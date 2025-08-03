@@ -1,4 +1,4 @@
-# Fork from SpudGunmans BBS Bot for Mesh Hessen (GermnayI
+# Fork from SpudGunmans BBS Bot for Mesh Hessen (Germany)
 # Mesh Bot for Network Testing and BBS Activities
 
 Welcome to the Mesh Bot project! This feature-rich bot is designed to enhance your [Meshtastic](https://meshtastic.org/docs/introduction/) network experience with a variety of powerful tools and fun features, connectivity and utility through text-based message delivery. Whether you're looking to perform network tests, send messages, or even play games, [mesh_bot.py](mesh_bot.py) has you covered. 
