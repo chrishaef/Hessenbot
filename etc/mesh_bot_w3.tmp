@@ -9,8 +9,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=meshbot
+Group=meshbot
 WorkingDirectory=/dir/
 ExecStart=python3 modules/web.py
 ExecStop=pkill -f mesh_bot_w3.py

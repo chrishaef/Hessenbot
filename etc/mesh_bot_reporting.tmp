@@ -9,8 +9,8 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=pi
-Group=pi
+User=meshbot
+Group=meshbot
 WorkingDirectory=/dir/
 ExecStart=python3 etc/report_generator5.py
 ExecStop=pkill -f report_generator5.py
