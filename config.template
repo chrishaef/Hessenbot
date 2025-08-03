@@ -5,21 +5,12 @@
 # mac is the MAC address of the device to connect to for ble type
 
 [interface]
-type = serial
-port = /dev/ttyACM0
+type = tcp
+# port = /dev/ttyACM0
 # port = /dev/ttyUSB0
-# hostname = meshtastic.local
+hostname = 192.168.178.251
 # mac = 00:11:22:33:44:55
 
-# Additional interface for multi radio support
-[interface2]
-enabled = False
-type = serial
-port = /dev/ttyUSB0
-# port = /dev/ttyACM1
-# port = COM1
-# hostname = localhost
-# mac = 00:11:22:33:44:55
 
 # example, the third interface would be [interface3] up to 9
 
@@ -35,24 +26,24 @@ ignoreDefaultChannel = False
 # ignoreChannels is a comma separated list of channels to ignore, e.g. 4,5
 ignoreChannels = 
 # require ! to be the first character in a command
-cmdBang = False
+cmdBang = True
 
 # motd is reset to this value on boot
 motd = Thanks for using MeshBOT! Have a good day!
-welcome_message = MeshBot, here for you like a friend who is not. Try sending: ping @foo or, cmd
+welcome_message = Wilkommen auf dem MeshHessen Kanal.
 
 # whoami
 whoami = True
 
 # enable or disable the Joke module
-DadJokes = True
+DadJokes = False
 DadJokesEmoji = False
 
 # enable or disable the Solar module
 spaceWeather = True
 
 # enable or disable the wikipedia search module
-wikipedia = True
+wikipedia = False
 
 # Enable ollama LLM see more at https://ollama.com
 ollama = False
@@ -65,7 +56,7 @@ ollamaHostName = http://localhost:11434
 llmReplyToNonCommands = True
 
 # StoreForward Enabled and Limits
-StoreForward = True
+StoreForward = False
 StoreLimit = 3
 
 # history command 
@@ -74,12 +65,12 @@ enableCmdHistory = True
 lheardCmdIgnoreNodes =
 
 # 24 hour clock
-zuluTime = False
+zuluTime = True
 # wait time for URL requests
 urlTimeout = 10
 
 # logging to file of the non Bot messages
-LogMessagesToFile = False
+LogMessagesToFile = True
 # Logging of system messages to file
 SyslogToFile = True
 # logging level for the bot (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -102,9 +93,9 @@ alert_interface = 1
 SentryEnabled = True
 emailSentryAlerts = False
 # radius in meters to detect someone close to the bot
-SentryRadius = 100
+SentryRadius = 1000
 # channel to send a message to when the watchdog is triggered
-SentryChannel = 2
+SentryChannel = 1
 # holdoff time multiplied by seconds(20) of the watchdog
 SentryHoldoff = 9
 # list of ignored nodes numbers ex: 2813308004,4258675309
@@ -113,9 +104,9 @@ sentryIgnoreList =
 # HighFlying Node alert
 highFlyingAlert = True
 # Altitude in meters to trigger the alert
-highFlyingAlertAltitude = 2000
+highFlyingAlertAltitude = 800
 # Channel to send Alert when the high flying node is detected
-highFlyingAlertChannel = 2
+highFlyingAlertChannel = 1
 # list of nodes numbers to ignore high flying alert ex: 2813308004,4258675309
 highFlyingIgnoreList =
 
@@ -124,7 +115,7 @@ enabled = True
 # list of banned nodes numbers ex: 2813308004,4258675309
 bbs_ban_list = 
 # list of admin nodes numbers ex: 2813308004,4258675309
-bbs_admin_list = 
+bbs_admin_list = 1127983492,538300298
 # enable bbs synchronization with other nodes
 bbslink_enabled = False
 # list of whitelisted nodes numbers ex: 2813308004,4258675309 empty list allows all
@@ -133,11 +124,11 @@ bbslink_whitelist =
 # location module
 [location]
 enabled = True
-lat = 48.50
-lon = -123.0
+lat = 50.4531327
+lon = 9.5049096
 
 # Default to metric units rather than imperial
-useMetric = False
+useMetric = True
 
 # repeaterList lookup location (rbook / artsci)
 repeaterLookup = rbook
@@ -148,7 +139,7 @@ NOAAforecastDuration = 3
 NOAAalertCount = 2
 
 # use Open-Meteo API for weather data not NOAA useful for non US locations
-UseMeteoWxAPI = False
+UseMeteoWxAPI = True
 
 # NOAA Coastal Data Enable NOAA Coastal Waters Forecasts (PZZ) and tide cmd
 pzzEnabled = False
@@ -177,7 +168,7 @@ myFIPSList = 57,58,53
 # find your SAME https://www.weather.gov/nwr/counties comma separated list of SAME code to further refine local alert.
 mySAMEList = 053029,053073
 # Goverment Alert Broadcast Channels
-eAlertBroadcastCh = 2
+eAlertBroadcastCh = 1
 #  Enable Ignore, headline that includes following word list
 ignoreFEMAenable = True
 ignoreFEMAwords = test,exercise
@@ -190,10 +181,10 @@ ignoreUSGSEnable = False
 ignoreUSGSWords = test,advisory
 
 # Use DE Alert Broadcast Data
-enableDEalerts = False
+enableDEalerts = True
 # comma separated list of regional codes trigger local alert.
 # find your regional codet at https://www.xrepository.de/api/xrepository/urn:de:bund:destatis:bevoelkerungsstatistik:schluessel:rs_2021-07-31/download/Regionalschl_ssel_2021-07-31.json
-myRegionalKeysDE = 110000000000,120510000000
+myRegionalKeysDE = 110000000000,120510000000,064120000000,064130000000,064140000000,066310009009,066310008008
 
 # Satalite Pass Prediction
 # Register for free API https://www.n2yo.com/login/
@@ -203,7 +194,7 @@ satList = 25544,7530
 
 # CheckList Checkin/Checkout
 [checklist]
-enabled = False
+enabled = True
 checklist_db = data/checklist.db
 reverse_in_out = False
 
@@ -211,7 +202,7 @@ reverse_in_out = False
 # QRZ Hello to new nodes with message
 enabled = False
 qrz_db = data/qrz.db
-qrz_hello_string = "MeshBot says Hello! DM for more info."
+qrz_hello_string = "Willkommen auf dem MeshHessen Kanal!."
 # Training mode will not send the hello message to new nodes
 training = True
 
@@ -226,14 +217,14 @@ repeater_channels =
 
 [scheduler]
 # enable or disable the scheduler module
-enabled = False
+enabled = True
 # interface to send the message to
 interface = 1
 # channel to send the message to
-channel = 2
-message = "MeshBot says Hello! DM for more info."
+channel = 1
+message = "Das MeshHessen Team wuenscht frohens Funken! Sende !cmd für eine Uebersicht der Bot-Befehle."
 # value can be min,hour,day,mon,tue,wed,thu,fri,sat,sun
-value =
+value = 
 # interval to use when time is not set (e.g. every 2 days)
 interval = 
 # time of day in 24:00 hour format when value is 'day' and interval is not set
@@ -256,8 +247,8 @@ signalCycleLimit = 5
 [fileMon]
 filemon_enabled = False
 file_path = alert.txt
-broadcastCh = 2
-enable_read_news = False
+broadcastCh = 1
+enable_read_news = True
 news_file_path = news.txt
 # only return a single random line from the news file
 news_random_line = False
@@ -294,14 +285,14 @@ IMAP_FOLDER = inbox
 # if hop limit for the user exceeds this value, the message will be dropped
 game_hop_limit = 5
 # enable or disable the games module(s)
-dopeWars = True
-lemonade = True
-blackjack = True
-videopoker = True
-mastermind = True
-golfsim = True
-hangman = True
-hamtest = True
+dopeWars = False
+lemonade = False
+blackjack = False
+videopoker = False
+mastermind = False
+golfsim = False
+hangman = False
+hamtest = False
 
 [messagingSettings]
 # delay in seconds for response to avoid message collision /throttling
@@ -309,12 +300,12 @@ responseDelay = 2.2
 # delay in seconds for splits in messages to avoid message collision /throttling
 splitDelay = 2.5
 # message chunk size for sending at high success rate, chunkr allows exceeding by 3 characters
-MESSAGE_CHUNK_SIZE = 160
+MESSAGE_CHUNK_SIZE = 180
 # Request Acknowledgement of message OTA
 wantAck = False
 # Max limit buffer for radio testing
 maxBuffer = 200
 #Enable Extra logging of Hop count data
-enableHopLogs = False
+enableHopLogs = True
 
 
