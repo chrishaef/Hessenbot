@@ -9,7 +9,7 @@ import bs4 as bs # pip install beautifulsoup4
 import xml.dom.minidom 
 from modules.log import *
 
-trap_list_location = ("whereami", "wx", "wxa", "wxalert", "rlist", "ea", "ealert", "riverflow", "valert")
+trap_list_location = ("whereami", "wx", "wxa", "wxalert", "rlist", "ea", "ealert", "riverflow", "valert", "earthquake")
 
 def where_am_i(lat=0, lon=0, short=False, zip=False):
     whereIam = ""
@@ -83,9 +83,12 @@ def getRepeaterBook(lat=0, lon=0):
     
     try:
         msg = ''
-        response = requests.get(repeater_url)
+        user_agent = {'User-agent': 'Mozilla/5.0'}
+        response = requests.get(repeater_url, headers=user_agent, timeout=urlTimeoutSeconds)
+        if response.status_code!=200:
+            logger.error(f"Location:Error fetching repeater data from {repeater_url} with status code {response.status_code}")
         soup = bs.BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table', attrs={'class': 'w3-table w3-striped w3-responsive w3-mobile w3-auto sortable'})
+        table = soup.find('table', attrs={'class': 'table table-striped table-hover align-middle sortable'})
         if table is not None:
             cells = table.find_all('td')
             data = []
@@ -127,6 +130,8 @@ def getArtSciRepeaters(lat=0, lon=0):
         try:
             artsci_url = f"http://www.artscipub.com/mobile/showstate.asp?zip={zipCode}"
             response = requests.get(artsci_url)
+            if response.status_code!=200:
+                logger.error(f"Location:Error fetching data from {artsci_url} with status code {response.status_code}")
             soup = bs.BeautifulSoup(response.text, 'html.parser')
             # results needed xpath is /html/body/table[2]/tbody/tr/td/table/tbody/tr[2]/td/table
             table = soup.find_all('table')[1]
@@ -702,32 +707,31 @@ def get_volcano_usgs(lat=0, lon=0):
 
 def get_nws_marine(zone, days=3):
     # forcast from NWS coastal products
-    marine_pzz_url = "https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/pz/pzz" + str(zone) + ".txt"
     try:
-        marine_pzz_data = requests.get(marine_pzz_url, timeout=urlTimeoutSeconds)
-        if not marine_pzz_data.ok:
+        marine_pz_data = requests.get(zone, timeout=urlTimeoutSeconds)
+        if not marine_pz_data.ok:
             logger.warning("Location:Error fetching NWS Marine PZ data")
             return ERROR_FETCHING_DATA
     except (requests.exceptions.RequestException):
         logger.warning("Location:Error fetching NWS Marine PZ data")
         return ERROR_FETCHING_DATA
     
-    marine_pzz_data = marine_pzz_data.text
+    marine_pz_data = marine_pz_data.text
     #validate data
     todayDate = today.strftime("%Y%m%d")
-    if marine_pzz_data.startswith("Expires:"):
-        expires = marine_pzz_data.split(";;")[0].split(":")[1]
+    if marine_pz_data.startswith("Expires:"):
+        expires = marine_pz_data.split(";;")[0].split(":")[1]
         expires_date = expires[:8]
         if expires_date < todayDate:
             logger.debug("Location: NWS Marine PZ data expired")
-            return NO_DATA_NOGPS
+            return ERROR_FETCHING_DATA
     else:
         logger.debug("Location: NWS Marine PZ data not valid")
-        return NO_DATA_NOGPS
+        return ERROR_FETCHING_DATA
     
     # process the marine forecast data
-    marine_pzz_lines = marine_pzz_data.split("\n")
-    marine_pzz_report = ""
+    marine_pzz_lines = marine_pz_data.split("\n")
+    marine_pz_report = ""
     day_blocks = []
     current_block = ""
     in_forecast = False
@@ -744,17 +748,66 @@ def get_nws_marine(zone, days=3):
     if current_block:
         day_blocks.append(current_block.strip())
 
-    # Only keep up to pzzDays blocks
+    # Only keep up to pzDays blocks
     for block in day_blocks[:days]:
-        marine_pzz_report += block + "\n"
+        marine_pz_report += block + "\n"
 
     # remove last newline
-    if marine_pzz_report.endswith("\n"):
-        marine_pzz_report = marine_pzz_report[:-1]
+    if marine_pz_report.endswith("\n"):
+        marine_pz_report = marine_pz_report[:-1]
+
+    # remove NOAA EOF $$
+    if marine_pz_report.endswith("$$"):
+        marine_pz_report = marine_pz_report[:-2].strip()
 
     # abbreviate the report
-    marine_pzz_report = abbreviate_noaa(marine_pzz_report)
-    if marine_pzz_report == "":
+    marine_pz_report = abbreviate_noaa(marine_pz_report)
+    if marine_pz_report == "":
         return NO_DATA_NOGPS
-    return marine_pzz_report
+    return marine_pz_report
 
+def checkUSGSEarthQuake(lat=0, lon=0):
+    if lat == 0 and lon == 0:
+        lat = latitudeValue
+        lon = longitudeValue
+    radius = 100 # km
+    magnitude = 1.5
+    history = 7 # days
+    startDate = datetime.fromtimestamp(datetime.now().timestamp() - history*24*60*60).strftime("%Y-%m-%d")
+    USGSquake_url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?&format=xml&latitude={lat}&longitude={lon}&maxradiuskm={radius}&minmagnitude={magnitude}&starttime={startDate}"
+    description_text = ""
+    quake_count = 0
+    # fetch the earthquake data from USGS
+    try:
+        quake_data = requests.get(USGSquake_url, timeout=urlTimeoutSeconds)
+        if not quake_data.ok:
+            logger.warning("Location:Error fetching earthquake data from USGS")
+            return NO_ALERTS
+        if not quake_data.text.strip():
+            return NO_ALERTS
+        try:
+            quake_xml = xml.dom.minidom.parseString(quake_data.text)
+        except Exception as e:
+            logger.warning(f"Location: USGS earthquake API returned invalid XML: {e}")
+            return NO_ALERTS
+    except (requests.exceptions.RequestException):
+        logger.warning("Location:Error fetching earthquake data from USGS")
+        return NO_ALERTS
+
+    quake_xml = xml.dom.minidom.parseString(quake_data.text)
+    quake_count = len(quake_xml.getElementsByTagName("event"))
+
+    #get largest mag in magnitude of the set of quakes
+    largest_mag = 0.0
+    for event in quake_xml.getElementsByTagName("event"):
+        mag = event.getElementsByTagName("magnitude")[0]
+        mag_value = float(mag.getElementsByTagName("value")[0].childNodes[0].nodeValue)
+        if mag_value > largest_mag:
+            largest_mag = mag_value
+            # set description text
+            description_text = event.getElementsByTagName("description")[0].getElementsByTagName("text")[0].childNodes[0].nodeValue
+
+    if quake_count == 0:
+        return NO_ALERTS
+    else:
+        return f"{quake_count} quakes in last {history} days within {radius}km of you largest was {largest_mag}. {description_text}"

@@ -74,8 +74,8 @@ if enableCmdHistory:
 # Location Configuration
 if location_enabled:
     from modules.locationdata import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + trap_list_location # items tide, whereami, wx
-    help_message = help_message + ", whereami, wx"
+    trap_list = trap_list + trap_list_location
+    help_message = help_message + ", whereami, wx, rlist"
     if enableGBalerts and not enableDEalerts:
         from modules.globalalert import * # from the spudgunman/meshing-around repo
         logger.warning(f"System: GB Alerts not functional at this time need to find a source API")
@@ -92,19 +92,23 @@ if location_enabled:
         from modules.wx_meteo import * # from the spudgunman/meshing-around repo
     else:
         # NOAA only features
-        help_message = help_message + ", wxa"
+        help_message = help_message + ", wxa, wxalert"
+
+    # USGS riverFlow Configuration
+    if riverListDefault != ['']:
+        help_message = help_message + ", riverflow"
 
 # NOAA alerts needs location module
 if wxAlertBroadcastEnabled or emergencyAlertBrodcastEnabled or volcanoAlertBroadcastEnabled:
     from modules.locationdata import * # from the spudgunman/meshing-around repo
     # limited subset, this should be done better but eh..
     trap_list = trap_list + ("wx", "wxa", "wxalert", "ea", "ealert", "valert")
-    help_message = help_message + ", wxalert, ealert, valert"
+    help_message = help_message + ", ealert, valert"
 
-# NOAA Coastal Waters Forecasts PZZ
-if pzzEnabled:
+# NOAA Coastal Waters Forecasts
+if coastalEnabled:
     from modules.locationdata import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("mwx", "tide",)
+    trap_list = trap_list + ("mwx","tide",)
     help_message = help_message + ", mwx, tide"
         
 # BBS Configuration
@@ -264,6 +268,7 @@ if ble_count > 1:
 logger.debug(f"System: Initializing Interfaces")
 interface1 = interface2 = interface3 = interface4 = interface5 = interface6 = interface7 = interface8 = interface9 = None
 retry_int1 = retry_int2 = retry_int3 = retry_int4 = retry_int5 = retry_int6 = retry_int7 = retry_int8 = retry_int9 = False
+myNodeNum1 = myNodeNum2 = myNodeNum3 = myNodeNum4 = myNodeNum5 = myNodeNum6 = myNodeNum7 = myNodeNum8 = myNodeNum9 = 777
 max_retry_count1 = max_retry_count2 = max_retry_count3 = max_retry_count4 = max_retry_count5 = max_retry_count6 = max_retry_count7 = max_retry_count8 = max_retry_count9 = interface_retry_count
 for i in range(1, 10):
     interface_type = globals().get(f'interface{i}_type')
@@ -682,11 +687,24 @@ def messageTrap(msg):
     message_list=msg.split(" ")
     for m in message_list:
         for t in trap_list:
-            # if word in message is in the trap list, return True
-            if t.lower() == m.lower():
-                return True
-            if cmdBang and m.startswith("!"):
-                return True
+            if not explicitCmd:
+                # if word in message is in the trap list, return True
+                if t.lower() == m.lower():
+                    if cmdBang:
+                        if m.startswith('!'):
+                            return True
+                        else:
+                            continue
+                    return True
+            else:
+                # if the index 0 of the message is a word in the trap list, return True
+                if t.lower() == m.lower() and message_list.index(m) == 0:
+                    if cmdBang:
+                        if m.startswith('!'):
+                            return True
+                        else:
+                            continue
+                    return True
     # if no trap words found, run a search for near misses like ping? or cmd?
     for m in message_list:
         for t in range(len(trap_list)):
@@ -921,6 +939,7 @@ def displayNodeTelemetry(nodeID=0, rxNode=0, userRequested=False):
 
     if batteryLevel < 25:
         logger.warning(f"System: Low Battery Level: {batteryLevel}{emji} on Device: {rxNode}")
+        send_message(f"Low Battery Level: {batteryLevel}{emji} on Device: {rxNode}", {secure_channel}, 0, {secure_interface})
     elif batteryLevel < 10:
         logger.critical(f"System: Critical Battery Level: {batteryLevel}{emji} on Device: {rxNode}")
     return dataResponse
@@ -970,7 +989,8 @@ def consumeMetadata(packet, rxNode=0):
                 # if altitude is over 2000 send a log and message for high-flying nodes and not in highfly_ignoreList
                 if position_data.get('altitude', 0) > highfly_altitude and highfly_enabled and str(nodeID) not in highfly_ignoreList:
                     logger.info(f"System: High Altitude {position_data['altitude']}m on Device: {rxNode} NodeID: {nodeID}")
-                    send_message(f"High Altitude {position_data['altitude']}m on Device:{rxNode} Node:{get_name_from_number(nodeID,'short',rxNode)}", highfly_channel, 0, rxNode)
+                    altFeet = round(position_data['altitude'] * 3.28084, 2)
+                    send_message(f"High Altitude {altFeet}ft ({position_data['altitude']}m) on Device:{rxNode} Node:{get_name_from_number(nodeID,'short',rxNode)}", highfly_channel, 0, highfly_interface)
                     time.sleep(responseDelay)
         
                 # Keep the positionMetadata dictionary at a maximum size of 20
@@ -1197,10 +1217,8 @@ async def handleSentinel(deviceID):
                 resolution = metadata.get('precisionBits')
 
         logger.warning(f"System: {detectedNearby} is close to your location on Interface{deviceID} Accuracy is {resolution}bits")
-        for i in range(1, 10):
-            if globals().get(f'interface{i}_enabled'):
-                send_message(f"Sentry{deviceID}: {detectedNearby}", secure_channel, 0, i)
-                time.sleep(responseDelay + 1)
+        send_message(f"Sentry{deviceID}: {detectedNearby}", secure_channel, 0, secure_interface)
+        time.sleep(responseDelay + 1)
         if enableSMTP and email_sentry_alerts:
             for email in sysopEmails:
                 send_email(email, f"Sentry{deviceID}: {detectedNearby}")

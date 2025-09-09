@@ -52,6 +52,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "dopewars": lambda: handleDopeWars(message, message_from_id, deviceID),
     "ea": lambda: handle_emergency_alerts(message, message_from_id, deviceID),
     "ealert": lambda: handle_emergency_alerts(message, message_from_id, deviceID),
+    "earthquake": lambda: handleEarthquake(message, message_from_id, deviceID),
     "email:": lambda: handle_email(message_from_id, message),
     "games": lambda: gamesCmdList,
     "globalthermonuclearwar": lambda: handle_gTnW(),
@@ -752,8 +753,11 @@ def handle_riverFlow(message, message_from_id, deviceID):
         return msg
 
 def handle_mwx(message_from_id, deviceID, cmd):
-    # NOAA Coastal and Marine Weather PZZ
-    return get_nws_marine(zone=pzzZoneID, days=pzzForecastDays)
+    # NOAA Coastal and Marine Weather
+    if myCoastalZone is None:
+        logger.warning("System: Coastal Zone not set, please set in config.ini")
+        return NO_ALERTS
+    return get_nws_marine(zone=myCoastalZone, days=coastalForecastDays)
 
 def handle_wxc(message_from_id, deviceID, cmd):
     location = get_node_location(message_from_id, deviceID)
@@ -782,6 +786,11 @@ def handle_emergency_alerts(message, message_from_id, deviceID):
     else:
         # Headlines only FEMA
         return getIpawsAlert(str(location[0]), str(location[1]), shortAlerts=True)
+
+def handleEarthquake(message, message_from_id, deviceID):
+    location = get_node_location(message_from_id, deviceID)
+    if "earthquake" in message.lower():
+        return checkUSGSEarthQuake(str(location[0]), str(location[1]))
     
 def handle_checklist(message, message_from_id, deviceID):
     name = get_name_from_number(message_from_id, 'short', deviceID)
@@ -1108,7 +1117,7 @@ def onReceive(packet, interface):
         elif multiple_interface and port7 in rxInterface: rxNode = 7
         elif multiple_interface and port8 in rxInterface: rxNode = 8
         elif multiple_interface and port9 in rxInterface: rxNode = 9
-    
+
     if rxType == 'TCPInterface':
         rxHost = interface.__dict__.get('hostname', 'unknown')
         if rxHost and hostname1 in rxHost and interface1_type == 'tcp': rxNode = 1
@@ -1149,20 +1158,22 @@ def onReceive(packet, interface):
         if msg:
             # wait a responseDelay to avoid message collision from lora-ack.
             time.sleep(responseDelay)
-            logger.info(f"System: BBS DM Found: {msg[1]} For: {get_name_from_number(message_from_id, 'long', rxNode)}")
+            logger.info(f"System: BBS DM Delivery: {msg[1]} For: {get_name_from_number(message_from_id, 'long', rxNode)}")
             message = "Mail: " + msg[1] + "  From: " + get_name_from_number(msg[2], 'long', rxNode)
             bbs_delete_dm(msg[0], msg[1])
             send_message(message, channel_number, message_from_id, rxNode)
-
+            
     # handle TEXT_MESSAGE_APP
     try:
         if 'decoded' in packet and packet['decoded']['portnum'] == 'TEXT_MESSAGE_APP':
             message_bytes = packet['decoded']['payload']
             message_string = message_bytes.decode('utf-8')
+            via_mqtt = packet['decoded'].get('viaMqtt', False)
+            rx_time = packet['decoded'].get('rxTime', time.time())
 
             # check if the packet is from us
             if message_from_id in [myNodeNum1, myNodeNum2, myNodeNum3, myNodeNum4, myNodeNum5, myNodeNum6, myNodeNum7, myNodeNum8, myNodeNum9]:
-                logger.warning(f"System: Packet from self {message_from_id} loop or traffic replay deteted")
+                logger.warning(f"System: Packet from self {message_from_id} loop or traffic replay detected")
 
             # get the signal strength and snr if available
             if packet.get('rxSnr') or packet.get('rxRssi'):
@@ -1198,13 +1209,15 @@ def onReceive(packet, interface):
             
             if enableHopLogs:
                 logger.debug(f"System: Packet HopDebugger: hop_away:{hop_away} hop_limit:{hop_limit} hop_start:{hop_start}")
-                if hop_away == 0 and hop_limit == 0 and hop_start == 0:
-                    logger.debug(f"System: Packet HopDebugger: No hop count found in PACKET {packet} END PACKET")
+            
+            if hop_away == 0 and hop_limit == 0 and hop_start == 0:
+                hop = "Last Hop"
+                hop_count = 0
             
             if hop_start == hop_limit:
                 hop = "Direct"
                 hop_count = 0
-            elif hop_start == 0 and hop_limit > 0:
+            elif hop_start == 0 and hop_limit > 0 or via_mqtt:
                 hop = "MQTT"
                 hop_count = 0
             else:
@@ -1402,8 +1415,8 @@ async def start_rx():
             logger.debug("System: Location Telemetry Enabled using NOAA API")
     if dad_jokes_enabled:
         logger.debug("System: Dad Jokes Enabled!")
-    if pzzEnabled:
-        logger.debug("Coastal Forcast and Tide Enabled!")
+    if coastalEnabled:
+        logger.debug("System: Coastal Forcast and Tide Enabled!")
     if games_enabled:
         logger.debug("System: Games Enabled!")
     if wikipedia_enabled:

@@ -26,7 +26,8 @@ ignoreDefaultChannel = False
 # ignoreChannels is a comma separated list of channels to ignore, e.g. 4,5
 ignoreChannels = 
 # require ! to be the first character in a command
-cmdBang = True
+cmdBang = False
+explicitCmd = True
 
 # motd is reset to this value on boot
 motd = Thanks for using MeshBOT! Have a good day!
@@ -47,13 +48,15 @@ wikipedia = False
 
 # Enable ollama LLM see more at https://ollama.com
 ollama = False
-# Ollama model to use (defaults to gemma2:2b)
-# ollamaModel = llama3.1
+# Ollama model to use (defaults to gemma3:270m)
+# ollamaModel = gemma3:latest
 # server instance to use (defaults to local machine install)
 ollamaHostName = http://localhost:11434
 # Produce LLM replies to messages that aren't commands?
 # If False, the LLM only replies to the "ask:" and "askai" commands.
 llmReplyToNonCommands = True
+# if True, the input is sent raw to the LLM, if False uses legacy template query
+rawLLMQuery = True 
 
 # StoreForward Enabled and Limits
 StoreForward = False
@@ -93,9 +96,9 @@ alert_interface = 1
 SentryEnabled = True
 emailSentryAlerts = False
 # radius in meters to detect someone close to the bot
-SentryRadius = 1000
+SentryRadius = 100
 # channel to send a message to when the watchdog is triggered
-SentryChannel = 1
+SentryChannel = 2
 # holdoff time multiplied by seconds(20) of the watchdog
 SentryHoldoff = 9
 # list of ignored nodes numbers ex: 2813308004,4258675309
@@ -106,7 +109,7 @@ highFlyingAlert = True
 # Altitude in meters to trigger the alert
 highFlyingAlertAltitude = 800
 # Channel to send Alert when the high flying node is detected
-highFlyingAlertChannel = 1
+highFlyingAlertChannel = 2
 # list of nodes numbers to ignore high flying alert ex: 2813308004,4258675309
 highFlyingIgnoreList =
 
@@ -141,15 +144,18 @@ NOAAalertCount = 2
 # use Open-Meteo API for weather data not NOAA useful for non US locations
 UseMeteoWxAPI = True
 
-# NOAA Coastal Data Enable NOAA Coastal Waters Forecasts (PZZ) and tide cmd
-pzzEnabled = False
-# My Forecast Zone ID, https://www.weather.gov/marine select location and then look at the 'Forecast-by-Zone Map' and select PZZ zone
-pzzZoneID = 132
+# NOAA Coastal Data Enable NOAA Coastal Waters Forecasts and Tide
+coastalEnabled = False
+# Find the correct costal weather directory at https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/
+# pz = Puget Sound, ph = Honolulu HI, gm = Florida Keys, pk = Alaska
+# this map can help https://www.weather.gov/marine select location and then look at the 'Forecast-by-Zone Map'
+# myCoastalZone is the .txt file with the forecast data
+myCoastalZone = https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/pz/pzz135.txt
 # number of data points to return, default is 3
-pzzForecastDays = 3
+coastalForecastDays = 3
 
-# USGS Hydrology unique identifiers, LID or USGS ID https://waterdata.usgs.gov
-riverListDefault = 
+# NOAA USGS Hydrology river identifiers, LID or USGS ID https://waterdata.usgs.gov
+riverList = 
 
 # NOAA EAS Alert Broadcast
 wxAlertBroadcastEnabled = False
