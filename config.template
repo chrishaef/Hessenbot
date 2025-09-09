@@ -251,7 +251,7 @@ signalCooldown = 5
 signalCycleLimit = 5
 
 [fileMon]
-filemon_enabled = False
+filemon_enabled = True
 file_path = alert.txt
 broadcastCh = 1
 enable_read_news = True
@@ -304,7 +304,7 @@ hamtest = False
 # delay in seconds for response to avoid message collision /throttling
 responseDelay = 2.2
 # delay in seconds for splits in messages to avoid message collision /throttling
-splitDelay = 2.5
+splitDelay = 2.2
 # message chunk size for sending at high success rate, chunkr allows exceeding by 3 characters
 MESSAGE_CHUNK_SIZE = 180
 # Request Acknowledgement of message OTA

@@ -1,5 +1,5 @@
-# interface1.py "launch service nicht vergessen ;-)"
-# coded: chrishaef
+# interface1.py
+
 from flask import Flask, request, redirect, render_template_string, url_for
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
 from flask_limiter import Limiter
@@ -68,12 +68,13 @@ a {
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        if (request.form["username"] == "admin" and #<--- Change after installation
-            request.form["password"] == "passwort123"): #<--- Change after installation
+        if (request.form["username"] == "admin" and
+            request.form["password"] == "meshhessen"):
             user = User("admin")
             login_user(user)
             return redirect(url_for("choose"))
         return "Falsche Anmeldedaten."
+
     return render_template_string(dark_css + """
     <div class="container">
       <h2 class="mb-4 text-center">🔐 Login</h2>
@@ -221,7 +222,7 @@ def live_messages():
                     gefiltert.append(f"{zeitstempel} | {sender} | {nachricht}")
                 except:
                     gefiltert.append(f"[Fehler beim Parsen] → {z.strip()}")
-            inhalt = "\n\n".join(gefiltert)
+            inhalt = "\n".join(gefiltert)
     except:
         inhalt = "[Fehler beim Öffnen der Datei]"
 
@@ -229,16 +230,17 @@ def live_messages():
 <meta http-equiv="refresh" content="5">
 <div class="container">
   <h2 class="mb-4 text-center">📡 Bereinigte Live-Ansicht: messages.log</h2>
+  <div class="sticky-top bg-dark py-2 text-center">
+    <a href="{{{{url_for('choose')}}}}" class="btn btn-outline-light">⬅️ Zurück</a>
+  </div>
   <pre style="white-space: pre-wrap;
               background-color:#2a2a2a;
               padding:15px;
-              border-radius:6px;">{inhalt}</pre>
-  <div class="text-center mt-3">
-    <a href="{{{{url_for('choose')}}}}"
-       class="btn btn-outline-light">⬅️ Zurück</a>
-  </div>
+              border-radius:6px;
+              margin-top:10px;">{inhalt}</pre>
 </div>
 """)
+
 
 @app.route("/logout")
 @login_required
