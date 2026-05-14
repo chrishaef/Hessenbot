@@ -28,6 +28,8 @@ def iter_radio_interfaces() -> List[int]:
 
 def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     """Return (error_message or None, rows dicts for template)."""
+    from modules.system import decimal_to_hex
+
     sm = _system_mod()
     iface = sm.__dict__.get(f"interface{iface_id}")
     if iface is None:
@@ -51,9 +53,14 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
             lh_s = "—"
         snr = node.get("snr", "")
         is_self = num == myn
+        try:
+            node_id_disp = html.escape(decimal_to_hex(int(num)))
+        except (TypeError, ValueError):
+            node_id_disp = "—"
         rows.append(
             {
                 "num": num,
+                "node_id": node_id_disp,
                 "shortName": short_n,
                 "longName": long_n,
                 "lastHeard": lh_s,
