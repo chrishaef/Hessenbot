@@ -78,40 +78,135 @@ def create_app(
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>
 body {
-  background-color: #121212;
-  color: #f8f9fa;
-  font-family: 'Segoe UI', sans-serif;
+  background-color: #0f1214;
+  color: #e8edf2;
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  line-height: 1.55;
   padding-top: 60px;
+  -webkit-font-smoothing: antialiased;
 }
 .container {
-  max-width: 800px;
-  margin: auto;
-  background-color: #1e1e1e;
-  padding: 30px;
-  border-radius: 10px;
-  box-shadow: 0 0 20px rgba(25, 125, 25, 0.5);
+  max-width: min(100vw - 1.5rem, 1320px);
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  background-color: #1a1d21;
+  color: #e8edf2;
+  padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2.25rem);
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
-textarea, input[type="text"], input[type="password"] {
-  background-color: #2a2a2a;
-  color: #f8f9fa;
-  border: 1px solid #444;
+textarea, input[type="text"], input[type="password"], select.form-select, .form-control {
+  background-color: #25292e;
+  color: #eef4f8;
+  border: 1px solid #3d444c;
+}
+textarea:focus, input[type="text"]:focus, input[type="password"]:focus,
+select.form-select:focus, .form-control:focus {
+  background-color: #2a2f35;
+  color: #fff;
+  border-color: #5c7dff;
+  box-shadow: 0 0 0 0.2rem rgba(92, 125, 255, 0.2);
 }
 .btn-primary {
-  background-color: #0d6efd;
-  border-color: #0d6efd;
+  background-color: #2563eb;
+  border-color: #2563eb;
 }
 .btn-primary:hover {
-  background-color: #0b5ed7;
+  background-color: #1d4ed8;
+  border-color: #1d4ed8;
 }
 a {
-  color: #90cdf4;
+  color: #7dd3fc;
 }
-.alert { border-radius: 6px; padding: 12px; margin-bottom: 16px; }
-.alert-success { background: #1e4620; border: 1px solid #2a6; color: #d4edda; }
-.alert-danger { background: #4a1e1e; border: 1px solid #a44; color: #f8d7da; }
-.alert-info { background: #1e3a4a; border: 1px solid #48a; color: #d1ecf1; }
-table.nodes-table { width: 100%; font-size: 0.9rem; }
-table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padding: 8px; text-align: left; }
+a:hover {
+  color: #bae6fd;
+}
+.table-dark {
+  --bs-table-bg: #22262c;
+  --bs-table-color: #e8edf2;
+  --bs-table-border-color: #3a4149;
+  --bs-table-striped-bg: #262b32;
+}
+.alert { border-radius: 8px; padding: 12px 14px; margin-bottom: 1rem; font-size: 0.95rem; }
+.alert-success { background: #16351a; border: 1px solid #2a7a38; color: #ccefd2; }
+.alert-danger { background: #3d1818; border: 1px solid #8b3a3a; color: #fcd4d4; }
+.alert-info { background: #162d3d; border: 1px solid #2f6a8f; color: #c8e7f5; }
+.text-muted, .small.text-muted {
+  color: #9fb0c0 !important;
+}
+small, .small {
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #c5d0db;
+}
+code {
+  color: #f0c674;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 1rem 0;
+  border-radius: 8px;
+  border: 1px solid #343a42;
+  background: #1e2228;
+}
+.table-scroll table { margin-bottom: 0; }
+table.nodes-table {
+  width: 100%;
+  min-width: 640px;
+  font-size: 0.95rem;
+  border-collapse: collapse;
+}
+table.nodes-table thead th {
+  background: #2a3038;
+  color: #f1f5f9;
+  font-weight: 600;
+  padding: 12px 11px;
+  text-align: left;
+  vertical-align: bottom;
+  border-color: #3a4149;
+  white-space: nowrap;
+}
+table.nodes-table td {
+  border-color: #3a4149 !important;
+  padding: 10px 11px;
+  vertical-align: top;
+  color: #e8edf2;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+table.nodes-table tbody tr:hover td {
+  background: rgba(125, 211, 252, 0.06);
+}
+table.nodes-table.table-bbs-dm {
+  min-width: 820px;
+}
+table.nodes-table td.cell-bbs-preview,
+table.nodes-table td.cell-dm-text {
+  min-width: 14rem;
+  max-width: min(52vw, 36rem);
+  font-size: 0.93rem;
+  line-height: 1.5;
+  color: #dce7f0;
+}
+pre.admin-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background-color: #25292e;
+  color: #eef4f8;
+  padding: 1rem 1.15rem;
+  border-radius: 8px;
+  border: 1px solid #3d444c;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+h2 { color: #f8fafc; font-weight: 600; }
 </style>
 """
 
@@ -306,10 +401,7 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
             + f"""
     <div class="container">
       <h2 class="mb-4 text-center">📄 Datei: {filename}</h2>
-      <pre style="white-space: pre-wrap;
-                  background-color:#2a2a2a;
-                  padding:15px;
-                  border-radius:6px;">{inhalt}</pre>
+      <pre class="admin-pre">{inhalt}</pre>
       <div class="text-center mt-3">
         <a href="{{{{url_for('logs')}}}}" class="btn btn-outline-light">
           ⬅️ Zurück zur Übersicht
@@ -351,10 +443,7 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
 <meta http-equiv="refresh" content="5">
 <div class="container">
   <h2 class="mb-4 text-center">📡 Bereinigte Live-Ansicht: messages.log</h2>
-  <pre style="white-space: pre-wrap;
-              background-color:#2a2a2a;
-              padding:15px;
-              border-radius:6px;">{inhalt}</pre>
+  <pre class="admin-pre">{inhalt}</pre>
   <div class="text-center mt-3">
     <a href="{{{{url_for('choose')}}}}"
        class="btn btn-outline-light">⬅️ Zurück</a>
@@ -421,6 +510,7 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
                     rows_html.append(
                         "<tr>"
                         f"<td><code>{r['num']}</code></td>"
+                        f"<td><code>{r['node_id']}</code></td>"
                         f"<td>{r['shortName']}</td>"
                         f"<td>{r['longName']}</td>"
                         f"<td>{r['lastHeard']}</td>"
@@ -431,9 +521,9 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
                 body = f"""
 <p class="small text-muted mb-2">Schnittstelle: {tabs}</p>
 <p class="small">Entfernen sendet einen Admin-Befehl an dein lokales Gerät (wie meshtastic --remove-node).</p>
-<table class="nodes-table table-dark">
-<thead><tr><th>Num</th><th>Kurz</th><th>Lang</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
-<tbody>{"".join(rows_html)}</tbody></table>"""
+<div class="table-scroll"><table class="nodes-table table-dark table-bordered">
+<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
+<tbody>{"".join(rows_html)}</tbody></table></div>"""
 
         return render_template_string(
             dark_css
@@ -524,9 +614,12 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
                 return redirect(url_for("scheduler_edit"))
             message = request.form.get("message", "")
             sched_motd = request.form.get("schedulerMotd") == "on"
-            value = request.form.get("value", "")
+            value = (request.form.get("value") or "").strip()
             interval = request.form.get("interval", "")
             sched_time = request.form.get("time", "")
+            if not value:
+                flash("Bitte einen Zeitplantyp aus der Liste wählen.", "error")
+                return redirect(url_for("scheduler_edit"))
             try:
                 ops.save_scheduler_to_config(
                     enabled, iface, channel, message, sched_motd, value, interval, sched_time
@@ -557,6 +650,52 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
         prev = "True" if st.scheduler_enabled else "False"
         chk_en = " checked" if st.scheduler_enabled else ""
         chk_sm = " checked" if st.schedulerMotd else ""
+
+        presets = [
+            ("day", "Täglich / alle N Tage (day)"),
+            ("hour", "Alle N Stunden (hour)"),
+            ("min", "Alle N Minuten (min)"),
+            ("mon", "Montags zur Uhrzeit (mon)"),
+            ("tue", "Dienstags zur Uhrzeit (tue)"),
+            ("wed", "Mittwochs zur Uhrzeit (wed)"),
+            ("thu", "Donnerstags zur Uhrzeit (thu)"),
+            ("fri", "Freitags zur Uhrzeit (fri)"),
+            ("sat", "Samstags zur Uhrzeit (sat)"),
+            ("sun", "Sonntags zur Uhrzeit (sun)"),
+            ("joke", "Witz — Intervall = Minuten (joke)"),
+            ("link", "bbslink — Intervall = Stunden (link)"),
+            ("weather", "Wetter — täglich zur Uhrzeit (weather)"),
+            ("news", "News — Intervall = Stunden (news)"),
+            ("readrss", "RSS — Intervall = Stunden (readrss)"),
+            ("mwx", "Marinewetter — täglich zur Uhrzeit (mwx)"),
+            ("sysinfo", "Sysinfo — Intervall = Stunden (sysinfo)"),
+            ("tide", "Gezeiten — täglich zur Uhrzeit (tide)"),
+            ("solar", "Sonne — täglich zur Uhrzeit (solar)"),
+            ("verse", "Bibelvers — täglich zur Uhrzeit (verse)"),
+            ("custom", "Eigene Logik (custom, modules/custom_scheduler.py)"),
+        ]
+        cur_raw = (st.schedulerValue or "").strip()
+        cur = cur_raw.lower()
+        opt_parts = [
+            '<select name="value" class="form-control mb-2" required>',
+            '<option value="">— Zeitplantyp wählen —</option>',
+        ]
+        matched = False
+        for v, lab in presets:
+            sel = " selected" if cur == v else ""
+            if sel:
+                matched = True
+            opt_parts.append(
+                f'<option value="{html_escape(v, quote=True)}"{sel}>{html_escape(lab)}</option>'
+            )
+        if cur_raw and not matched:
+            opt_parts.append(
+                f'<option value="{html_escape(cur_raw.strip(), quote=True)}" selected>'
+                f"Freitext: {html_escape(cur_raw.strip())}</option>"
+            )
+        opt_parts.append("</select>")
+        schedule_select_html = Markup("".join(opt_parts))
+
         return render_template_string(
             dark_css
             + _flash_markup()
@@ -570,26 +709,54 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
       <label class="form-check-label" for="sen">Scheduler aktiv</label>
     </div>
     <div class="row mb-2">
-      <div class="col"><label>Interface</label>
+      <div class="col"><label>Interface (Radio)</label>
         <input type="number" name="interface" class="form-control" min="1" max="9" value="{{ iface }}"></div>
       <div class="col"><label>Kanal</label>
         <input type="number" name="channel" class="form-control" value="{{ chan }}"></div>
     </div>
     <div class="form-check mb-2">
       <input class="form-check-input" type="checkbox" name="schedulerMotd" id="sm"{{ chk_sm|safe }}>
-      <label class="form-check-label" for="sm">MOTD als geplante Nachricht verwenden</label>
+      <label class="form-check-label" for="sm">MOTD als geplante Nachricht verwenden (statt Textfeld)</label>
     </div>
-    <label>Nachricht (wenn nicht MOTD)</label>
+    <label>Nachricht (nur wenn MOTD-Haken aus)</label>
     <textarea name="message" rows="3" class="form-control mb-3">{{ msg }}</textarea>
-    <label>value (day, hour, min, joke, news, …)</label>
-    <input type="text" name="value" class="form-control mb-2" value="{{ val }}">
-    <label>interval</label>
-    <input type="text" name="interval" class="form-control mb-2" value="{{ ivl }}">
-    <label>time (HH:MM)</label>
-    <input type="text" name="time" class="form-control mb-3" value="{{ tim }}">
+
+    <label class="form-label fw-semibold">Zeitplantyp <span class="text-muted fw-normal">(config: value)</span></label>
+    {{ schedule_select|safe }}
+
+    <label class="form-label fw-semibold">Intervall <span class="text-muted fw-normal">(Zahl, config: interval)</span></label>
+    <input type="number" name="interval" class="form-control mb-2" min="1" step="1"
+           placeholder="z.B. 5" value="{{ ivl }}">
+    <p class="small text-muted mb-2">
+      <strong>day:</strong> ohne Uhrzeit = alle N Tage; mit Uhrzeit = alle N Tage zur gleichen Uhrzeit.
+      <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
+      <strong>mon … sun:</strong> Uhrzeit unten setzen (HH:MM).
+      <strong>joke:</strong> Minuten; <strong>link, news, readrss, sysinfo:</strong> Stunden.
+      <strong>weather, mwx, tide, solar, verse:</strong> Uhrzeit Pflicht, Intervall oft egal (siehe Code).
+    </p>
+
+    <label class="form-label fw-semibold">Uhrzeit <span class="text-muted fw-normal">(HH:MM, config: time)</span></label>
+    <input type="text" name="time" class="form-control mb-3" placeholder="z.B. 08:30" value="{{ tim }}"
+           pattern="[0-2][0-9]:[0-5][0-9]" title="Format 00:00 bis 23:59">
+
+    <details class="mb-3 p-3 rounded" style="background:#2a2a2a;border:1px solid #444;">
+      <summary class="fw-semibold">Kurzübersicht (technisch: modules/scheduler.py)</summary>
+      <table class="table table-sm table-dark mt-2 mb-0 small">
+        <thead><tr><th>value</th><th>Intervall</th><th>Uhrzeit</th></tr></thead>
+        <tbody>
+          <tr><td>day</td><td>Tage (1=täglich)</td><td>optional, sonst nur Tagesabstand</td></tr>
+          <tr><td>hour / min</td><td>Stunden bzw. Minuten</td><td>—</td></tr>
+          <tr><td>mon … sun</td><td>—</td><td>erforderlich</td></tr>
+          <tr><td>joke</td><td>Minuten</td><td>—</td></tr>
+          <tr><td>link, news, readrss, sysinfo</td><td>Stunden</td><td>—</td></tr>
+          <tr><td>weather, mwx, tide, solar, verse</td><td>(siehe Log)</td><td>erforderlich</td></tr>
+        </tbody>
+      </table>
+    </details>
+
     <input type="submit" value="Speichern" class="btn btn-success w-100">
   </form>
-  <p class="small text-muted mt-3">Siehe <code>config.template</code> Abschnitt <code>[scheduler]</code> und <code>modules/scheduler.py</code>.</p>
+  <p class="small text-muted mt-3">Vollständige Optionen: <code>config.template</code> → <code>[scheduler]</code>.</p>
   <div class="text-center mt-3">
     <a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a>
   </div>
@@ -601,9 +768,9 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
             iface=st.schedulerInterface,
             chan=st.schedulerChannel,
             msg=st.schedulerMessage,
-            val=st.schedulerValue,
             ivl=st.schedulerInterval,
             tim=st.schedulerTime,
+            schedule_select=schedule_select_html,
         )
 
     @app.route("/bbs")
@@ -639,7 +806,8 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
             )
             rows_html.append(
                 "<tr>"
-                f"<td><code>{mid}</code></td><td>{subj}</td><td>{preview}</td>"
+                f"<td><code>{mid}</code></td><td>{subj}</td>"
+                f'<td class="cell-bbs-preview">{preview}</td>'
                 f"<td><code>{fn_h}</code></td><td>{when}</td>"
                 f'<td><a class="btn btn-sm btn-outline-info" href="{url_for("bbs_read", mid=mid)}">'
                 "Text</a> "
@@ -651,9 +819,9 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
         body = (
             hint
             + f'<p><a class="btn btn-success mb-3" href="{url_for("bbs_new")}">Neue Nachricht</a></p>'
-            + '<table class="nodes-table table-dark">'
+            + '<div class="table-scroll"><table class="nodes-table table-dark table-bordered">'
             + "<thead><tr><th>#</th><th>Betreff</th><th>Vorschau</th><th>Von (Node)</th><th>Zeit</th><th></th></tr></thead>"
-            + f"<tbody>{table}</tbody></table>"
+            + f"<tbody>{table}</tbody></table></div>"
             + f'<p class="small text-muted">Speicher: <code>{html_escape(st.bbsdb)}</code> · '
             + f'<a href="{url_for("bbs_dm_index")}">BBS-DMs verwalten</a></p>'
         )
@@ -697,7 +865,7 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
   <h2 class="mb-4">📋 BBS #{mid}</h2>
   <p><strong>Betreff:</strong> {subj}</p>
   <p><strong>Von:</strong> <code>{fn_h}</code> &nbsp; <strong>Zeit:</strong> {when}</p>
-  <pre style="white-space: pre-wrap; background-color:#2a2a2a; padding:15px; border-radius:6px;">{body_esc}</pre>
+  <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
     <a href="{{{{ url_for('bbs_index') }}}}" class="btn btn-outline-light">Zurück zur Liste</a>
   </div>
@@ -794,7 +962,7 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
             rows_html.append(
                 "<tr>"
                 f"<td><code>{idx}</code></td><td><code>{to_h}</code></td><td><code>{from_h}</code></td>"
-                f"<td>{preview}</td><td>{actions}</td>"
+                f'<td class="cell-dm-text">{preview}</td><td>{actions}</td>'
                 "</tr>"
             )
         table = "".join(rows_html) if rows_html else '<tr><td colspan="5">Keine Einträge.</td></tr>'
@@ -803,9 +971,9 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
             hint
             + f'<p><a class="btn btn-success mb-3" href="{url_for("bbs_dm_new")}">Neue DM</a> '
             + f'<a class="btn btn-outline-secondary mb-3" href="{url_for("bbs_index")}">Öffentliches BBS</a></p>'
-            + '<table class="nodes-table table-dark">'
+            + '<div class="table-scroll"><table class="nodes-table table-dark table-bordered table-bbs-dm">'
             + "<thead><tr><th>#</th><th>An (Node)</th><th>Von (Node)</th><th>Text</th><th></th></tr></thead>"
-            + f"<tbody>{table}</tbody></table>"
+            + f"<tbody>{table}</tbody></table></div>"
         )
 
         return render_template_string(
@@ -847,7 +1015,7 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
 <div class="container">
   <h2 class="mb-4">✉️ BBS-DM Zeile #{idx}</h2>
   <p><strong>An:</strong> <code>{to_h}</code> &nbsp; <strong>Von:</strong> <code>{from_h}</code></p>
-  <pre style="white-space: pre-wrap; background-color:#2a2a2a; padding:15px; border-radius:6px;">{body_esc}</pre>
+  <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
     <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-light">Zurück zur Liste</a>
   </div>
