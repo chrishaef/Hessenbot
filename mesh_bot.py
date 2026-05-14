@@ -2303,6 +2303,9 @@ async def main():
     
     try:
         handle_boot()
+        if my_settings.web_admin_enabled:
+            from modules.admin_web import start_admin_web_background
+            start_admin_web_background()
         # Create core tasks
         tasks.append(asyncio.create_task(start_rx(), name="mesh_rx"))
         tasks.append(asyncio.create_task(watchdog(), name="watchdog"))

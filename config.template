@@ -5,8 +5,8 @@
 # mac is the MAC address of the device to connect to for ble type
 
 [interface]
-type = serial
-port = /dev/ttyACM0
+type = tcp
+# port = /dev/ttyACM0
 # port = /dev/ttyUSB0
 # hostname = meshtastic.local
 # mac = 00:11:22:33:44:55
@@ -31,9 +31,9 @@ autoPingInChannel = False
 # defaultChannel is the meshtastic default public channel, e.g. LongFast (if none use -1)
 defaultChannel = 0
 # ignoreDefaultChannel, the bot will ignore the default channel set above
-ignoreDefaultChannel = False
+ignoreDefaultChannel = True
 # ignoreChannels is a comma separated list of channels to ignore, e.g. 4,5
-ignoreChannels = 
+ignoreChannels = 2,3,4 
 # require ! to be the first character in a command
 cmdBang = False
 # require explicit command, the message will only be processed if it starts with a command word
@@ -49,14 +49,14 @@ welcome_message = MeshBot, here for you like a friend who is not. Try sending: p
 whoami = True
 
 # enable or disable the Joke module
-DadJokes = True
+DadJokes = False
 DadJokesEmoji = False
 
 # enable or disable the Solar module
 spaceWeather = True
 
 # enable or disable the RSS module, and truncate the story
-rssEnable = True
+rssEnable = False
 rssFeedURL = http://www.hackaday.com/rss.xml,http://rss.slashdot.org/Slashdot/slashdotMain,http://www.reddit.com/r/meshtastic/.rss
 # RSS feed names must match the order of the URLs above, default is used if no match
 rssFeedNames = default,slashdot,mesh
@@ -70,7 +70,7 @@ newsAPIregion = us
 sort_by = relevancy
 
 # enable or disable the wikipedia search module
-wikipedia = True
+wikipedia = False
 # Use local Kiwix server instead of online Wikipedia
 # Set to False to use online Wikipedia, or provide Kiwix server URL
 useKiwixServer = False
@@ -146,7 +146,7 @@ alert_interface = 1
 SentryEnabled = True
 # device interface and channel to send the alert message to
 SentryInterface = 1
-SentryChannel = 2
+SentryChannel = 1
 emailSentryAlerts = False
 # Enable detection sensor alert, requires external GPIO sensor connected to node
 detectionSensorAlert = False
@@ -157,7 +157,7 @@ sentryIgnoreList =
 sentryWatchList =
 
 # radius in meters to detect someone close to the bot
-SentryRadius = 100
+SentryRadius = 1000
 # holdoff time multiplied by seconds(20) of the watchdog
 SentryHoldoff = 9
 
@@ -170,13 +170,13 @@ sentryAlertAway = sentry_alert_away.sh
 # HighFlying Node alert
 highFlyingAlert = True
 # Altitude in meters to trigger the alert
-highFlyingAlertAltitude = 2000
+highFlyingAlertAltitude = 1000
 # check with OpenSkyNetwork if highfly detected for aircraft
 highflyOpenskynetwork = True
 # Channel to send Alert when the high flying node is detected
 highFlyingAlertInterface = 1
 # to disable OTA alert set to unused channel like 9
-highFlyingAlertChannel = 2
+highFlyingAlertChannel = 1
 # list of nodes numbers to ignore high flying alert ex: 2813308004,4258675309
 highFlyingIgnoreList =
 
@@ -191,13 +191,13 @@ bbslink_enabled = False
 # list of whitelisted nodes numbers ex: 2813308004,4258675309 empty list allows all
 bbslink_whitelist =
 # enable API script access (increases disk i/o)
-bbsAPI_enabled = False 
+bbsAPI_enabled = True
 
 # location module
 [location]
 enabled = True
-lat = 48.50
-lon = -123.0
+lat = 50.4484
+lon = 9.509
 fuzzConfigLocation = True
 fuzzItAll = False
 # database file for saved locations
@@ -208,7 +208,7 @@ public_location_admin_manage = False
 delete_public_locations_admins_only = False
 
 # Default to metric units rather than imperial
-useMetric = False
+useMetric = True
 
 # repeaterList lookup location (rbook / artsci / False)
 repeaterLookup = rbook
@@ -220,7 +220,7 @@ n2yoAPIKey =
 satList = 25544,7530
 
 # use Open-Meteo API for weather data not NOAA useful for non US locations
-UseMeteoWxAPI = False
+UseMeteoWxAPI = True
 
 # NOAA weather forecast days
 NOAAforecastDuration = 3
@@ -250,7 +250,7 @@ coastalForecastDays = 3
 riverList = 
 
 # USA FEMA IPAWS alerts
-ipawsAlertEnabled = True
+ipawsAlertEnabled = False
 # comma separated list of FIPS codes to trigger local alert. find your FIPS codes at https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code
 myFIPSList = 57,58,53
 # find your SAME https://www.weather.gov/nwr/counties comma separated list of SAME code to further refine local alert.
@@ -266,13 +266,13 @@ ignoreUSGSEnable = False
 ignoreUSGSWords = test,advisory
 
 # Use Germany/DE Alert Broadcast Data
-enableDEalerts = False
+enableDEalerts = True
 # comma separated list of regional codes trigger local alert.
 # find your regional codet at https://www.xrepository.de/api/xrepository/urn:de:bund:destatis:bevoelkerungsstatistik:schluessel:rs_2021-07-31/download/Regionalschl_ssel_2021-07-31.json
-myRegionalKeysDE = 110000000000,120510000000
+myRegionalKeysDE = 066310009009,066310008008,066110000000,064120000000 
 
 # Alerts are sent to the emergency_handler interface and channel duplicate messages are send here if set
-eAlertBroadcastCh = 
+eAlertBroadcastCh = 1
 
 # CheckList Checkin/Checkout
 [checklist]
@@ -295,11 +295,11 @@ disable_penny = False
 
 [qrz]
 # QRZ Hello to new nodes with message
-enabled = False
+enabled = True
 qrz_db = data/qrz.db
-qrz_hello_string = "MeshBot says Hello! DM for more info."
+qrz_hello_string = "Der Hessenbot sagt Hallo! DM for more info."
 # Training mode will not send the hello message to new nodes
-training = True
+training = False
 
 # repeater module
 [repeater]
@@ -388,14 +388,14 @@ js8callWatchedCallsigns =
 
 
 [fileMon]
-filemon_enabled = False
+filemon_enabled = True
 # text file to monitor for changes
 file_path = alert.txt
 # channel to send the message to can be 2,3 multiple channels comma separated
-broadcastCh = 2
+broadcastCh = 1
 
 # news  command will return the contents of a text file
-enable_read_news = False
+enable_read_news = True
 news_file_path = ../data/news.txt
 # only return a single random (head)line from the news file
 news_random_line = False
@@ -403,7 +403,7 @@ news_random_line = False
 news_block_mode = True
 
 # enable the use of exernal shell commands, this enables some data in `sysinfo`
-enable_runShellCmd = False
+enable_runShellCmd = True
 # if runShellCmd and you think it is safe to allow the x: command to run
 # direct shell command handler the x: command in DMs
 allowXcmd = False
@@ -443,17 +443,17 @@ IMAP_FOLDER = inbox
 game_hop_limit = 5
 disable_emojis = False
 # enable or disable the games module(s)
-dopeWars = True
-lemonade = True
-blackjack = True
-videopoker = True
-mastermind = True
-golfsim = True
-hangman = True
-hamtest = True
-tictactoe = True
-wordOfTheDay = True
-battleShip = True
+dopeWars = False
+lemonade = False
+blackjack = False
+videopoker = False
+mastermind = False
+golfsim = False
+hangman = False
+hamtest = False
+tictactoe = False
+wordOfTheDay = False
+battleShip = False
 
 # enable or disable the quiz game module questions are in data/quiz.json
 quiz = False
@@ -479,7 +479,7 @@ wantAck = False
 # Max limit buffer for radio testing in bytes
 maxBuffer = 200
 #Enable Extra logging of Hop count data
-enableHopLogs = False
+enableHopLogs = True
 # Noisy Node Telemetry Logging and packet threshold
 noisyNodeLogging = False
 noisyTelemetryLimit = 5
@@ -503,3 +503,18 @@ autoBanTimeframe = 3600
 enabled = True
 # Interval in seconds for the persistence loop (how often to save data)
 interval = 300
+
+[webAdmin]
+# Flask UI (login): edit alert + news files, list logs/, live messages.log — starts with mesh_bot.py
+enabled = False
+host = 127.0.0.1
+port = 5000
+# Session signing; prefer env HESSENBOT_WEB_SECRET instead of storing in config
+secret_key =
+username = admin
+# Leave empty and set env HESSENBOT_WEB_PASSWORD, or set a strong password here
+password =
+# Optional path overrides (project-relative if not absolute). Empty = use [fileMon] file_path / news_file_path and logs/
+alert_file =
+news_file =
+log_dir =
