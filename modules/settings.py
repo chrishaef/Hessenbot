@@ -1,6 +1,7 @@
 # Settings for MeshBot and PongBot
 # 2024 Kelly Keeton K7MHI
 import configparser
+import os
 
 # messages
 NO_DATA_NOGPS = "No location data: does your device have GPS?"
@@ -133,6 +134,20 @@ if 'qrz' not in config:
 
 if 'inventory' not in config:
     config['inventory'] = {'enabled': 'False', 'inventory_db': 'data/inventory.db', 'disable_penny': 'False'}
+    config.write(open(config_file, 'w'))
+
+if 'webAdmin' not in config:
+    config['webAdmin'] = {
+        'enabled': 'False',
+        'host': '127.0.0.1',
+        'port': '5000',
+        'secret_key': '',
+        'username': 'admin',
+        'password': '',
+        'alert_file': '',
+        'news_file': '',
+        'log_dir': '',
+    }
     config.write(open(config_file, 'w'))
 
 if 'location' not in config:
@@ -478,6 +493,17 @@ try:
     allowXcmd = config['fileMon'].getboolean('allowXcmd', False) # default False
     xCmd2factorEnabled = config['fileMon'].getboolean('twoFactor_enabled', True) # default True
     xCmd2factor_timeout = config['fileMon'].getint('twoFactor_timeout', 100) # default 100 seconds
+
+    # web admin (Flask UI: alert/news edit, log browser; optional HESSENBOT_WEB_PASSWORD / HESSENBOT_WEB_SECRET)
+    web_admin_enabled = config['webAdmin'].getboolean('enabled', False)
+    web_admin_host = config['webAdmin'].get('host', '127.0.0.1')
+    web_admin_port = config['webAdmin'].getint('port', 5000)
+    web_admin_secret_key = os.environ.get('HESSENBOT_WEB_SECRET', config['webAdmin'].get('secret_key', ''))
+    web_admin_username = config['webAdmin'].get('username', 'admin')
+    web_admin_password = os.environ.get('HESSENBOT_WEB_PASSWORD', config['webAdmin'].get('password', ''))
+    web_admin_alert_file = config['webAdmin'].get('alert_file', '').strip()
+    web_admin_news_file = config['webAdmin'].get('news_file', '').strip()
+    web_admin_log_dir = config['webAdmin'].get('log_dir', '').strip()
 
     # games
     game_hop_limit = config['games'].getint('game_hop_limit', 5) # default 5 hops
