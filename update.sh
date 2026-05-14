@@ -1,132 +1,147 @@
 #!/bin/bash
-# MeshBot Update Script
-# Usage: bash update.sh or ./update.sh after making it executable with chmod +x update.sh
+# Update Hessenbot / meshing-around: stop systemd units, git pull, refresh venv deps, optional config merge, start units.
+# Run from the repository root (same directory as this file). Use sudo if services run as root.
+#
+# Usage:
+#   ./update.sh              full update
+#   ./update.sh --no-merge skip script/configMerge.py
 
-echo "=============================================="
-echo "     MeshBot Automated Update & Backup Tool    "
-echo "=============================================="
-echo
+set -uo pipefail
 
-# --- Service Management ---
-service_stopped=false
-for svc in mesh_bot.service pong_bot.service mesh_bot_reporting.service mesh_bot_w3.service; do
-    if systemctl is-active --quiet "$svc"; then
-        echo ">> Stopping $svc ..."
-        systemctl stop "$svc"
-        service_stopped=true
+cd "$(dirname "$0")"
+REPO_ROOT=$(pwd)
+
+DO_MERGE=1
+for arg in "$@"; do
+    if [[ "$arg" == "--no-merge" ]]; then
+        DO_MERGE=0
     fi
 done
 
-# --- Git Operations ---
+if [[ ${EUID:-0} -eq 0 ]]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+SC="${SUDO} systemctl"
+
+# Match etc/*.service names used by install.sh
+UNITS=(
+    mesh_bot.service
+    pong_bot.service
+    mesh_bot_w3_server.service
+    mesh_bot_reporting.timer
+)
+
+echo "=============================================="
+echo "  Hessenbot / MeshBot — Update"
+echo "=============================================="
+echo "Repository: $REPO_ROOT"
+echo
+
+# --- Stop (best-effort; ignore if unit not installed) ---
+echo "----------------------------------------------"
+echo "Stopping systemd units (if present)..."
+echo "----------------------------------------------"
+for svc in "${UNITS[@]}"; do
+    if $SUDO systemctl cat "$svc" &>/dev/null; then
+        if $SC is-active --quiet "$svc" 2>/dev/null || $SC is-failed --quiet "$svc" 2>/dev/null; then
+            echo ">> Stopping $svc"
+            $SC stop "$svc" || true
+        else
+            echo "   (inactive) $svc"
+        fi
+    else
+        echo "   (not installed) $svc — skip"
+    fi
+done
+# Oneshot reporting service may still be running without the timer being "active"
+if $SUDO systemctl cat mesh_bot_reporting.service &>/dev/null; then
+    $SC stop mesh_bot_reporting.service 2>/dev/null || true
+fi
+
 echo
 echo "----------------------------------------------"
-echo "Fetching latest changes from GitHub..."
+echo "Git: pull latest"
 echo "----------------------------------------------"
-if ! git fetch origin; then
-    echo "ERROR: Failed to fetch from GitHub. Check your network connection. Script expects to be run inside a git repository."
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "ERROR: Not a git repository."
     exit 1
 fi
 
-if [[ $(git symbolic-ref --short -q HEAD) == "" ]]; then
-    echo "WARNING: You are in a detached HEAD state."
-    echo "You may not be on a branch. To return to the main branch, run:"
-    echo "    git checkout main"
-    echo "Proceed with caution; changes may not be saved to a branch."
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+echo "Current branch: $BRANCH"
+
+if ! git pull --ff-only; then
+    echo "WARN: git pull --ff-only failed (e.g. diverged history). Trying merge pull..."
+    git pull || {
+        echo "ERROR: git pull failed. Resolve manually, then re-run update.sh."
+        exit 1
+    }
 fi
 
-echo "Pulling latest changes from GitHub..."
-if ! git pull origin main --rebase; then
-    read -p "Git pull resulted in conflicts. Do you want to reset hard to origin/main? This will discard local changes. (y/n): " choice
-    if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
-        git fetch --all
-        git reset --hard origin/main
-        echo "Local repository updated."
-    else
-        echo "Update aborted due to git conflicts."
+echo
+echo "----------------------------------------------"
+echo "Python dependencies (venv)"
+echo "----------------------------------------------"
+if [[ -f "$REPO_ROOT/venv/bin/pip" ]]; then
+    if ! (
+        set -e
+        # shellcheck source=/dev/null
+        source "$REPO_ROOT/venv/bin/activate"
+        pip install -U -r "$REPO_ROOT/requirements.txt"
+    ); then
+        echo "ERROR: pip install in venv failed."
+        exit 1
     fi
-fi
-
-
-if [[ ! -f modules/custom_scheduler.py ]]; then
-# --- Scheduler Template ---
-echo
-echo "----------------------------------------------"
-echo "Checking custom scheduler template..."
-echo "----------------------------------------------"
-    cp -n etc/custom_scheduler.py modules/
-    printf "Custom scheduler template copied to modules/custom_scheduler.py\n"
-elif ! cmp -s modules/custom_scheduler.template etc/custom_scheduler.py; then
-    echo "custom_scheduler.py is set. To check changes run: diff etc/custom_scheduler.py modules/custom_scheduler.py"
-fi
-
-# --- Data Templates ---
-if [[ -d data ]]; then
-    mkdir -p data
-    for f in etc/data/*; do
-        base=$(basename "$f")
-        if [[ ! -e "data/$base" ]]; then
-            if [[ -d "$f" ]]; then
-                cp -r "$f" "data/"
-                echo "Copied new data/directory $base"
-            else
-                cp "$f" "data/"
-                echo "Copied new data/$base"
-            fi
-        fi
-    done
-fi
-
-# --- Backup ---
-echo
-echo "----------------------------------------------"
-echo "Backing up data/ directory..."
-echo "----------------------------------------------"
-backup_file="data_backup.tar.gz"
-path2backup="data/"
-if [[ -f "modules/custom_scheduler.py" ]]; then
-    echo "Including custom_scheduler.py in backup..."
-    cp modules/custom_scheduler.py data/
-fi
-tar -czf "$backup_file" "$path2backup"
-if [ $? -ne 0 ]; then
-    echo "ERROR: Backup failed."
+    echo "pip install -r requirements.txt completed in venv."
 else
-    echo "Backup of ${path2backup} completed: ${backup_file}"
+    echo "No venv found at ./venv — skip pip (use install.sh or: python3 -m venv venv && ./venv/bin/pip install -r requirements.txt)."
 fi
 
-# --- Config Merge ---
 echo
 echo "----------------------------------------------"
-echo "Merging configuration files..."
+echo "Optional: custom scheduler module"
 echo "----------------------------------------------"
-python3 script/configMerge.py > ini_merge_log.txt 2>&1
-if [[ -f ini_merge_log.txt ]]; then
-    if grep -q "Error during configuration merge" ini_merge_log.txt; then
-        echo "Configuration merge encountered errors. Please check ini_merge_log.txt for details."
-    else
-        echo "Configuration merge completed. Please review config_new.ini and ini_merge_log.txt."
-    fi
-else
-    echo "Configuration merge log (ini_merge_log.txt) not found. Check out the script/configMerge.py tool!"
+if [[ ! -f modules/custom_scheduler.py ]] && [[ -f etc/custom_scheduler.template ]]; then
+    cp -n etc/custom_scheduler.template modules/custom_scheduler.py && echo "Created modules/custom_scheduler.py from template (first time)."
 fi
 
-# --- Service Restart ---
-if [[ "$service_stopped" = true ]]; then
+if [[ "$DO_MERGE" -eq 1 ]] && [[ -f script/configMerge.py ]]; then
     echo
     echo "----------------------------------------------"
-    echo "Restarting services..."
+    echo "Merging config (config.template → config_new.ini)"
     echo "----------------------------------------------"
-    for svc in mesh_bot.service pong_bot.service mesh_bot_reporting.service mesh_bot_w3.service; do
-        if systemctl list-unit-files | grep -q "^$svc"; then
-            systemctl start "$svc"
-            echo "$svc restarted."
-        fi
-    done
+    ( cd "$REPO_ROOT" && python3 script/configMerge.py > ini_merge_log.txt 2>&1 ) || true
+    if grep -q "Error during configuration merge" ini_merge_log.txt 2>/dev/null; then
+        echo "WARN: config merge reported errors — see ini_merge_log.txt"
+    else
+        echo "Config merge finished — review config_new.ini and ini_merge_log.txt if needed."
+    fi
+else
+    echo "Skipping config merge (--no-merge or script missing)."
 fi
 
 echo
+echo "----------------------------------------------"
+echo "Starting enabled units"
+echo "----------------------------------------------"
+for svc in "${UNITS[@]}"; do
+    if $SUDO systemctl cat "$svc" &>/dev/null; then
+        if $SC is-enabled --quiet "$svc" 2>/dev/null; then
+            echo ">> Starting $svc"
+            $SC start "$svc" || echo "WARN: start failed for $svc"
+        else
+            echo "   (disabled) $svc — not started"
+        fi
+    fi
+done
+
+echo
 echo "=============================================="
-echo "      MeshBot Update Completed Successfully!   "
+echo "  Update finished."
 echo "=============================================="
+echo "Status examples:"
+echo "  $SUDO systemctl status mesh_bot.service"
+echo "  $SUDO journalctl -u mesh_bot.service -f"
 exit 0
-# End of script
