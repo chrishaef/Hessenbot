@@ -19,7 +19,15 @@ from flask import (
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_login import LoginManager, UserMixin, login_required, login_user, logout_user
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
+from markupsafe import Markup
 
 
 def _abs_path(rel_or_abs: str) -> str:
@@ -54,6 +62,7 @@ def create_app(
 
     login_manager = LoginManager()
     login_manager.init_app(app)
+    login_manager.login_view = "login"
 
     class User(UserMixin):
         def __init__(self, uid):
@@ -118,9 +127,15 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
 """
         return render_template_string(raw)
 
+    @app.route("/login")
+    def login_legacy_redirect():
+        return redirect(url_for("login"), code=301)
+
     @limiter.limit("5 per minute")
-    @app.route("/login", methods=["GET", "POST"])
+    @app.route("/", methods=["GET", "POST"])
     def login():
+        if request.method == "GET" and current_user.is_authenticated:
+            return redirect(url_for("choose"))
         if request.method == "POST":
             if (
                 request.form.get("username") == admin_username
@@ -182,6 +197,14 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
       <a href="{{url_for('scheduler_edit')}}"
          class="btn btn-outline-warning mb-2 w-100">
         ⏰ Geplante Nachrichten (Scheduler)
+      </a>
+      <a href="{{url_for('bbs_index')}}"
+         class="btn btn-outline-warning mb-2 w-100">
+        📋 BBS (öffentliche Nachrichten)
+      </a>
+      <a href="{{url_for('bbs_dm_index')}}"
+         class="btn btn-outline-warning mb-2 w-100">
+        ✉️ BBS-Direktnachrichten (DM)
       </a>
       <div class="mt-4">
         <a href="{{url_for('logout')}}" class="btn btn-secondary">🔒 Logout</a>
@@ -412,8 +435,6 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
 <thead><tr><th>Num</th><th>Kurz</th><th>Lang</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
 <tbody>{"".join(rows_html)}</tbody></table>"""
 
-        from markupsafe import Markup
-
         return render_template_string(
             dark_css
             + _flash_markup()
@@ -585,6 +606,323 @@ table.nodes-table th, table.nodes-table td { border-bottom: 1px solid #444; padd
             tim=st.schedulerTime,
         )
 
+    @app.route("/bbs")
+    @login_required
+    def bbs_index():
+        import modules.bbstools as bbs
+        import modules.settings as st
+
+        hint = ""
+        if not st.bbs_enabled:
+            hint = (
+                '<p class="alert alert-info">Das Mesh-BBS ist unter <code>[bbs] enabled = False</code> '
+                "deaktiviert. Bearbeitung wirkt trotzdem auf die laufende Bot-Instanz und "
+                f"<code>{html_escape(st.bbsdb)}</code>.</p>"
+            )
+
+        rows_html = []
+        for m in bbs.bbs_messages:
+            mid = m[0]
+            subj = html_escape(str(m[1]))
+            raw_body = m[2] if len(m) > 2 else ""
+            preview = html_escape(raw_body[:120] + ("…" if len(raw_body) > 120 else ""))
+            fn = m[3] if len(m) > 3 else 0
+            when = html_escape(str(m[4])) if len(m) > 4 else ""
+            try:
+                fn_h = html_escape(hex(int(fn)))
+            except (TypeError, ValueError):
+                fn_h = html_escape(str(fn))
+            del_form = (
+                f'<form method="post" action="{url_for("bbs_delete", mid=mid)}" style="display:inline" '
+                f'onsubmit="return confirm(\'Nachricht #{mid} wirklich löschen?\');">'
+                '<button type="submit" class="btn btn-sm btn-danger">Löschen</button></form>'
+            )
+            rows_html.append(
+                "<tr>"
+                f"<td><code>{mid}</code></td><td>{subj}</td><td>{preview}</td>"
+                f"<td><code>{fn_h}</code></td><td>{when}</td>"
+                f'<td><a class="btn btn-sm btn-outline-info" href="{url_for("bbs_read", mid=mid)}">'
+                "Text</a> "
+                f"{del_form}</td>"
+                "</tr>"
+            )
+        table = "".join(rows_html) if rows_html else '<tr><td colspan="6">Keine Nachrichten.</td></tr>'
+
+        body = (
+            hint
+            + f'<p><a class="btn btn-success mb-3" href="{url_for("bbs_new")}">Neue Nachricht</a></p>'
+            + '<table class="nodes-table table-dark">'
+            + "<thead><tr><th>#</th><th>Betreff</th><th>Vorschau</th><th>Von (Node)</th><th>Zeit</th><th></th></tr></thead>"
+            + f"<tbody>{table}</tbody></table>"
+            + f'<p class="small text-muted">Speicher: <code>{html_escape(st.bbsdb)}</code> · '
+            + f'<a href="{url_for("bbs_dm_index")}">BBS-DMs verwalten</a></p>'
+        )
+
+        return render_template_string(
+            dark_css
+            + _flash_markup()
+            + """
+<div class="container">
+  <h2 class="mb-4">📋 BBS — öffentliche Nachrichten</h2>
+  {{ body|safe }}
+  <div class="text-center mt-3"><a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a></div>
+</div>
+""",
+            body=Markup(body),
+        )
+
+    @app.route("/bbs/read/<int:mid>")
+    @login_required
+    def bbs_read(mid):
+        import modules.bbstools as bbs
+
+        if mid < 1 or mid > len(bbs.bbs_messages):
+            flash("Nachricht nicht gefunden.", "error")
+            return redirect(url_for("bbs_index"))
+        m = bbs.bbs_messages[mid - 1]
+        subj = html_escape(str(m[1]))
+        raw_body = m[2] if len(m) > 2 else ""
+        body_esc = html_escape(raw_body)
+        fn = m[3] if len(m) > 3 else 0
+        try:
+            fn_h = html_escape(hex(int(fn)))
+        except (TypeError, ValueError):
+            fn_h = html_escape(str(fn))
+        when = html_escape(str(m[4])) if len(m) > 4 else ""
+        return render_template_string(
+            dark_css
+            + _flash_markup()
+            + f"""
+<div class="container">
+  <h2 class="mb-4">📋 BBS #{mid}</h2>
+  <p><strong>Betreff:</strong> {subj}</p>
+  <p><strong>Von:</strong> <code>{fn_h}</code> &nbsp; <strong>Zeit:</strong> {when}</p>
+  <pre style="white-space: pre-wrap; background-color:#2a2a2a; padding:15px; border-radius:6px;">{body_esc}</pre>
+  <div class="text-center mt-3">
+    <a href="{{{{ url_for('bbs_index') }}}}" class="btn btn-outline-light">Zurück zur Liste</a>
+  </div>
+</div>
+""",
+        )
+
+    @app.route("/bbs/new", methods=["GET", "POST"])
+    @login_required
+    def bbs_new():
+        import modules.bbstools as bbs
+
+        if request.method == "POST":
+            subj = (request.form.get("subject") or "").strip()
+            body_txt = request.form.get("body") or ""
+            if not subj:
+                flash("Betreff darf nicht leer sein.", "error")
+            else:
+                flash(bbs.bbs_post_message(subj, body_txt, 0), "success")
+            return redirect(url_for("bbs_index"))
+
+        return render_template_string(
+            dark_css
+            + _flash_markup()
+            + """
+<div class="container">
+  <h2 class="mb-4">📋 Neue BBS-Nachricht</h2>
+  <p class="small text-muted">Wird wie <code>bbspost</code> mit Absender-Node <code>0</code> (Web-Admin) eingetragen.</p>
+  <form method="post">
+    <label>Betreff</label>
+    <input type="text" name="subject" class="form-control mb-3" required maxlength="500">
+    <label>Text</label>
+    <textarea name="body" rows="12" class="form-control mb-3"></textarea>
+    <input type="submit" value="Veröffentlichen" class="btn btn-success w-100">
+  </form>
+  <div class="text-center mt-3">
+    <a href="{{ url_for('bbs_index') }}" class="btn btn-outline-light">Abbrechen / Liste</a>
+  </div>
+</div>
+""",
+        )
+
+    @app.route("/bbs/delete/<int:mid>", methods=["POST"])
+    @login_required
+    @limiter.limit("60 per minute")
+    def bbs_delete(mid):
+        from modules import bbstools as bbs
+
+        ok, txt = bbs.bbs_delete_message_system(mid)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("bbs_index"))
+
+    @app.route("/bbs/dm")
+    @login_required
+    def bbs_dm_index():
+        import modules.bbstools as bbs
+        import modules.settings as st
+
+        hint = ""
+        if not st.bbs_enabled:
+            hint = (
+                '<p class="alert alert-info">BBS ist unter <code>[bbs] enabled = False</code> '
+                "deaktiviert. Die DM-Liste im laufenden Bot kannst du hier trotzdem bearbeiten.</p>"
+            )
+        hint += (
+            "<p class=\"small text-muted\">Format pro Zeile: <code>[Ziel-Node, Text, Absender-Node]</code>. "
+            "Zeile <strong>0</strong> ist ein interner Platzhalter (wird in <code>bbsinfo</code> nicht mitgezählt) "
+            "und kann nicht gelöscht werden. Datei: <code>data/bbsdm.pkl</code>.</p>"
+        )
+
+        rows_html = []
+        for idx, row in enumerate(bbs.bbs_dm):
+            to_n = row[0] if len(row) > 0 else 0
+            text = row[1] if len(row) > 1 else ""
+            from_n = row[2] if len(row) > 2 else 0
+            try:
+                to_h = html_escape(hex(int(to_n)))
+            except (TypeError, ValueError):
+                to_h = html_escape(str(to_n))
+            try:
+                from_h = html_escape(hex(int(from_n)))
+            except (TypeError, ValueError):
+                from_h = html_escape(str(from_n))
+            preview = html_escape(text[:100] + ("…" if len(text) > 100 else ""))
+            if idx == 0:
+                actions = '<span class="text-muted">(Platzhalter)</span>'
+            else:
+                actions = (
+                    f'<a class="btn btn-sm btn-outline-info" href="{url_for("bbs_dm_read", idx=idx)}">Text</a> '
+                    f'<form method="post" action="{url_for("bbs_dm_delete", idx=idx)}" style="display:inline" '
+                    f'onsubmit="return confirm(\'DM-Zeile {idx} wirklich löschen?\');">'
+                    '<button type="submit" class="btn btn-sm btn-danger">Löschen</button></form>'
+                )
+            rows_html.append(
+                "<tr>"
+                f"<td><code>{idx}</code></td><td><code>{to_h}</code></td><td><code>{from_h}</code></td>"
+                f"<td>{preview}</td><td>{actions}</td>"
+                "</tr>"
+            )
+        table = "".join(rows_html) if rows_html else '<tr><td colspan="5">Keine Einträge.</td></tr>'
+
+        body = (
+            hint
+            + f'<p><a class="btn btn-success mb-3" href="{url_for("bbs_dm_new")}">Neue DM</a> '
+            + f'<a class="btn btn-outline-secondary mb-3" href="{url_for("bbs_index")}">Öffentliches BBS</a></p>'
+            + '<table class="nodes-table table-dark">'
+            + "<thead><tr><th>#</th><th>An (Node)</th><th>Von (Node)</th><th>Text</th><th></th></tr></thead>"
+            + f"<tbody>{table}</tbody></table>"
+        )
+
+        return render_template_string(
+            dark_css
+            + _flash_markup()
+            + """
+<div class="container">
+  <h2 class="mb-4">✉️ BBS — Direktnachrichten</h2>
+  {{ body|safe }}
+  <div class="text-center mt-3"><a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a></div>
+</div>
+""",
+            body=Markup(body),
+        )
+
+    @app.route("/bbs/dm/read/<int:idx>")
+    @login_required
+    def bbs_dm_read(idx):
+        import modules.bbstools as bbs
+
+        if idx < 0 or idx >= len(bbs.bbs_dm):
+            flash("Eintrag nicht gefunden.", "error")
+            return redirect(url_for("bbs_dm_index"))
+        row = bbs.bbs_dm[idx]
+        to_n, text, from_n = row[0], row[1] if len(row) > 1 else "", row[2] if len(row) > 2 else 0
+        try:
+            to_h = html_escape(hex(int(to_n)))
+        except (TypeError, ValueError):
+            to_h = html_escape(str(to_n))
+        try:
+            from_h = html_escape(hex(int(from_n)))
+        except (TypeError, ValueError):
+            from_h = html_escape(str(from_n))
+        body_esc = html_escape(text)
+        return render_template_string(
+            dark_css
+            + _flash_markup()
+            + f"""
+<div class="container">
+  <h2 class="mb-4">✉️ BBS-DM Zeile #{idx}</h2>
+  <p><strong>An:</strong> <code>{to_h}</code> &nbsp; <strong>Von:</strong> <code>{from_h}</code></p>
+  <pre style="white-space: pre-wrap; background-color:#2a2a2a; padding:15px; border-radius:6px;">{body_esc}</pre>
+  <div class="text-center mt-3">
+    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-light">Zurück zur Liste</a>
+  </div>
+</div>
+""",
+        )
+
+    @app.route("/bbs/dm/new", methods=["GET", "POST"])
+    @login_required
+    def bbs_dm_new():
+        import modules.bbstools as bbs
+
+        if request.method == "POST":
+            raw_to = (request.form.get("to_node") or "").strip()
+            body_txt = request.form.get("body") or ""
+            raw_from = (request.form.get("from_node") or "").strip() or "0"
+
+            to_node = 0
+            if raw_to.startswith("!") and len(raw_to) >= 2:
+                try:
+                    to_node = int(raw_to[1:], 16)
+                except ValueError:
+                    to_node = 0
+            else:
+                try:
+                    to_node = int(raw_to)
+                except ValueError:
+                    to_node = 0
+
+            try:
+                from_node = int(raw_from)
+            except ValueError:
+                from_node = 0
+
+            if to_node == 0:
+                flash("Ziel-Node ungültig (Dezimal oder !hex, z. B. !1234abcd).", "error")
+            elif not body_txt.strip():
+                flash("Nachricht darf nicht leer sein.", "error")
+            else:
+                flash(bbs.bbs_post_dm(to_node, body_txt.strip(), from_node), "success")
+            return redirect(url_for("bbs_dm_index"))
+
+        return render_template_string(
+            dark_css
+            + _flash_markup()
+            + """
+<div class="container">
+  <h2 class="mb-4">✉️ Neue BBS-DM</h2>
+  <p class="small text-muted">Wie <code>bbspost @Ziel #Text</code>: Ziel als Dezimal-Node-ID oder Meshtastic-<code>!hex</code> (9 Zeichen).</p>
+  <form method="post">
+    <label>Ziel-Node</label>
+    <input type="text" name="to_node" class="form-control mb-2" placeholder="z.B. 2813308004 oder !a1b2c3d4" required>
+    <label>Absender-Node (optional, Standard 0 = Web)</label>
+    <input type="text" name="from_node" class="form-control mb-3" value="0" placeholder="0">
+    <label>Nachricht</label>
+    <textarea name="body" rows="10" class="form-control mb-3" required></textarea>
+    <input type="submit" value="Absenden" class="btn btn-success w-100">
+  </form>
+  <div class="text-center mt-3">
+    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-light">Abbrechen</a>
+  </div>
+</div>
+""",
+        )
+
+    @app.route("/bbs/dm/delete/<int:idx>", methods=["POST"])
+    @login_required
+    @limiter.limit("60 per minute")
+    def bbs_dm_delete(idx):
+        from modules import bbstools as bbs
+
+        ok, txt = bbs.bbs_delete_dm_at_index(idx)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("bbs_dm_index"))
+
     @app.route("/logout")
     @login_required
     def logout():
@@ -654,4 +992,4 @@ def start_admin_web_background():
         )
 
     threading.Thread(target=run, daemon=True, name="web_admin").start()
-    logger.info(f"Web admin UI listening on http://{host}:{port}/login")
+    logger.info(f"Web admin UI listening on http://{host}:{port}/")
