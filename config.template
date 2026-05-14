@@ -505,7 +505,7 @@ enabled = True
 interval = 300
 
 [webAdmin]
-# Flask UI (login): edit alert + news files, list logs/, live messages.log — starts with mesh_bot.py
+# Flask UI at http://<host>:<port>/ (login); old /login redirects to /
 enabled = False
 host = 127.0.0.1
 port = 5000

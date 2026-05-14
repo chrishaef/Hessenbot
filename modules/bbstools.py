@@ -99,6 +99,23 @@ def bbs_delete_message(messageID = 0, fromNode = 0):
     else:
         return "Please specify a message number to delete."
 
+
+def bbs_delete_message_system(message_id: int):
+    """
+    Remove a public BBS message by 1-based ID without author check (trusted: web admin).
+    Renumbers message IDs and saves data/bbsdb.pkl.
+    """
+    global bbs_messages
+    if message_id < 1 or message_id > len(bbs_messages):
+        return False, "Message not found."
+    bbs_messages.pop(message_id - 1)
+    for i in range(len(bbs_messages)):
+        bbs_messages[i][0] = i + 1
+    save_bbsdb()
+    logger.info(f"System: BBS message #{message_id} removed via web admin")
+    return True, f"Nachricht #{message_id} gelöscht."
+
+
 def bbs_post_message(subject, message, fromNode, threadID=0, replytoID=0):
     # post a message to the bbsdb
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -211,6 +228,26 @@ def bbs_delete_dm(toNode, message):
             save_bbsdm()
             return "System: cleared mail for" + str(toNode)
     return "System: No DM found for node " + str(toNode)
+
+
+def bbs_delete_dm_at_index(index: int):
+    """
+    Remove one row from bbs_dm by list index (trusted: web admin).
+    Index 0 is reserved (placeholder / stats convention); cannot be removed.
+    """
+    global bbs_dm
+    if index < 0 or index >= len(bbs_dm):
+        return False, "Eintrag nicht gefunden."
+    if index == 0:
+        return False, "Der erste Eintrag ist reserviert (interner Platzhalter) und kann nicht gelöscht werden."
+    bbs_dm.pop(index)
+    if len(bbs_dm) == 0:
+        bbs_dm.append([1234567890, "Message", 1234567890])
+        logger.debug("System: bbs_dm was empty after delete; restored placeholder row")
+    save_bbsdm()
+    logger.info(f"System: BBS DM row {index} removed via web admin")
+    return True, "DM-Eintrag gelöscht."
+
 
 def compress_data(data_to_compress):
     # Prepare message as bytes
