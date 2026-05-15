@@ -288,6 +288,27 @@ interval =
 # time = Uhrzeit HH:MM (24h), nötig u.a. für day mit Uhrzeit, Wochentage mon…sun, weather, mwx, tide, solar, verse
 time =
 
+# Automatischer MOTD-Versand (Web-Admin → MOTD; unabhängig vom Scheduler oben)
+[motdBroadcast]
+enabled = False
+interface = 1
+channel = 2
+# mode: day, hour, min, mon, tue, wed, thu, fri, sat, sun
+mode = day
+# interval: bei hour/min = Stunden/Minuten; bei day = alle N Tage (1 = täglich)
+interval = 1
+# time = HH:MM bei day und Wochentagen (mode mon…sun)
+time = 09:00
+
+# Automatischer News-Versand aus news.txt (Web-Admin → News)
+[newsBroadcast]
+enabled = False
+interface = 1
+channel = 2
+mode = hour
+interval = 6
+time =
+
 [radioMon]
 # dx cluster `dx` command
 dxspotter_enabled = True

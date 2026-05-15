@@ -1027,25 +1027,48 @@ def ban_hammer(node_id, rxInterface=None, channel=None, reason=""):
 
     return False  # No ban applied
 
+def bbs_ban_list_file_path():
+    from modules.paths import path_in_repo
+
+    return path_in_repo("data/bbs_ban_list.txt")
+
+
 def save_bbsBanList():
-    # save the bbs_ban_list to file
+    # save the bbs_ban_list to file (absolute path — unabhängig vom Arbeitsverzeichnis)
+    import os
+
+    path = bbs_ban_list_file_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     try:
-        with open('data/bbs_ban_list.txt', 'w') as f:
+        with open(path, "w", encoding="utf-8") as f:
             for node in bbs_ban_list:
-                f.write(f"{node}\n")
-        logger.debug("System: BBS ban list saved")
+                if node:
+                    f.write(f"{node}\n")
+        logger.debug(f"System: BBS ban list saved to {path}")
         return True
-    except Exception as e:
-        logger.error(f"System: Error saving BBS ban list: {e}")
+    except OSError as e:
+        logger.error(
+            f"System: Error saving BBS ban list to {path}: {e}. "
+            "Prüfe Besitzer/Rechte (z. B. sudo chown -R <bot-user>:<bot-user> data/)."
+        )
         return False
+    except Exception as e:
+        logger.error(f"System: Error saving BBS ban list to {path}: {e}")
+        return False
+
 
 def load_bbsBanList():
     global bbs_ban_list
     loaded_list = []
+    path = bbs_ban_list_file_path()
     try:
-        with open('data/bbs_ban_list.txt', 'r') as f:
+        with open(path, encoding="utf-8") as f:
             loaded_list = [line.strip() for line in f if line.strip()]
-        logger.debug(f"System: BBS ban list now has {len(loaded_list)} entries loaded from file")
+        logger.debug(
+            f"System: BBS ban list now has {len(loaded_list)} entries loaded from {path}"
+        )
     except FileNotFoundError:
         config_val = config['bbs'].get('bbs_ban_list', '')
         if config_val:

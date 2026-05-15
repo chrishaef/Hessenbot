@@ -36,10 +36,22 @@ fi
 echo "Repository: $REPO_ROOT"
 echo "Owner:      $TARGET_USER:$TARGET_USER"
 
+mkdir -p "$REPO_ROOT/logs" "$REPO_ROOT/data"
+
+# Runtime files the bot / web admin must be able to create or update
+RUNTIME_FILES=(
+  "$REPO_ROOT/data/bbs_ban_list.txt"
+)
+for f in "${RUNTIME_FILES[@]}"; do
+  if [ ! -f "$f" ]; then
+    touch "$f"
+  fi
+done
+
 for dir in "$REPO_ROOT/logs" "$REPO_ROOT/data"; do
-  mkdir -p "$dir"
   chown -R "$TARGET_USER:$TARGET_USER" "$dir"
   chmod 775 "$dir"
+  chmod g+s "$dir"
   find "$dir" -type f -exec chmod 664 {} \;
   find "$dir" -type d -exec chmod 775 {} \;
 done
@@ -49,4 +61,4 @@ if [ -f "$REPO_ROOT/config.ini" ]; then
   chmod 664 "$REPO_ROOT/config.ini"
 fi
 
-echo "Permissions set for $TARGET_USER on data/, logs/, and config.ini (if present)."
+echo "Permissions set for $TARGET_USER on data/, logs/, config.ini (if present)."

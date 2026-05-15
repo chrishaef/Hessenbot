@@ -94,6 +94,20 @@ if 'scheduler' not in config:
     config['scheduler'] = {'enabled': 'False'}
     config.write(open(config_file, 'w'))
 
+if 'motdBroadcast' not in config:
+    config['motdBroadcast'] = {
+        'enabled': 'False', 'interface': '1', 'channel': '2',
+        'mode': 'day', 'interval': '1', 'time': '09:00',
+    }
+    config.write(open(config_file, 'w'))
+
+if 'newsBroadcast' not in config:
+    config['newsBroadcast'] = {
+        'enabled': 'False', 'interface': '1', 'channel': '2',
+        'mode': 'hour', 'interval': '6', 'time': '',
+    }
+    config.write(open(config_file, 'w'))
+
 if 'emergencyHandler' not in config:
     config['emergencyHandler'] = {'enabled': 'False', 'alert_channel': '2', 'alert_interface': '1', 'email': ''}
     config.write(open(config_file, 'w'))
@@ -425,6 +439,21 @@ try:
     schedulerTime = config['scheduler'].get('time', '') # default empty
     schedulerValue = config['scheduler'].get('value', '') # default empty
     schedulerMotd = config['scheduler'].getboolean('schedulerMotd', False) # default False
+
+    # MOTD / News automatic broadcast (Web-Admin; independent of [scheduler])
+    motd_broadcast_enabled = config['motdBroadcast'].getboolean('enabled', False)
+    motd_broadcast_interface = config['motdBroadcast'].getint('interface', 1)
+    motd_broadcast_channel = config['motdBroadcast'].getint('channel', 2)
+    motd_broadcast_mode = config['motdBroadcast'].get('mode', 'day').strip().lower()
+    motd_broadcast_interval = config['motdBroadcast'].get('interval', '1').strip()
+    motd_broadcast_time = config['motdBroadcast'].get('time', '09:00').strip()
+
+    news_broadcast_enabled = config['newsBroadcast'].getboolean('enabled', False)
+    news_broadcast_interface = config['newsBroadcast'].getint('interface', 1)
+    news_broadcast_channel = config['newsBroadcast'].getint('channel', 2)
+    news_broadcast_mode = config['newsBroadcast'].get('mode', 'hour').strip().lower()
+    news_broadcast_interval = config['newsBroadcast'].get('interval', '6').strip()
+    news_broadcast_time = config['newsBroadcast'].get('time', '').strip()
 
     # radio monitoring
     radio_detection_enabled = config['radioMon'].getboolean('enabled', False)
