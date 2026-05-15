@@ -271,8 +271,16 @@ def create_app(
     @app.route("/choose")
     @login_required
     def choose():
+        from modules.web_dashboard import render_host_metrics_html
+
+        host_block = f"""
+<h3 class="h6 section-title mb-3"><i class="bi bi-pc-display me-2 text-success"></i>Host</h3>
+{render_host_metrics_html()}
+<hr class="my-4">
+"""
         return _render_admin_template(
-            """
+            host_block
+            + """
 <div class="row g-3">
   <div class="col-md-6">
     <h3 class="h6 section-title"><i class="bi bi-file-earmark-text me-2"></i>Inhalte</h3>
