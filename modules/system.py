@@ -16,9 +16,12 @@ import io # for suppressing output on watchdog
 # homebrew 'modules'
 from modules.settings import *
 from modules.log import logger, getPrettyTime, CustomFormatter
-from modules.paths import path_in_repo
+from modules.paths import ensure_parent_dir, path_in_repo
 
-_LEADERBOARD_PKL = path_in_repo("data/leaderboard.pkl")
+
+def _mesh_leaderboard_pkl_path() -> str:
+    return path_in_repo("data/leaderboard.pkl")
+
 
 # Global Variables
 trap_list = ("cmd","cmd?","bannode",) # base commands
@@ -1179,12 +1182,9 @@ def bbs_ban_list_file_path():
 
 def save_bbsBanList():
     # save the bbs_ban_list to file (absolute path — unabhängig vom Arbeitsverzeichnis)
-    import os
 
     path = bbs_ban_list_file_path()
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
+    ensure_parent_dir(path)
     try:
         with open(path, "w", encoding="utf-8") as f:
             for node in bbs_ban_list:
@@ -1195,7 +1195,7 @@ def save_bbsBanList():
     except OSError as e:
         logger.error(
             f"System: Error saving BBS ban list to {path}: {e}. "
-            "Prüfe Besitzer/Rechte (z. B. sudo chown -R <bot-user>:<bot-user> data/)."
+            "Prüfe Besitzer/Rechte (z. B. sudo chown -R <bot-user>:<bot-user> data/ oder etc/set-permissions.sh)."
         )
         return False
     except Exception as e:
@@ -2411,23 +2411,29 @@ def noisyTelemetryCheck():
 def saveLeaderboard():
     # save the meshLeaderboard to a pickle file
     global meshLeaderboard
+    path = _mesh_leaderboard_pkl_path()
     try:
-        import os
-
-        os.makedirs(os.path.dirname(_LEADERBOARD_PKL), exist_ok=True)
-        with open(_LEADERBOARD_PKL, "wb") as f:
+        ensure_parent_dir(path)
+        with open(path, "wb") as f:
             pickle.dump(meshLeaderboard, f)
         if logMetaStats:
-            logger.debug("System: Mesh Leaderboard saved to leaderboard.pkl")
+            logger.debug(f"System: Mesh Leaderboard saved to {path}")
         return True
+    except OSError as e:
+        logger.warning(
+            f"System: Error saving Mesh Leaderboard to {path}: {e}. "
+            "Prüfe Schreibrechte auf data/ (z. B. sudo chown -R <bot-user>:<bot-user> data/ oder etc/set-permissions.sh)."
+        )
+        return False
     except Exception as e:
-        logger.warning(f"System: Error saving Mesh Leaderboard: {e}")
+        logger.warning(f"System: Error saving Mesh Leaderboard to {path}: {e}")
         return False
 
 def loadLeaderboard():
     global meshLeaderboard
+    path = _mesh_leaderboard_pkl_path()
     try:
-        with open(_LEADERBOARD_PKL, "rb") as f:
+        with open(path, "rb") as f:
             loaded = pickle.load(f)
         # Merge with current default structure to add any new keys
         initializeMeshLeaderboard()  # sets meshLeaderboard to default structure
@@ -2435,10 +2441,10 @@ def loadLeaderboard():
             meshLeaderboard[k] = v
         sync_leaderboard_from_nodedb()
         if logMetaStats:
-            logger.debug("System: Mesh Leaderboard loaded from leaderboard.pkl")
+            logger.debug(f"System: Mesh Leaderboard loaded from {path}")
     except FileNotFoundError:
         if logMetaStats:
-            logger.debug("System: No existing Mesh Leaderboard found, starting fresh")
+            logger.debug(f"System: No existing Mesh Leaderboard at {path}, starting fresh")
         initializeMeshLeaderboard()
         sync_leaderboard_from_nodedb()
     except Exception as e:
