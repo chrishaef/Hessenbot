@@ -584,14 +584,20 @@ body.page-login {
   border: 1px solid var(--card-border);
 }
 
-/* Dashboard layout */
-.portal-wrapper--stats {
-  height: calc(100vh - var(--nav-h));
-  overflow: hidden;
+/* Dashboard layout — full page scroll (no clipped viewport) */
+.portal-wrapper.portal-wrapper--stats {
+  height: auto;
+  min-height: calc(100vh - var(--nav-h));
+  overflow: visible;
 }
 
-.portal-wrapper--stats .portal-main {
-  overflow-y: auto;
+.portal-wrapper.portal-wrapper--stats .portal-main {
+  height: auto;
+  overflow: visible;
+}
+
+.portal-wrapper.portal-wrapper--stats .home-content {
+  padding-bottom: 2rem;
 }
 
 .stat-grid {
