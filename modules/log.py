@@ -1,6 +1,12 @@
 import logging
+import os
 from logging.handlers import TimedRotatingFileHandler
+
 import modules.settings as my_settings
+from modules.paths import path_in_repo
+
+_logs_dir = path_in_repo("logs")
+os.makedirs(_logs_dir, exist_ok=True)
 # if LOGGING_LEVEL is not set in settings.py, default to DEBUG
 if not my_settings.LOGGING_LEVEL:
     my_settings.LOGGING_LEVEL = "DEBUG"
@@ -72,14 +78,24 @@ logger.addHandler(stdout_handler)
 
 if my_settings.syslog_to_file:
     # Create file handler for logging to a file
-    file_handler_sys = TimedRotatingFileHandler('logs/meshbot.log', when='midnight', backupCount=my_settings.log_backup_count, encoding='utf-8')
+    file_handler_sys = TimedRotatingFileHandler(
+        path_in_repo("logs/meshbot.log"),
+        when="midnight",
+        backupCount=my_settings.log_backup_count,
+        encoding="utf-8",
+    )
     file_handler_sys.setLevel(LOGGING_LEVEL) # DEBUG used by default for system logs to disk
     file_handler_sys.setFormatter(plainFormatter(logFormat))
     logger.addHandler(file_handler_sys)
 
 if my_settings.log_messages_to_file:
     # Create file handler for logging to a file
-    file_handler = TimedRotatingFileHandler('logs/messages.log', when='midnight', backupCount=my_settings.log_backup_count, encoding='utf-8')
+    file_handler = TimedRotatingFileHandler(
+        path_in_repo("logs/messages.log"),
+        when="midnight",
+        backupCount=my_settings.log_backup_count,
+        encoding="utf-8",
+    )
     file_handler.setLevel(logging.INFO) # INFO used for messages to disk
     file_handler.setFormatter(logging.Formatter(msgLogFormat))
     msgLogger.addHandler(file_handler)
