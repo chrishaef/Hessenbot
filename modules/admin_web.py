@@ -192,6 +192,7 @@ def create_app(
             portal_shell_start(
                 title="Befehle – Hessenbot",
                 active_nav="commands",
+                dash_view_tabs=True,
                 particles=True,
                 admin_href=url_for(
                     "choose" if current_user.is_authenticated else "admin_login"
@@ -835,7 +836,6 @@ def create_app(
             ("sysinfo", "Sysinfo — Intervall = Stunden (sysinfo)"),
             ("tide", "Gezeiten — täglich zur Uhrzeit (tide)"),
             ("solar", "Sonne — täglich zur Uhrzeit (solar)"),
-            ("verse", "Bibelvers — täglich zur Uhrzeit (verse)"),
             ("custom", "Eigene Logik (custom, modules/custom_scheduler.py)"),
         ]
         cur_raw = (st.schedulerValue or "").strip()
@@ -891,7 +891,7 @@ def create_app(
       <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
       <strong>mon … sun:</strong> Uhrzeit unten setzen (HH:MM).
       <strong>joke:</strong> Minuten; <strong>link, news, readrss, sysinfo:</strong> Stunden.
-      <strong>weather, mwx, tide, solar, verse:</strong> Uhrzeit Pflicht, Intervall oft egal (siehe Code).
+      <strong>weather, mwx, tide, solar:</strong> Uhrzeit Pflicht, Intervall oft egal (siehe Code).
     </p>
 
     <label class="form-label fw-semibold">Uhrzeit <span class="text-muted fw-normal">(HH:MM, config: time)</span></label>
@@ -908,7 +908,7 @@ def create_app(
           <tr><td>mon … sun</td><td>—</td><td>erforderlich</td></tr>
           <tr><td>joke</td><td>Minuten</td><td>—</td></tr>
           <tr><td>link, news, readrss, sysinfo</td><td>Stunden</td><td>—</td></tr>
-          <tr><td>weather, mwx, tide, solar, verse</td><td>(siehe Log)</td><td>erforderlich</td></tr>
+          <tr><td>weather, mwx, tide, solar</td><td>(siehe Log)</td><td>erforderlich</td></tr>
         </tbody>
       </table>
     </details>

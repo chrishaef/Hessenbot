@@ -281,12 +281,12 @@ message = "MeshBot says Hello! DM for more info."
 # enable overides the above and uses the motd as the message
 schedulerMotd = False
 # value = Zeitplantyp (siehe Web-Admin Scheduler oder modules/scheduler.py). z.B. day, hour, min, mon…sun,
-# joke, link, weather, news, readrss, mwx, sysinfo, tide, solar, verse, custom
+# joke, link, weather, news, readrss, mwx, sysinfo, tide, solar, custom
 value =
 # interval = Zahl: bei day oft Tage; bei hour/min Stunden bzw. Minuten; bei joke Minuten;
 # bei link/news/readrss/sysinfo Stunden (siehe Kurzübersicht im Web-Admin)
 interval = 
-# time = Uhrzeit HH:MM (24h), nötig u.a. für day mit Uhrzeit, Wochentage mon…sun, weather, mwx, tide, solar, verse
+# time = Uhrzeit HH:MM (24h), nötig u.a. für day mit Uhrzeit, Wochentage mon…sun, weather, mwx, tide, solar
 time =
 
 # Automatischer MOTD-Versand (Web-Admin → MOTD; unabhängig vom Scheduler oben)

@@ -95,7 +95,6 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "sysinfo": lambda: sysinfo(message, message_from_id, deviceID, isDM),
     "test": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "testing": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "verse": lambda: read_verse(),
     "warning": lambda: handle_warning(
         message_from_id, deviceID, channel_number, isDM
     ),
@@ -826,8 +825,6 @@ def handle_boot(mesh=True):
                 logger.debug(f"System: File Monitor News Reader Enabled for {my_settings.news_file_path}")
             if my_settings.bee_enabled:
                 logger.debug("System: File Monitor Bee Monitor Enabled for 🐝bee.txt")
-            if my_settings.bible_enabled:
-                logger.debug("System: File Monitor Bible Verse Enabled for bible.txt")
             if my_settings.enableDEalerts:
                 logger.debug(f"System: NINA Alerts Enabled with counties {my_settings.myRegionalKeysDE}")
             if my_settings.enableDEalerts:

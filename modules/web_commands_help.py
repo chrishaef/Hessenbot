@@ -68,7 +68,17 @@ def _sections() -> List[CommandSection]:
         CommandSection(
             "Knoten & Position",
             "bi-geo-alt",
-            "Standortdaten kommen aus der Meshtastic-NodeDB (GPS der Knoten). Ohne GPS meldet der Bot das.",
+            (
+                "Standortdaten stammen aus der Meshtastic-NodeDB (GPS am Gerät). Ohne GPS kann der Bot keine "
+                "Koordinaten liefern.\n\n"
+                f"Entfernungen messen: Mit aktivem GPS sendest du {p}map <Name> — der Bot antwortet mit Richtung "
+                "und Distanz zu einem zuvor gespeicherten Ort (bezogen auf deine aktuelle Position). "
+                f"{p}howfar summiert die zurückgelegte Strecke seit dem letzten Aufruf (erneut senden aktualisiert "
+                f"den Zähler; {p}howfar reset setzt den Startpunkt zurück).\n\n"
+                f"Standorte speichern: An der gewünschten Position {p}map save <Name> [Beschreibung] (nur für dich) "
+                f"oder {p}map save public <Name> [Beschreibung] (für alle). {p}map list zeigt deine Einträge, "
+                f"{p}map delete <Name> entfernt einen Ort. {p}map public <Name> fragt einen öffentlichen Ort ab."
+            ),
             (
                 CommandEntry(
                     f"{p}whoami",
@@ -94,13 +104,14 @@ def _sections() -> List[CommandSection]:
                 ),
                 CommandEntry(
                     f"{p}map",
-                    "Gespeicherte Orte: speichern, Entfernung/Richtung, Liste.",
-                    f"{p}map help",
+                    "Orte speichern und Entfernung/Richtung abfragen.",
+                    f"{p}map save Treffpunkt | {p}map Treffpunkt | {p}map list",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
                 CommandEntry(
                     f"{p}howfar",
-                    "Zurückgelegte Strecke seit dem letzten GPS-Punkt (Tracking).",
+                    "Zurückgelegte Strecke seit dem letzten Aufruf; reset setzt den Startpunkt zurück.",
+                    f"{p}howfar | {p}howfar reset",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
             ),
@@ -213,7 +224,6 @@ def _sections() -> List[CommandSection]:
                     "Schlagzeilen (NewsAPI.org, API-Key nötig).",
                     enabled=lambda: getattr(st, "enableNewsAPI", False),
                 ),
-                CommandEntry(f"{p}verse", "Zufälliger Bibelvers (wenn bible.txt vorhanden)."),
             ),
         ),
         CommandSection(
