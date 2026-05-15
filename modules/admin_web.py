@@ -760,6 +760,144 @@ def create_app(
             schedule_select=schedule_select_html,
         )
 
+    @app.route("/banlist", methods=["GET", "POST"])
+    @login_required
+    def banlist_index():
+        from modules import admin_web_ops as ops
+        import modules.settings as st
+
+        ban_path = ops.ban_list_file_path()
+
+        if request.method == "POST":
+            action = (request.form.get("action") or "").strip()
+            current = ops.read_ban_list_file()
+            if not current:
+                current = list(st.bbs_ban_list)
+
+            if action == "add":
+                nid = ops.normalize_ban_node_id(request.form.get("node_id", ""))
+                if not nid:
+                    flash("Ungültige Knoten-ID (Dezimalzahl oder !xxxxxxxx).", "error")
+                elif nid in current:
+                    flash(f"Knoten {nid} steht bereits auf der Banliste.", "info")
+                else:
+                    current.append(nid)
+                    ops.save_ban_list(current)
+                    flash(f"Knoten {nid} zur Banliste hinzugefügt.", "success")
+            elif action == "remove":
+                nid = (request.form.get("node_id") or "").strip()
+                if nid in current:
+                    current = [x for x in current if x != nid]
+                    ops.save_ban_list(current)
+                    auto = getattr(st, "autoBanlist", None)
+                    if isinstance(auto, list) and nid in auto:
+                        auto.remove(nid)
+                    flash(f"Knoten {nid} von der Banliste entfernt.", "success")
+                else:
+                    flash("Knoten nicht auf der Banliste.", "error")
+            elif action == "save":
+                lines = (request.form.get("ban_list_text") or "").splitlines()
+                merged = [ln.strip() for ln in lines if ln.strip()]
+                ops.save_ban_list(merged)
+                flash(f"Banliste gespeichert ({len(merged)} Einträge).", "success")
+            elif action == "reload":
+                ops.reload_ban_list_runtime()
+                flash("Banliste von der Datei neu geladen.", "success")
+            else:
+                flash("Unbekannte Aktion.", "error")
+            return redirect(url_for("banlist_index"))
+
+        banned = ops.read_ban_list_file()
+        if not banned:
+            banned = ops.reload_ban_list_runtime()
+
+        rows_html = []
+        for nid in sorted(banned, key=lambda x: int(x) if x.isdigit() else 0):
+            label = html_escape(ops.ban_node_label(nid))
+            try:
+                hex_h = html_escape(f"!{int(nid):08x}")
+            except (TypeError, ValueError):
+                hex_h = html_escape(nid)
+            rows_html.append(
+                "<tr>"
+                f"<td><code>{html_escape(nid)}</code></td>"
+                f"<td><code>{hex_h}</code></td>"
+                f"<td>{label}</td>"
+                f'<td><form method="post" style="display:inline" '
+                f'onsubmit="return confirm(\'Knoten {html_escape(nid)} von der Banliste entfernen?\');">'
+                f'<input type="hidden" name="action" value="remove">'
+                f'<input type="hidden" name="node_id" value="{html_escape(nid)}">'
+                '<button type="submit" class="btn btn-sm btn-danger">Entfernen</button>'
+                "</form></td>"
+                "</tr>"
+            )
+        table = (
+            "".join(rows_html)
+            if rows_html
+            else '<tr><td colspan="4">Keine gesperrten Knoten.</td></tr>'
+        )
+
+        auto_rows = getattr(st, "autoBanlist", None) or []
+        auto_html = ""
+        if auto_rows:
+            auto_items = "".join(
+                f"<li><code>{html_escape(str(n))}</code></li>"
+                for n in auto_rows
+                if str(n).strip()
+            )
+            auto_html = (
+                '<div class="alert alert-secondary mt-3 mb-0">'
+                "<strong>Auto-Ban (laufende Sitzung):</strong> "
+                f"{len(auto_rows)} Knoten · wird beim Neustart zurückgesetzt, "
+                "steht nicht in <code>bbs_ban_list.txt</code>."
+                f'<ul class="small mb-0 mt-2">{auto_items}</ul></div>'
+            )
+
+        list_text = "\n".join(banned)
+        body = (
+            f'<p class="small text-muted">Datei: <code>{html_escape(ban_path)}</code> · '
+            f"Config: <code>[bbs] bbs_ban_list</code> · "
+            f"{len(banned)} Eintrag/Einträge</p>"
+            '<form method="post" class="row g-2 align-items-end mb-3">'
+            '<input type="hidden" name="action" value="add">'
+            '<div class="col-md-8">'
+            '<label class="form-label small">Knoten sperren</label>'
+            '<input type="text" name="node_id" class="form-control" '
+            'placeholder="Dezimal-ID oder !a1b2c3d4" required>'
+            "</div>"
+            '<div class="col-md-4">'
+            '<button type="submit" class="btn btn-danger w-100">Hinzufügen</button>'
+            "</div></form>"
+            '<div class="table-scroll"><table class="nodes-table table-dark table-bordered">'
+            "<thead><tr><th>Node-ID</th><th>Hex</th><th>Anzeige</th><th></th></tr></thead>"
+            f"<tbody>{table}</tbody></table></div>"
+            '<form method="post" class="mt-3">'
+            '<input type="hidden" name="action" value="save">'
+            '<label class="form-label small">Banliste bearbeiten (eine Node-ID pro Zeile)</label>'
+            f'<textarea name="ban_list_text" rows="8" class="form-control font-monospace mb-2">'
+            f"{html_escape(list_text)}</textarea>"
+            '<div class="d-flex flex-wrap gap-2">'
+            '<button type="submit" class="btn btn-success">Speichern</button>'
+            "</div></form>"
+            '<form method="post" class="d-inline ms-2">'
+            '<input type="hidden" name="action" value="reload">'
+            '<button type="submit" class="btn btn-outline-secondary">Von Datei neu laden</button>'
+            "</form>"
+            '<p class="small text-muted mt-2 mb-0">'
+            "Gesperrte Knoten können keine BBS-Beiträge mehr posten. "
+            "Im Mesh: <code>bannode add/remove/list</code> (nur per DM, Admin).</p>"
+            f"{auto_html}"
+        )
+
+        return _render_admin_template(
+            """
+  {{ body|safe }}
+""",
+            title="Banliste",
+            active_tab="banlist",
+            body=Markup(body),
+        )
+
     @app.route("/bbs")
     @login_required
     def bbs_index():
