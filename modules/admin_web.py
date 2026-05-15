@@ -197,6 +197,9 @@ def create_app(
                 active_nav="stats",
                 particles=True,
                 dash_view_tabs=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
             )
             + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
             + '<div class="home-content container-fluid py-4">'
@@ -290,25 +293,21 @@ def create_app(
         return _render_admin_template(
             host_block
             + """
+<p class="text-muted small mb-3">
+  NodeDB, MOTD, Scheduler, BBS und Logs findest du in den Tabs oben.
+</p>
 <div class="row g-3">
   <div class="col-md-6">
-    <h3 class="h6 section-title"><i class="bi bi-file-earmark-text me-2"></i>Inhalte</h3>
+    <h3 class="h6 section-title"><i class="bi bi-file-earmark-text me-2"></i>Texte</h3>
     <a href="{{ url_for('edit', dateiname='direktnachricht') }}"
        class="btn btn-outline-secondary mb-2 w-100">Direktnachricht bearbeiten</a>
     <a href="{{ url_for('edit', dateiname='news') }}"
-       class="btn btn-outline-secondary mb-2 w-100">News bearbeiten</a>
-    <a href="{{ url_for('logs') }}"
-       class="btn btn-outline-secondary mb-2 w-100">Logdateien</a>
-    <a href="{{ url_for('live_messages') }}"
-       class="btn btn-outline-success w-100">Live: messages.log</a>
+       class="btn btn-outline-secondary w-100">News bearbeiten</a>
   </div>
   <div class="col-md-6">
-    <h3 class="h6 section-title"><i class="bi bi-broadcast me-2"></i>Bot-Steuerung</h3>
-    <a href="{{ url_for('nodes_list') }}" class="btn btn-outline-success mb-2 w-100">NodeDB</a>
-    <a href="{{ url_for('motd_edit') }}" class="btn btn-outline-success mb-2 w-100">MOTD</a>
-    <a href="{{ url_for('scheduler_edit') }}" class="btn btn-outline-success mb-2 w-100">Scheduler</a>
-    <a href="{{ url_for('bbs_index') }}" class="btn btn-outline-success mb-2 w-100">BBS öffentlich</a>
-    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-success w-100">BBS-DMs</a>
+    <h3 class="h6 section-title"><i class="bi bi-activity me-2"></i>Live</h3>
+    <a href="{{ url_for('live_messages') }}"
+       class="btn btn-outline-success w-100">messages.log (Auto-Refresh)</a>
   </div>
 </div>
 <p class="text-center mt-4 mb-0">
@@ -381,17 +380,13 @@ def create_app(
             for f in sorted(dateien_liste)
         )
 
-        return _render_admin_template(f"""
-    <div class="container text-center">
-      <h2 class="mb-4">📁 Alle Dateien im Log-Ordner</h2>
-      {items if items else "<p>Keine Dateien gefunden.</p>"}
-      <div class="mt-4">
-        <a href="{{{{url_for('choose')}}}}" class="btn btn-outline-light">
-          ⬅️ Zurück
-        </a>
-      </div>
-    </div>
-    """,
+        return _render_admin_template(
+            f"""
+<div class="text-center">
+  <p class="text-muted small mb-3">Ordner: <code>{html_escape(log_dir)}</code></p>
+  {items if items else "<p>Keine Dateien gefunden.</p>"}
+</div>
+""",
             title="Logdateien",
             active_tab="logs",
         )
@@ -409,13 +404,13 @@ def create_app(
         except OSError:
             inhalt = "[Fehler beim Öffnen der Datei]"
 
-        return _render_admin_template(f"""
-      <p class="text-muted small mb-2">Datei: <code>{html_escape(filename)}</code></p>
-      <pre class="admin-pre">{inhalt}</pre>
-      <div class="text-center mt-3">
-        <a href="{{{{ url_for('logs') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
-      </div>
-    """,
+        return _render_admin_template(
+            f"""
+<div class="admin-log-view">
+  <p class="text-muted small mb-2">Datei: <code>{html_escape(filename)}</code></p>
+  <pre class="admin-pre">{html_escape(inhalt)}</pre>
+</div>
+""",
             title=f"Log: {filename}",
             active_tab="logs",
         )
@@ -459,12 +454,11 @@ def create_app(
 
         return _render_admin_template(
             f"""
+<div class="admin-log-view">
 <meta http-equiv="refresh" content="5">
   {hint}
   <pre class="admin-pre">{html_escape(inhalt)}</pre>
-  <div class="text-center mt-3">
-    <a href="{{{{ url_for('logs') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
-  </div>
+</div>
 """,
             title="Live messages.log",
             active_tab="logs",

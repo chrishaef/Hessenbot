@@ -83,13 +83,19 @@ body,
 
 /* ─── Portal shell ──────────────────────────────────────── */
 .portal-wrapper {
+  display: flex;
+  flex-direction: column;
   height: calc(100vh - var(--nav-h));
   overflow: hidden;
 }
 
 .portal-main {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--body-bg);
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Frame mode: no scroll, children fill height */
@@ -160,6 +166,14 @@ body,
   font-size: 0.72rem;
   color: #6c757d;
   margin-top: 0.1rem;
+}
+
+.metric-sub {
+  min-height: 1.15em;
+}
+
+[data-dash-panel="stats"] > .row.g-2 > [class*="col-"] {
+  display: flex;
 }
 
 /* Smaller dual metrics */
@@ -463,7 +477,7 @@ body,
 }
 
 .portal-wrapper--admin .portal-main {
-  min-height: calc(100vh - var(--nav-h) - 2rem);
+  min-height: 0;
 }
 
 .portal-admin-content {
@@ -471,6 +485,7 @@ body,
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+  padding-bottom: 2rem;
 }
 
 .portal-card {
@@ -586,12 +601,15 @@ body.page-login {
 
 /* Dashboard layout — full page scroll (no clipped viewport) */
 .portal-wrapper.portal-wrapper--stats {
+  display: block;
   height: auto;
   min-height: calc(100vh - var(--nav-h));
   overflow: visible;
 }
 
 .portal-wrapper.portal-wrapper--stats .portal-main {
+  flex: none;
+  min-height: 0;
   height: auto;
   overflow: visible;
 }
@@ -685,6 +703,24 @@ body.page-login {
   display: none !important;
 }
 
+.dash-dm-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dash-dm-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-dm-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
 .motd-box {
   background: var(--card-bg-muted);
   border-radius: 8px;
@@ -748,6 +784,9 @@ table.nodes-table td.cell-dm-text {
 }
 
 pre.admin-pre {
+  display: block;
+  max-height: min(72vh, calc(100vh - var(--nav-h) - 14rem));
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   background: var(--card-bg-muted);
@@ -756,6 +795,14 @@ pre.admin-pre {
   border-radius: 8px;
   border: 1px solid var(--card-border);
   font-size: 0.95rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-log-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
 }
 
 .portal-main .container:not(.portal-card .container) {
