@@ -188,14 +188,13 @@ def create_app(
 
         try:
             data = collect_dashboard(log_dir)
-            body = render_dashboard_page(data, admin_url=url_for("admin_login"))
+            body = render_dashboard_page(data)
         except Exception as e:
             body = f'<p class="alert alert-danger">Dashboard: {html_escape(str(e))}</p>'
         return (
             portal_shell_start(
                 title="Statistik – Hessenbot",
                 active_nav="stats",
-                admin_href=url_for("admin_login"),
                 particles=True,
             )
             + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
