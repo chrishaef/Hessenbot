@@ -267,8 +267,9 @@ ignoreUSGSWords = test,advisory
 
 # Use Germany/DE Alert Broadcast Data
 enableDEalerts = True
-# comma separated list of regional codes trigger local alert.
-# find your regional codet at https://www.xrepository.de/api/xrepository/urn:de:bund:destatis:bevoelkerungsstatistik:schluessel:rs_2021-07-31/download/Regionalschl_ssel_2021-07-31.json
+# Comma-separated Amtlicher Regionalschlüssel (ARS) for NINA/Warnung Bund (dealert).
+# Keys are normalized to Kreisebene (last 7 digits -> 0000000); Gemeinde-IDs are OK.
+# Lookup: https://www.xrepository.de/api/xrepository/urn:de:bund:destatis:bevoelkerungsstatistik:schluessel:rs_2021-07-31/download/Regionalschl_ssel_2021-07-31.json
 myRegionalKeysDE = 066310009009,066310008008,066110000000,064120000000 
 
 # Alerts are sent to the emergency_handler interface and channel duplicate messages are send here if set

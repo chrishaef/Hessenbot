@@ -13,6 +13,24 @@ from modules.settings import urlTimeoutSeconds, NO_ALERTS, myRegionalKeysDE
 trap_list_location_eu = ("ukalert",)
 trap_list_location_de = ("dealert",)
 
+# Official NINA API (nina.api.proxy.bund.dev no longer resolves).
+NINA_API_BASE = "https://warnung.bund.de/api31"
+
+
+def normalize_nina_ars(regional_key: str) -> str:
+    """NINA dashboard data is only available at Kreisebene (last 7 ARS digits zeroed)."""
+    key = (regional_key or "").strip()
+    if not key.isdigit():
+        return key
+    if len(key) < 12:
+        key = key.zfill(12)
+    elif len(key) > 12:
+        key = key[:12]
+    if len(key) >= 7:
+        return key[:-7] + "0000000"
+    return key
+
+
 def get_govUK_alerts(lat, lon):
     try:
         # get UK.gov alerts
@@ -31,16 +49,41 @@ def get_govUK_alerts(lat, lon):
         return NO_ALERTS
 
 def get_nina_alerts():
+    alerts = []
+    seen_ars: set[str] = set()
     try:
-        # get api.bund.dev alerts
-        alerts = []
-        for regionalKey in myRegionalKeysDE:
-            url = ("https://nina.api.proxy.bund.dev/api31/dashboard/" + regionalKey + ".json")
-            response = requests.get(url, timeout=urlTimeoutSeconds)
-            data = response.json()
-
+        for regional_key in myRegionalKeysDE:
+            raw = (regional_key or "").strip()
+            if not raw:
+                continue
+            ars = normalize_nina_ars(raw)
+            if ars in seen_ars:
+                continue
+            seen_ars.add(ars)
+            url = f"{NINA_API_BASE}/dashboard/{ars}.json"
+            try:
+                response = requests.get(url, timeout=urlTimeoutSeconds)
+                response.raise_for_status()
+                data = response.json()
+            except requests.RequestException as exc:
+                logger.warning(
+                    f"NINA DE alerts for {raw} (ARS {ars}): {exc}"
+                )
+                continue
+            if not isinstance(data, list):
+                logger.warning(
+                    f"NINA DE alerts for {raw}: unexpected response type {type(data).__name__}"
+                )
+                continue
             for item in data:
-                title = item["i18nTitle"]["de"]
+                if not isinstance(item, dict):
+                    continue
+                title_obj = item.get("i18nTitle") or {}
+                title = (
+                    title_obj.get("de")
+                    if isinstance(title_obj, dict)
+                    else None
+                ) or item.get("title") or "Warnung"
                 alerts.append(f"🚨 {title}")
         return "\n".join(alerts) if alerts else NO_ALERTS
     except Exception as e:
