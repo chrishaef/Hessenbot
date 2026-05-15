@@ -281,6 +281,7 @@ def _empty_log_stats() -> Dict[str, Any]:
         "command_timestamps": [],
         "message_timestamps": [],
         "recent_messages": [],
+        "bbs_dm_delivered": [],
         "firmware1_version": "—",
         "firmware2_version": "—",
         "node1_name": "—",
@@ -322,6 +323,7 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     nodes = _NodeDirectory()
     warnings: List[str] = []
     errors: List[str] = []
+    bbs_dm_delivered: List[Dict[str, Any]] = []
     timestamp = None
 
     for line in lines:
@@ -387,6 +389,18 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
             stats["bbs_messages"] = int(bbs_match.group(1))
             stats["messages_waiting"] = int(bbs_match.group(2))
 
+        if "BBS DM Delivery:" in plain and timestamp:
+            dm_del = re.search(r"BBS DM Delivery:\s*(.+?)\s+For:\s*(.+)$", plain)
+            if dm_del:
+                body = dm_del.group(1).strip()
+                bbs_dm_delivered.append(
+                    {
+                        "time": timestamp.isoformat(),
+                        "text": body,
+                        "to": dm_del.group(2).strip()[:80],
+                    }
+                )
+
         if "| Telemetry:" in line:
             telemetry_match = re.search(
                 r"Telemetry:(\d+) numPacketsRx:(\d+).*?totalNodes:(\d+) Online:(\d+).*?"
@@ -442,6 +456,7 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     stats["command_timestamps"] = command_timestamps[-40:]
     stats["message_timestamps"] = message_timestamps[-40:]
     stats["recent_messages"] = recent_messages[-40:]
+    stats["bbs_dm_delivered"] = bbs_dm_delivered[-25:]
     return stats
 
 
@@ -531,7 +546,7 @@ def _load_bbs_dm_queue() -> List[List[Any]]:
     return rows[1:] if len(rows) > 1 else []
 
 
-def _format_bbs_dm_line(row: List[Any]) -> str:
+def _format_bbs_dm_waiting_line(row: List[Any]) -> str:
     to_n = row[0] if len(row) > 0 else 0
     text = (str(row[1]).strip().replace("\n", " ") if len(row) > 1 else "")[:100]
     if len(row) > 1 and len(str(row[1])) > 100:
@@ -541,25 +556,54 @@ def _format_bbs_dm_line(row: List[Any]) -> str:
     return f"An {to_h} · Von {from_n}" + (f" — {text}" if text else "")
 
 
+def _format_bbs_dm_delivered_line(entry: Dict[str, Any]) -> str:
+    when_raw = str(entry.get("time") or "")
+    try:
+        when = datetime.fromisoformat(when_raw).strftime("%d.%m %H:%M")
+    except ValueError:
+        when = when_raw[-8:] if when_raw else ""
+    to_name = str(entry.get("to") or "?").strip()
+    text = str(entry.get("text") or "").strip().replace("\n", " ")[:100]
+    if len(str(entry.get("text") or "")) > 100:
+        text += "…"
+    line = f"{when} · An {to_name}" if when else f"An {to_name}"
+    if text:
+        line += f" — {text}"
+    return line
+
+
+def _bbs_dm_status_badge(status: str) -> str:
+    if status == "delivered":
+        return '<span class="badge text-bg-success dash-dm-badge">zugestellt</span>'
+    return '<span class="badge text-bg-warning text-dark dash-dm-badge">wartend</span>'
+
+
 def _render_bbs_dm_queue_html(
-    queue: List[List[Any]], *, enabled: bool, waiting_hint: str = ""
+    queue: List[List[Any]],
+    delivered: List[Dict[str, Any]],
+    *,
+    enabled: bool,
 ) -> str:
     if not enabled:
         return '<p class="text-muted small mb-0">Mesh-BBS ist deaktiviert.</p>'
-    note = (
-        f'<p class="small text-muted mb-2">{html_escape(waiting_hint)}</p>'
-        if waiting_hint
-        else ""
-    )
-    if not queue:
-        return note + '<p class="text-muted small mb-0">Keine DMs in der Warteschlange.</p>'
-    lines = [_format_bbs_dm_line(r) for r in reversed(queue[-25:])]
-    return (
-        note
-        + '<ul class="dash-list dash-scroll mb-0">'
-        + "".join(f"<li>{html_escape(line)}</li>" for line in lines)
-        + "</ul>"
-    )
+    items: List[str] = []
+    for row in reversed(queue[-25:]):
+        line = _format_bbs_dm_waiting_line(row)
+        items.append(
+            f'<li class="dash-dm-item">'
+            f'<span class="dash-dm-text">{html_escape(line)}</span>'
+            f"{_bbs_dm_status_badge('waiting')}</li>"
+        )
+    for entry in reversed(delivered[-15:]):
+        line = _format_bbs_dm_delivered_line(entry)
+        items.append(
+            f'<li class="dash-dm-item">'
+            f'<span class="dash-dm-text">{html_escape(line)}</span>'
+            f"{_bbs_dm_status_badge('delivered')}</li>"
+        )
+    if not items:
+        return '<p class="text-muted small mb-0">Keine BBS-DMs.</p>'
+    return '<ul class="dash-list dash-scroll mb-0">' + "".join(items) + "</ul>"
 
 
 def _resolve_node_label(node_id: Any) -> str:
@@ -812,12 +856,12 @@ def collect_dashboard(log_dir: str) -> Dict[str, Any]:
 
 def _metric_card(title: str, value: str, sub: str = "", accent: str = "") -> str:
     val_cls = f" metric-value {accent}" if accent else "metric-value"
-    sub_html = f'<div class="metric-label">{html_escape(sub)}</div>' if sub else ""
+    sub_text = html_escape(sub) if sub else "&nbsp;"
     return f"""
-    <div class="metric-card">
+    <div class="metric-card h-100">
       <div class="metric-label">{html_escape(title)}</div>
       <div class="{val_cls.strip()}">{html_escape(value)}</div>
-      {sub_html}
+      <div class="metric-label metric-sub">{sub_text}</div>
     </div>"""
 
 
@@ -988,17 +1032,12 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     )
     bbs_count = len(bbs_public)
     bbs_dm_queue = rt.get("bbs_dm_queue") or []
+    bbs_dm_delivered = log.get("bbs_dm_delivered") or []
     dm_count = len(bbs_dm_queue)
-    dm_hint_parts: List[str] = []
-    if log.get("bbs_messages"):
-        dm_hint_parts.append(f"{log['bbs_messages']} öffentliche BBS-Einträge gesamt")
-    if log.get("messages_waiting") is not None:
-        dm_hint_parts.append(f"{log['messages_waiting']} laut Log wartend")
-    dm_hint = " · ".join(dm_hint_parts)
     bbs_dm_html = _render_bbs_dm_queue_html(
         bbs_dm_queue,
+        bbs_dm_delivered,
         enabled=bool(rt.get("bbs_enabled")),
-        waiting_hint=dm_hint,
     )
     toplist_html = _render_toplist_html(cmd, lb)
     leaderboard_html = _render_mesh_leaderboard_html(lb)
@@ -1030,7 +1069,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
 
 <div class="dash-panels">
 <div data-dash-panel="stats">
-<div class="row g-2 mb-4">{"".join(f'<div class="col-6 col-md-4 col-xl-3">{c}</div>' for c in cards)}</div>
+<div class="row g-2 mb-4">{"".join(f'<div class="col-6 col-md-4 col-xl-3 d-flex">{c}</div>' for c in cards)}</div>
 
 <div class="section-card mb-4">
   <h2 class="section-title h5"><i class="bi bi-chat-quote me-2 text-success"></i>Message of the Day</h2>
@@ -1105,7 +1144,6 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     <i class="bi bi-envelope-paper me-2 text-success"></i>BBS-DM Warteschlange
     <span class="badge text-bg-secondary ms-2 fw-normal">{dm_count}</span>
   </h2>
-  <p class="small text-muted mb-2">Ausstehende Direktnachrichten · neueste zuerst</p>
   {bbs_dm_html}
 </div>
 </div>
