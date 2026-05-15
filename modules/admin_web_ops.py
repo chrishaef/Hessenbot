@@ -29,6 +29,37 @@ def iter_radio_interfaces() -> List[int]:
     return out
 
 
+def _parse_node_gps(node: Dict[str, Any]) -> Tuple[bool, Optional[float], Optional[float]]:
+    """True if NodeDB has a non-zero latitude/longitude on the node."""
+    pos = node.get("position")
+    if not pos or not isinstance(pos, dict):
+        return False, None, None
+    if pos.get("latitude") is None or pos.get("longitude") is None:
+        return False, None, None
+    try:
+        lat = float(pos["latitude"])
+        lon = float(pos["longitude"])
+    except (TypeError, ValueError):
+        return False, None, None
+    if lat == 0.0 and lon == 0.0:
+        return False, None, None
+    return True, lat, lon
+
+
+def format_node_location_html(
+    has_gps: bool,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+) -> str:
+    if not has_gps or lat is None or lon is None:
+        return '<span class="text-muted" title="Keine GPS-Position in der NodeDB">—</span>'
+    coords = html.escape(f"{lat:.5f}, {lon:.5f}")
+    return (
+        f'<span class="badge bg-success me-1" title="GPS in NodeDB">GPS</span>'
+        f'<code class="small text-nowrap">{coords}</code>'
+    )
+
+
 def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     """Return (error_message or None, rows dicts for template)."""
     from modules.system import decimal_to_hex
@@ -56,6 +87,7 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
             lh_s = "—"
         snr = node.get("snr", "")
         is_self = num == myn
+        has_gps, lat, lon = _parse_node_gps(node)
         try:
             node_id_disp = html.escape(decimal_to_hex(int(num)))
         except (TypeError, ValueError):
@@ -70,6 +102,8 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
                 "lastHeard_raw": lh or 0,
                 "snr": snr,
                 "is_self": is_self,
+                "has_gps": has_gps,
+                "location_html": format_node_location_html(has_gps, lat, lon),
             }
         )
     rows.sort(key=lambda r: r.get("lastHeard_raw", 0), reverse=True)
@@ -93,6 +127,7 @@ def nodedb_row_search_text(row: Dict[str, Any]) -> str:
         text = html.unescape(str(val)).strip()
         if text and text != "—":
             parts.append(text)
+    parts.append("gps" if row.get("has_gps") else "kein gps")
     return " ".join(parts).lower()
 
 
