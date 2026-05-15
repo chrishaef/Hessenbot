@@ -735,24 +735,48 @@ def _resolve_node_label(node_id: Any) -> str:
 
 
 def _load_mesh_leaderboard() -> Dict[str, Any]:
+    """Load mesh leaderboard for the dashboard.
+
+    Uses the bot's loadLeaderboard() when available. Always merges message-count
+    aggregates from repo-root ``data/leaderboard.pkl`` when in-memory counts are
+    empty (e.g. web process had wrong CWD before system.loadLeaderboard used
+    path_in_repo).
+    """
+    lb: Dict[str, Any] = {}
     try:
         from modules.system import loadLeaderboard, meshLeaderboard
 
         loadLeaderboard()
         if meshLeaderboard:
-            return dict(meshLeaderboard)
+            lb = dict(meshLeaderboard)
     except Exception:
         pass
+
     pkl = path_in_repo("data/leaderboard.pkl")
-    if os.path.isfile(pkl):
-        try:
-            with open(pkl, "rb") as f:
-                loaded = pickle.load(f)
-            if isinstance(loaded, dict):
-                return loaded
-        except Exception:
-            pass
-    return {}
+    if not os.path.isfile(pkl):
+        return lb
+
+    try:
+        with open(pkl, "rb") as f:
+            disk = pickle.load(f)
+        if not isinstance(disk, dict):
+            return lb
+
+        local_mc = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
+        disk_mc = disk.get("nodeMessageCounts") if isinstance(disk.get("nodeMessageCounts"), dict) else {}
+        if disk_mc and not local_mc:
+            lb["nodeMessageCounts"] = disk_mc
+
+        local_tmc = lb.get("nodeTMessageCounts") if isinstance(lb.get("nodeTMessageCounts"), dict) else {}
+        disk_tmc = disk.get("nodeTMessageCounts") if isinstance(disk.get("nodeTMessageCounts"), dict) else {}
+        if disk_tmc and not local_tmc:
+            lb["nodeTMessageCounts"] = disk_tmc
+
+        if not lb:
+            lb = disk
+    except Exception:
+        pass
+    return lb
 
 
 def _leaderboard_web_rows(lb: Dict[str, Any]) -> List[str]:
@@ -799,7 +823,18 @@ def _render_mesh_leaderboard_html(lb: Dict[str, Any]) -> str:
 def _render_toplist_html(cmd: Counter, lb: Dict[str, Any]) -> str:
     cmd_rows = cmd.most_common(10)
     msg_counts = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
-    top_nodes = sorted(msg_counts.items(), key=lambda x: int(x[1]), reverse=True)[:10]
+
+    def _count_val(x: object) -> int:
+        try:
+            return int(x)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0
+
+    top_nodes = sorted(
+        ((k, v) for k, v in msg_counts.items() if _count_val(v) > 0),
+        key=lambda x: _count_val(x[1]),
+        reverse=True,
+    )[:10]
 
     cmd_items = (
         "".join(
