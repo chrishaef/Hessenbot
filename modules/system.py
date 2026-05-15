@@ -16,6 +16,9 @@ import io # for suppressing output on watchdog
 # homebrew 'modules'
 from modules.settings import *
 from modules.log import logger, getPrettyTime, CustomFormatter
+from modules.paths import path_in_repo
+
+_LEADERBOARD_PKL = path_in_repo("data/leaderboard.pkl")
 
 # Global Variables
 trap_list = ("cmd","cmd?","bannode",) # base commands
@@ -2409,7 +2412,10 @@ def saveLeaderboard():
     # save the meshLeaderboard to a pickle file
     global meshLeaderboard
     try:
-        with open('data/leaderboard.pkl', 'wb') as f:
+        import os
+
+        os.makedirs(os.path.dirname(_LEADERBOARD_PKL), exist_ok=True)
+        with open(_LEADERBOARD_PKL, "wb") as f:
             pickle.dump(meshLeaderboard, f)
         if logMetaStats:
             logger.debug("System: Mesh Leaderboard saved to leaderboard.pkl")
@@ -2421,7 +2427,7 @@ def saveLeaderboard():
 def loadLeaderboard():
     global meshLeaderboard
     try:
-        with open('data/leaderboard.pkl', 'rb') as f:
+        with open(_LEADERBOARD_PKL, "rb") as f:
             loaded = pickle.load(f)
         # Merge with current default structure to add any new keys
         initializeMeshLeaderboard()  # sets meshLeaderboard to default structure
