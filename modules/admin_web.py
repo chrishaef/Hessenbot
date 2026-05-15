@@ -391,10 +391,11 @@ def create_app(
             except ValueError:
                 flash("Interface/Kanal ungültig.", "error")
                 return redirect(url_for("edit_news"))
-            err = ops.validate_broadcast_schedule(mode, interval, sched_time)
-            if enabled and err:
-                flash(err, "error")
-                return redirect(url_for("edit_news"))
+            if enabled:
+                err = ops.validate_broadcast_schedule(mode, interval, sched_time)
+                if err:
+                    flash(err, "error")
+                    return redirect(url_for("edit_news"))
             try:
                 with open(pfad, "w", encoding="utf-8") as f:
                     f.write(request.form.get("text", ""))
@@ -680,10 +681,11 @@ def create_app(
             except ValueError:
                 flash("Interface/Kanal ungültig.", "error")
                 return redirect(url_for("motd_edit"))
-            err = ops.validate_broadcast_schedule(mode, interval, sched_time)
-            if enabled and err:
-                flash(err, "error")
-                return redirect(url_for("motd_edit"))
+            if enabled:
+                err = ops.validate_broadcast_schedule(mode, interval, sched_time)
+                if err:
+                    flash(err, "error")
+                    return redirect(url_for("motd_edit"))
             try:
                 ops.save_motd_to_config(text)
                 ops.save_motd_broadcast_to_config(
