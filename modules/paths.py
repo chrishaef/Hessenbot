@@ -20,3 +20,33 @@ def path_in_repo(rel_or_abs: str) -> str:
     if os.path.isabs(rel_or_abs):
         return os.path.normpath(rel_or_abs)
     return os.path.normpath(os.path.join(repo_root(), rel_or_abs))
+
+
+def runtime_writable_paths_from_config(config_ini: str | None = None) -> list[str]:
+    """Paths the bot / web admin may write (DM alert, news, ban list, …)."""
+    import configparser
+
+    root = repo_root()
+    cfg_path = config_ini or os.path.join(root, "config.ini")
+    paths: set[str] = set()
+    for rel in (
+        "data/bbs_ban_list.txt",
+        "data/alert.txt",
+        "data/news.txt",
+        "alert.txt",
+    ):
+        paths.add(path_in_repo(rel))
+    if os.path.isfile(cfg_path):
+        parser = configparser.ConfigParser()
+        parser.read(cfg_path, encoding="utf-8")
+        for section, key in (
+            ("fileMon", "file_path"),
+            ("webAdmin", "alert_file"),
+            ("fileMon", "news_file_path"),
+            ("webAdmin", "news_file"),
+        ):
+            if parser.has_option(section, key):
+                value = parser.get(section, key).strip()
+                if value:
+                    paths.add(path_in_repo(value))
+    return sorted(paths)

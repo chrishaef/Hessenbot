@@ -326,7 +326,12 @@ def create_app(
                 with open(pfad, "w", encoding="utf-8") as f:
                     f.write(request.form.get("text", ""))
             except OSError as e:
-                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                from modules import admin_web_ops as ops
+
+                if getattr(e, "errno", None) == 13:
+                    flash(ops.runtime_file_permission_hint(pfad), "error")
+                else:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
                 return redirect(request.url)
             flash(f"{page_title} gespeichert.", "success")
             return redirect(request.url)
@@ -404,7 +409,10 @@ def create_app(
                 )
                 ops.rebuild_scheduler_jobs()
             except OSError as e:
-                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                if getattr(e, "errno", None) == 13:
+                    flash(ops.runtime_file_permission_hint(pfad), "error")
+                else:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
                 return redirect(url_for("edit_news"))
             except Exception as e:
                 flash(f"Speichern fehlgeschlagen: {e!s}", "error")
