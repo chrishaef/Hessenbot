@@ -122,6 +122,8 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "valert": lambda: get_volcano_usgs(),
     "verse": lambda: read_verse(),
     "videopoker": lambda: handleVideoPoker(message, message_from_id, deviceID),
+    "warning": lambda: handle_warning(message_from_id, deviceID),
+    "dealert": lambda: handle_dealert(message_from_id, deviceID),
     "whereami": lambda: handle_whereami(message_from_id, deviceID, channel_number),
     "whoami": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
     "whois": lambda: handle_whois(message, deviceID, channel_number, message_from_id),
@@ -1372,10 +1374,21 @@ def handle_wxc(message_from_id, deviceID, cmd, days=None, vox=False):
         weather = get_NOAAweather(str(location[0]), str(location[1]), report_days=days)
     return weather
 
+def handle_dealert(message_from_id, deviceID):
+    if my_settings.enableDEalerts:
+        return get_nina_alerts()
+    return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
+
+def handle_warning(message_from_id, deviceID):
+    if not my_settings.enableDEalerts:
+        return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
+    location = get_node_location(message_from_id, deviceID)
+    return get_nina_alerts_for_location(str(location[0]), str(location[1]))
+
 def handle_emergency_alerts(message, message_from_id, deviceID):
     location = get_node_location(message_from_id, deviceID)
     if my_settings.enableDEalerts:
-        # nina Alerts
+        # nina Alerts (config regions); use !warning for node location
         return get_nina_alerts()
     if message.lower().startswith("ealert"):
         # Detailed alert FEMA
