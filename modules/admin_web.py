@@ -270,11 +270,20 @@ def create_app(
     @app.route("/choose")
     @login_required
     def choose():
-        from modules.web_dashboard import render_host_metrics_html
+        from modules.web_dashboard import (
+            collect_dashboard,
+            render_admin_log_alerts_html,
+            render_host_metrics_html,
+        )
 
+        dash = collect_dashboard(log_dir)
+        alerts_html = render_admin_log_alerts_html(dash["log"])
         host_block = f"""
 <h3 class="h6 section-title mb-3"><i class="bi bi-pc-display me-2 text-success"></i>Host</h3>
 {render_host_metrics_html()}
+<hr class="my-4">
+<h3 class="h6 section-title mb-3"><i class="bi bi-exclamation-triangle me-2 text-warning"></i>Log-Warnungen &amp; Fehler</h3>
+{alerts_html}
 <hr class="my-4">
 """
         return _render_admin_template(

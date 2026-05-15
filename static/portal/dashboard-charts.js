@@ -2,13 +2,27 @@
   function readChartData() {
     var el = document.getElementById("dash-chart-data");
     if (!el || !el.textContent) {
-      return { cmdLabels: [], cmdValues: [], msgLabels: [], msgValues: [] };
+      return {
+        cmdLabels: [],
+        cmdValues: [],
+        msgLabels: [],
+        msgValues: [],
+        activityLabels: [],
+        activityValues: [],
+      };
     }
     try {
       return JSON.parse(el.textContent);
     } catch (e) {
       console.error("dashboard-charts: invalid JSON", e);
-      return { cmdLabels: [], cmdValues: [], msgLabels: [], msgValues: [] };
+      return {
+        cmdLabels: [],
+        cmdValues: [],
+        msgLabels: [],
+        msgValues: [],
+        activityLabels: [],
+        activityValues: [],
+      };
     }
   }
 
@@ -80,6 +94,39 @@
           responsive: true,
           maintainAspectRatio: false,
           plugins: { legend: legend },
+        },
+      });
+    }
+
+    var activityEl = document.getElementById("activityChart");
+    if (activityEl && data.activityLabels && data.activityLabels.length) {
+      new Chart(activityEl, {
+        type: "line",
+        data: {
+          labels: data.activityLabels,
+          datasets: [
+            {
+              label: "Log-Zeilen / Stunde",
+              data: data.activityValues,
+              borderColor: "rgba(46, 125, 94, 1)",
+              backgroundColor: "rgba(46, 125, 94, 0.15)",
+              fill: true,
+              tension: 0.25,
+              pointRadius: 2,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: legend },
+          scales: {
+            x: {
+              ticks: { color: ticks, maxRotation: 45, minRotation: 0 },
+              grid: { color: gridColor },
+            },
+            y: { ticks: { color: ticks }, grid: { color: gridColor }, beginAtZero: true },
+          },
         },
       });
     }

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
 import platform
 import re
 import subprocess
@@ -444,6 +445,276 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     return stats
 
 
+def _load_bbs_public_messages() -> List[List[Any]]:
+    """Public BBS posts from live bot state or data/bbsdb.pkl."""
+    messages: List[List[Any]] = []
+    try:
+        import modules.bbstools as bbs
+
+        raw = getattr(bbs, "bbs_messages", None)
+        if raw:
+            messages = list(raw)
+    except Exception:
+        pass
+    if not messages:
+        pkl = path_in_repo("data/bbsdb.pkl")
+        if os.path.isfile(pkl):
+            try:
+                with open(pkl, "rb") as f:
+                    loaded = pickle.load(f)
+                if isinstance(loaded, list):
+                    messages = loaded
+            except Exception:
+                pass
+    return messages
+
+
+def _format_bbs_node_id(from_node: Any) -> str:
+    try:
+        return f"!{int(from_node):08x}"
+    except (TypeError, ValueError):
+        return str(from_node) if from_node else "?"
+
+
+def _format_bbs_public_line(entry: List[Any]) -> str:
+    mid = entry[0] if entry else "?"
+    subject = str(entry[1]).strip()[:120] if len(entry) > 1 else "—"
+    body = (str(entry[2]).strip().replace("\n", " ") if len(entry) > 2 else "")[:100]
+    if len(entry) > 2 and len(str(entry[2])) > 100:
+        body += "…"
+    from_node = _format_bbs_node_id(entry[3] if len(entry) > 3 else 0)
+    when_raw = str(entry[4]) if len(entry) > 4 else ""
+    try:
+        when = datetime.strptime(when_raw[:19], "%Y-%m-%d %H:%M:%S").strftime("%d.%m %H:%M")
+    except ValueError:
+        when = when_raw[-8:] if when_raw else ""
+    line = f"{when} · #{mid} · {subject} · {from_node}"
+    if body:
+        line += f" — {body}"
+    return line
+
+
+def _render_bbs_public_html(messages: List[List[Any]], *, enabled: bool) -> str:
+    if not enabled:
+        return '<p class="text-muted small mb-0">Mesh-BBS ist deaktiviert.</p>'
+    if not messages:
+        return '<p class="text-muted small mb-0">Keine öffentlichen Nachrichten.</p>'
+    lines = [_format_bbs_public_line(m) for m in reversed(messages[-25:])]
+    return (
+        '<ul class="dash-list dash-scroll mb-0">'
+        + "".join(f"<li>{html_escape(line)}</li>" for line in lines)
+        + "</ul>"
+    )
+
+
+def _load_bbs_dm_queue() -> List[List[Any]]:
+    """Pending BBS DMs (without internal placeholder row 0)."""
+    rows: List[List[Any]] = []
+    try:
+        import modules.bbstools as bbs
+
+        raw = list(getattr(bbs, "bbs_dm", None) or [])
+        if raw:
+            rows = raw
+    except Exception:
+        pass
+    if len(rows) <= 1:
+        pkl = path_in_repo("data/bbsdm.pkl")
+        if os.path.isfile(pkl):
+            try:
+                with open(pkl, "rb") as f:
+                    loaded = pickle.load(f)
+                if isinstance(loaded, list) and loaded:
+                    rows = loaded
+            except Exception:
+                pass
+    return rows[1:] if len(rows) > 1 else []
+
+
+def _format_bbs_dm_line(row: List[Any]) -> str:
+    to_n = row[0] if len(row) > 0 else 0
+    text = (str(row[1]).strip().replace("\n", " ") if len(row) > 1 else "")[:100]
+    if len(row) > 1 and len(str(row[1])) > 100:
+        text += "…"
+    from_n = _format_bbs_node_id(row[2] if len(row) > 2 else 0)
+    to_h = _format_bbs_node_id(to_n)
+    return f"An {to_h} · Von {from_n}" + (f" — {text}" if text else "")
+
+
+def _render_bbs_dm_queue_html(
+    queue: List[List[Any]], *, enabled: bool, waiting_hint: str = ""
+) -> str:
+    if not enabled:
+        return '<p class="text-muted small mb-0">Mesh-BBS ist deaktiviert.</p>'
+    note = (
+        f'<p class="small text-muted mb-2">{html_escape(waiting_hint)}</p>'
+        if waiting_hint
+        else ""
+    )
+    if not queue:
+        return note + '<p class="text-muted small mb-0">Keine DMs in der Warteschlange.</p>'
+    lines = [_format_bbs_dm_line(r) for r in reversed(queue[-25:])]
+    return (
+        note
+        + '<ul class="dash-list dash-scroll mb-0">'
+        + "".join(f"<li>{html_escape(line)}</li>" for line in lines)
+        + "</ul>"
+    )
+
+
+def _resolve_node_label(node_id: Any) -> str:
+    if node_id is None:
+        return "—"
+    try:
+        from modules.system import get_name_from_number
+
+        name = get_name_from_number(int(node_id), "short", 1)
+        if name and str(name).strip() and str(name) != str(node_id):
+            return f"{name} · !{int(node_id):08x}"
+    except Exception:
+        pass
+    try:
+        return f"!{int(node_id):08x}"
+    except (TypeError, ValueError):
+        return str(node_id)
+
+
+def _load_mesh_leaderboard() -> Dict[str, Any]:
+    try:
+        from modules.system import loadLeaderboard, meshLeaderboard
+
+        loadLeaderboard()
+        if meshLeaderboard:
+            return dict(meshLeaderboard)
+    except Exception:
+        pass
+    pkl = path_in_repo("data/leaderboard.pkl")
+    if os.path.isfile(pkl):
+        try:
+            with open(pkl, "rb") as f:
+                loaded = pickle.load(f)
+            if isinstance(loaded, dict):
+                return loaded
+        except Exception:
+            pass
+    return {}
+
+
+def _leaderboard_web_rows(lb: Dict[str, Any]) -> List[str]:
+    """Human-readable mesh leaderboard lines for the public dashboard."""
+    specs = [
+        ("mostMessages", "💬 Meiste Nachrichten", lambda r: str(int(r["value"]))),
+        ("mostTMessages", "📊 Meiste Telemetrie", lambda r: str(int(r["value"]))),
+        ("lowestBattery", "🪫 Niedrigster Akku", lambda r: f"{round(float(r['value']), 1)} %"),
+        ("longestUptime", "🕰️ Längste Laufzeit", lambda r: str(int(float(r["value"])))),
+        ("highestDBm", "📶 Bestes SNR", lambda r: f"{r['value']} dB"),
+        ("weakestDBm", "📶 Schwächstes SNR", lambda r: f"{r['value']} dB"),
+        ("fastestSpeed", "🚓 Höchstgeschwindigkeit", lambda r: f"{round(float(r['value']), 1)} km/h"),
+        ("highestAltitude", "🚀 Höchste Höhe", lambda r: f"{int(round(float(r['value'])))} m"),
+        ("coldestTemp", "🥶 Kälteste Temperatur", lambda r: f"{round(float(r['value']), 1)} °C"),
+        ("hottestTemp", "🥵 Heißeste Temperatur", lambda r: f"{round(float(r['value']), 1)} °C"),
+    ]
+    lines: List[str] = []
+    for key, title, fmt in specs:
+        rec = lb.get(key)
+        if not isinstance(rec, dict) or rec.get("nodeID") is None:
+            continue
+        if key == "lowestBattery" and float(rec.get("value", 101)) >= 101:
+            continue
+        if key == "coldestTemp" and float(rec.get("value", 999)) >= 999:
+            continue
+        if key == "hottestTemp" and float(rec.get("value", -999)) <= -999:
+            continue
+        node = _resolve_node_label(rec["nodeID"])
+        lines.append(f"{title}: {fmt(rec)} · {node}")
+    return lines
+
+
+def _render_mesh_leaderboard_html(lb: Dict[str, Any]) -> str:
+    lines = _leaderboard_web_rows(lb)
+    if not lines:
+        return '<p class="text-muted small mb-0">Noch keine Leaderboard-Daten.</p>'
+    return (
+        '<ul class="dash-list dash-scroll mb-0">'
+        + "".join(f"<li>{html_escape(line)}</li>" for line in lines)
+        + "</ul>"
+    )
+
+
+def _render_toplist_html(cmd: Counter, lb: Dict[str, Any]) -> str:
+    cmd_rows = cmd.most_common(10)
+    msg_counts = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
+    top_nodes = sorted(msg_counts.items(), key=lambda x: int(x[1]), reverse=True)[:10]
+
+    cmd_items = (
+        "".join(
+            f"<li>{html_escape(name)} · {cnt}</li>" for name, cnt in cmd_rows
+        )
+        if cmd_rows
+        else '<li class="text-muted">Keine Befehle im Log</li>'
+    )
+    node_items = (
+        "".join(
+            f"<li>{html_escape(_resolve_node_label(nid))} · {cnt}</li>"
+            for nid, cnt in top_nodes
+        )
+        if top_nodes
+        else '<li class="text-muted">Noch keine Mesh-Zähler</li>'
+    )
+    return f"""
+<div class="row g-3">
+  <div class="col-md-6">
+    <h3 class="h6 text-muted mb-2">Top-Befehle (Log)</h3>
+    <ul class="dash-list dash-scroll mb-0">{cmd_items}</ul>
+  </div>
+  <div class="col-md-6">
+    <h3 class="h6 text-muted mb-2">Aktivste Knoten (Mesh)</h3>
+    <ul class="dash-list dash-scroll mb-0">{node_items}</ul>
+  </div>
+</div>
+"""
+
+
+def _activity_series(hourly: Dict[str, int], *, hours: int = 48) -> tuple[List[str], List[int]]:
+    if not hourly:
+        return [], []
+    keys = sorted(hourly.keys())[-hours:]
+    labels: List[str] = []
+    values: List[int] = []
+    for key in keys:
+        try:
+            dt = datetime.strptime(key, "%Y-%m-%d %H:00:00")
+            labels.append(dt.strftime("%d.%m %H:%M"))
+        except ValueError:
+            labels.append(key[-11:] if len(key) > 11 else key)
+        values.append(int(hourly[key]))
+    return labels, values
+
+
+def render_admin_log_alerts_html(log: Dict[str, Any]) -> str:
+    """Recent warnings/errors from meshbot.log for the admin overview."""
+    warnings = [_strip_ansi(str(w)) for w in (log.get("warnings") or [])[:8]]
+    errors = [_strip_ansi(str(e)) for e in (log.get("errors") or [])[:8]]
+    if not warnings and not errors:
+        return (
+            '<p class="text-muted small mb-0">'
+            "Keine Warnungen oder Fehler im aktuellen Log-Ausschnitt."
+            "</p>"
+        )
+    parts: List[str] = []
+    if errors:
+        parts.append('<h3 class="h6 text-danger mb-2">Fehler</h3>')
+        parts.append('<ul class="dash-list dash-scroll mb-3">')
+        parts.extend(f'<li class="text-danger">{html_escape(line)}</li>' for line in errors)
+        parts.append("</ul>")
+    if warnings:
+        parts.append('<h3 class="h6 text-warning mb-2">Warnungen</h3>')
+        parts.append('<ul class="dash-list dash-scroll mb-0">')
+        parts.extend(f"<li>{html_escape(line)}</li>" for line in warnings)
+        parts.append("</ul>")
+    return "".join(parts)
+
+
 def _host_info() -> Dict[str, str]:
     if platform.system() != "Linux":
         return {"uptime": "—", "memory": "—", "disk": "—"}
@@ -472,7 +743,10 @@ def collect_runtime_stats() -> Dict[str, Any]:
         "motd": getattr(st, "MOTD", "—"),
         "bbs_enabled": getattr(st, "bbs_enabled", False),
         "bbs_public_count": 0,
+        "bbs_public_messages": [],
         "bbs_dm_count": 0,
+        "bbs_dm_queue": [],
+        "mesh_leaderboard": {},
         "node_summary": [],
         "node_tables": [],
         "mesh_nodes_total": 0,
@@ -481,10 +755,19 @@ def collect_runtime_stats() -> Dict[str, Any]:
     try:
         import modules.bbstools as bbs
 
-        out["bbs_public_count"] = len(getattr(bbs, "bbs_messages", []) or [])
-        out["bbs_dm_count"] = max(0, len(getattr(bbs, "bbs_dm", []) or []) - 1)
+        public = _load_bbs_public_messages()
+        out["bbs_public_messages"] = public
+        out["bbs_public_count"] = len(public)
+        dm_queue = _load_bbs_dm_queue()
+        out["bbs_dm_queue"] = dm_queue
+        out["bbs_dm_count"] = len(dm_queue)
     except Exception:
-        pass
+        out["bbs_public_messages"] = _load_bbs_public_messages()
+        out["bbs_public_count"] = len(out["bbs_public_messages"])
+        out["bbs_dm_queue"] = _load_bbs_dm_queue()
+        out["bbs_dm_count"] = len(out["bbs_dm_queue"])
+
+    out["mesh_leaderboard"] = _load_mesh_leaderboard()
 
     try:
         from modules import admin_web_ops as ops
@@ -646,14 +929,23 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     raw_msg = log.get("message_types") or {}
     msg_types: Counter = raw_msg if isinstance(raw_msg, Counter) else Counter(raw_msg)
     msg_keys = list(msg_types.keys())
+    activity_labels, activity_values = _activity_series(log.get("hourly_activity") or {})
+    lb = rt.get("mesh_leaderboard") or {}
     chart_data_json = json.dumps(
         {
             "cmdLabels": [c[0] for c in top_cmds],
             "cmdValues": [c[1] for c in top_cmds],
             "msgLabels": msg_keys,
             "msgValues": [int(msg_types[k]) for k in msg_keys],
+            "activityLabels": activity_labels,
+            "activityValues": activity_values,
         },
         ensure_ascii=False,
+    )
+    activity_chart_body = (
+        '<div class="chart-canvas-wrap chart-canvas-wrap--wide"><canvas id="activityChart"></canvas></div>'
+        if activity_labels
+        else '<p class="text-muted small mb-0">Noch keine Aktivitätsdaten im Log.</p>'
     )
     cmd_chart_body = (
         '<div class="chart-canvas-wrap"><canvas id="cmdChart"></canvas></div>'
@@ -675,7 +967,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
             str(rt["bbs_public_count"]),
             "live" if rt["bbs_enabled"] else "deaktiviert",
         ),
-        _metric_card("BBS DMs", str(rt["bbs_dm_count"]), "ohne Zeile 0"),
+        _metric_card("BBS DMs", str(rt["bbs_dm_count"])),
         _metric_card(
             "Mesh-Knoten",
             str(rt["mesh_nodes_total"]),
@@ -690,6 +982,26 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     recent_msgs_html = _message_list_items(log.get("recent_messages") or [])
     nodedb_html = _render_public_nodedb(rt.get("node_tables") or [])
     motd_text = html_escape(str(rt.get("motd", "—"))[:500])
+    bbs_public = rt.get("bbs_public_messages") or []
+    bbs_public_html = _render_bbs_public_html(
+        bbs_public, enabled=bool(rt.get("bbs_enabled"))
+    )
+    bbs_count = len(bbs_public)
+    bbs_dm_queue = rt.get("bbs_dm_queue") or []
+    dm_count = len(bbs_dm_queue)
+    dm_hint_parts: List[str] = []
+    if log.get("bbs_messages"):
+        dm_hint_parts.append(f"{log['bbs_messages']} öffentliche BBS-Einträge gesamt")
+    if log.get("messages_waiting") is not None:
+        dm_hint_parts.append(f"{log['messages_waiting']} laut Log wartend")
+    dm_hint = " · ".join(dm_hint_parts)
+    bbs_dm_html = _render_bbs_dm_queue_html(
+        bbs_dm_queue,
+        enabled=bool(rt.get("bbs_enabled")),
+        waiting_hint=dm_hint,
+    )
+    toplist_html = _render_toplist_html(cmd, lb)
+    leaderboard_html = _render_mesh_leaderboard_html(lb)
     log_note = ""
     if log.get("log_error"):
         log_note = f'<p class="alert alert-info mb-3"><i class="bi bi-info-circle me-2"></i>{html_escape(log["log_error"])}</p>'
@@ -723,8 +1035,32 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
 </div>
 
 <div class="section-card mb-4">
+  <h2 class="section-title h5">
+    <i class="bi bi-inboxes me-2 text-success"></i>BBS öffentlich
+    <span class="badge text-bg-secondary ms-2 fw-normal">{bbs_count}</span>
+  </h2>
+  <p class="small text-muted mb-2">Betreff, Absender und Vorschau · neueste zuerst</p>
+  {bbs_public_html}
+</div>
+
+<div class="section-card mb-4">
+  <h2 class="section-title h5">
+    <i class="bi bi-envelope-paper me-2 text-success"></i>BBS-DM Warteschlange
+    <span class="badge text-bg-secondary ms-2 fw-normal">{dm_count}</span>
+  </h2>
+  <p class="small text-muted mb-2">Ausstehende Direktnachrichten · neueste zuerst</p>
+  {bbs_dm_html}
+</div>
+
+<div class="section-card mb-4">
   <h2 class="section-title h5"><i class="bi bi-diagram-3 me-2 text-success"></i>NodeDB</h2>
   {nodedb_html}
+</div>
+
+<div class="section-card mb-4">
+  <h2 class="section-title h5"><i class="bi bi-activity me-2 text-success"></i>Aktivität über die Zeit</h2>
+  <p class="small text-muted mb-2">Log-Zeilen pro Stunde (letzte {len(activity_labels)} Stunden)</p>
+  {activity_chart_body}
 </div>
 
 <div class="row g-3 mb-4">
@@ -738,6 +1074,22 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     <div class="section-card">
       <h2 class="section-title h5"><i class="bi bi-pie-chart text-success me-2"></i>Nachrichtentypen</h2>
       {msg_chart_body}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="section-card">
+      <h2 class="section-title h5"><i class="bi bi-trophy me-2 text-success"></i>Topliste</h2>
+      {toplist_html}
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="section-card">
+      <h2 class="section-title h5"><i class="bi bi-award me-2 text-success"></i>Leaderboard</h2>
+      <p class="small text-muted mb-2">Mesh-Rekorde seit letztem Reset</p>
+      {leaderboard_html}
     </div>
   </div>
 </div>
