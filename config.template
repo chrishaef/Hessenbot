@@ -222,50 +222,7 @@ satList = 25544,7530
 # use Open-Meteo API for weather data not NOAA useful for non US locations
 UseMeteoWxAPI = True
 
-# NOAA weather forecast days
-NOAAforecastDuration = 3
-# number of weather alerts to display
-NOAAalertCount = 2
-
-# NOAA Weather EAS Alert Broadcast
-wxAlertBroadcastEnabled = False
-#  Enable Ignore any message that includes following word list
-ignoreEASenable = False
-ignoreEASwords = test,advisory
-# Add extra location to the weather alert
-enableExtraLocationWx = False
-
-# NOAA Coastal Data Enable NOAA Coastal Waters Forecasts and Tide
-coastalEnabled = False
-# Find the correct costal weather directory at https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/
-# pz = Puget Sound, ph = Honolulu HI, gm = Florida Keys, pk = Alaska
-# this map can help https://www.weather.gov/marine select location and then look at the 'Forecast-by-Zone Map'
-# myCoastalZone is the .txt file with the forecast data
-myCoastalZone = https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/pz/pzz135.txt
-# number of data points to return, default is 3
-coastalForecastDays = 3
-
-# NOAA USGS Hydrology river identifiers, LID or USGS ID https://waterdata.usgs.gov 12484500 Columbia River at The Dalles, OR
-# for multiple rivers use comma separated list e.g. 12484500,14105700
-riverList = 
-
-# USA FEMA IPAWS alerts
-ipawsAlertEnabled = False
-# comma separated list of FIPS codes to trigger local alert. find your FIPS codes at https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code
-myFIPSList = 57,58,53
-# find your SAME https://www.weather.gov/nwr/counties comma separated list of SAME code to further refine local alert.
-mySAMEList = 053029,053073
-#  Enable Ignore, headline that includes following word list
-ignoreFEMAenable = True
-ignoreFEMAwords = test,exercise
-
-# USGS Volcano alerts Enable USGS Volcano Alert Broadcast
-volcanoAlertBroadcastEnabled = False
-# Enable Ignore any message that includes following word list
-ignoreUSGSEnable = False
-ignoreUSGSWords = test,advisory
-
-# Use Germany/DE Alert Broadcast Data
+# Use Germany/DE Alert Broadcast Data (NINA/Katwarn/DWD via warnung.bund.de)
 enableDEalerts = True
 # Comma-separated Amtlicher Regionalschlüssel (ARS) for NINA/Warnung Bund (dealert broadcast).
 # Mesh command !warning uses the requesting node's GPS to query NINA/Katwarn/DWD for that Kreis.
@@ -436,35 +393,6 @@ IMAP_PORT = 993
 IMAP_USERNAME = none@gmail.com
 IMAP_PASSWORD = none
 IMAP_FOLDER = inbox
-
-[games]
-# if hop limit for the user exceeds this value, the message will be dropped
-game_hop_limit = 5
-disable_emojis = False
-# enable or disable the games module(s)
-dopeWars = False
-lemonade = False
-blackjack = False
-videopoker = False
-mastermind = False
-golfsim = False
-hangman = False
-hamtest = False
-tictactoe = False
-wordOfTheDay = False
-battleShip = False
-
-# enable or disable the quiz game module questions are in data/quiz.json
-quiz = False
-
-# enable or disable the survey game module questions are in data/survey/*_survey.json
-survey = False
-# this is the default survey to use when command givcen, from data/survey/example_survey.json
-defaultSurvey = example
-# Whether to record user ID in responses
-surveyRecordID=True
-# Whether to record location on start of survey
-surveyRecordLocation=True
 
 [messagingSettings]
 # delay in seconds for response to avoid message collision /throttling

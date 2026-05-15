@@ -18,7 +18,6 @@ from modules.settings import (
 
 WARNING_NONE_MSG = "Keine Aktiven Nina oder Katwarn Meldungen"
 
-trap_list_location_eu = ("ukalert",)
 trap_list_location_de = ("dealert", "warning")
 
 # Official NINA API (nina.api.proxy.bund.dev no longer resolves).
@@ -255,23 +254,6 @@ def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5) -> lis
 
     return messages
 
-
-def get_govUK_alerts(lat, lon):
-    try:
-        # get UK.gov alerts
-        url = 'https://www.gov.uk/alerts'
-        response = requests.get(url, timeout=urlTimeoutSeconds)
-        soup = bs.BeautifulSoup(response.text, 'html.parser')
-        # the alerts are in <h2 class="govuk-heading-m" id="alert-status">
-        alert = soup.find('h2', class_='govuk-heading-m', id='alert-status')
-    except Exception as e:
-        logger.warning("Error getting UK alerts: " + str(e))
-        return 
-    
-    if alert:
-        return "🚨" + alert.get_text(strip=True)
-    else:
-        return NO_ALERTS
 
 def get_nina_alerts():
     alerts = []

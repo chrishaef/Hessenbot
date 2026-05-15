@@ -26,7 +26,6 @@ max_retry_count1 = max_retry_count2 = max_retry_count3 = max_retry_count4 = max_
 retry_int1 = False
 retry_int2 = False
 wiki_return_limit = 3 # limit the number of sentences returned off the first paragraph first hit
-GAMEDELAY = 28800 # 8 hours in seconds for game mode holdoff
 cmdHistory = [] # list to hold the last commands
 seenNodes = [] # list to hold the last seen nodes
 cmdHistory = [] # list to hold the command history for lheard and history commands
@@ -38,28 +37,11 @@ wsjtxMsgQueue = [] # queue for WSJT-X detected messages
 js8callMsgQueue = [] # queue for JS8Call detected messages
 autoBanlist = [] # list of nodes to autoban for repeated offenses
 apiThrottleList = [] # list of nodes to throttle API requests for repeated offenses
-# Game trackers
-surveyTracker = []           # Survey game tracker
-tictactoeTracker = []        # TicTacToe game tracker
-hamtestTracker = []          # Ham radio test tracker
-hangmanTracker = []          # Hangman game tracker
-golfTracker = []             # GolfSim game tracker
-mastermindTracker = []       # Mastermind game tracker
-vpTracker = []               # Video Poker game tracker
-jackTracker = []             # Blackjack game tracker
-lemonadeTracker = []         # Lemonade Stand game tracker
-dwPlayerTracker = []         # DopeWars player tracker
-jackTracker = []             # Jack game tracker
-mindTracker = []             # Mastermind (mmind) game tracker
-battleshipTracker = []       # Battleship game tracker
-
 # Memory Management Constants
 MAX_MSG_HISTORY = 250
 MAX_CMD_HISTORY = 250
 MAX_SEEN_NODES = 1000
 CLEANUP_INTERVAL = 86400 # 24 hours in seconds
-GAMEDELAY = 3 * CLEANUP_INTERVAL # 3 days in seconds
-
 # Read the config file, if it does not exist, create basic config file
 config = configparser.ConfigParser() 
 config_file = "config.ini"
@@ -98,10 +80,6 @@ if 'repeater' not in config:
 
 if 'radioMon' not in config:
     config['radioMon'] = {'enabled': 'False', 'rigControlServerAddress': 'localhost:4532', 'sigWatchBrodcastCh': '2', 'signalDetectionThreshold': '-10', 'signalHoldTime': '10', 'signalCooldown': '5', 'signalCycleLimit': '5'}
-    config.write(open(config_file, 'w'))
-
-if 'games' not in config:
-    config['games'] = {'dopeWars': 'True', 'lemonade': 'True', 'blackjack': 'True', 'videoPoker': 'True'}
     config.write(open(config_file, 'w'))
 
 if 'messagingSettings' not in config:
@@ -504,26 +482,6 @@ try:
     web_admin_alert_file = config['webAdmin'].get('alert_file', '').strip()
     web_admin_news_file = config['webAdmin'].get('news_file', '').strip()
     web_admin_log_dir = config['webAdmin'].get('log_dir', '').strip()
-
-    # games
-    game_hop_limit = config['games'].getint('game_hop_limit', 5) # default 5 hops
-    disable_emojis_in_games = config['games'].getboolean('disable_emojis', False) # default False
-    dopewars_enabled = config['games'].getboolean('dopeWars', True)
-    lemonade_enabled = config['games'].getboolean('lemonade', True)
-    blackjack_enabled = config['games'].getboolean('blackjack', True)
-    videoPoker_enabled = config['games'].getboolean('videoPoker', True)
-    mastermind_enabled = config['games'].getboolean('mastermind', True)
-    golfSim_enabled = config['games'].getboolean('golfSim', True)
-    hangman_enabled = config['games'].getboolean('hangman', True)
-    hamtest_enabled = config['games'].getboolean('hamtest', True)
-    tictactoe_enabled = config['games'].getboolean('tictactoe', True)
-    quiz_enabled = config['games'].getboolean('quiz', False)
-    survey_enabled = config['games'].getboolean('survey', False)
-    default_survey = config['games'].get('defaultSurvey', 'example') # default example
-    surveyRecordID = config['games'].getboolean('surveyRecordID', True)
-    surveyRecordLocation = config['games'].getboolean('surveyRecordLocation', True)
-    wordOfTheDay = config['games'].getboolean('wordOfTheDay', True)
-    battleship_enabled = config['games'].getboolean('battleShip', True)
 
     # messaging settings
     responseDelay = config['messagingSettings'].getfloat('responseDelay', 0.7) # default 0.7
