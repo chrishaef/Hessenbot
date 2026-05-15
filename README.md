@@ -65,6 +65,7 @@ cp config.template config.ini
 | `!dealert` | Warnungen für in `myRegionalKeysDE` eingetragene Regionen |
 | `!wx` / `!wxc` | Wetter (Open-Meteo) |
 | `!whereami` / `!whoami` | Standort / Node-Info |
+| `!loc` | Letzte GPS-Position eines Knotens aus der NodeDB (optional Name/ID) |
 | `!bbslist`, `!bbspost`, … | Bulletin Board |
 
 Voraussetzungen in `config.ini`: u. a. `[location] enabled = True`, `enableDEalerts = True`, `UseMeteoWxAPI = True`, `cmdBang = True`.

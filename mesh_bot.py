@@ -101,6 +101,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     ),
     "dealert": lambda: handle_dealert(message_from_id, deviceID),
     "whereami": lambda: handle_whereami(message_from_id, deviceID, channel_number),
+    "loc": lambda: handle_loc(message, message_from_id, deviceID, channel_number),
     "whoami": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
     "whois": lambda: handle_whois(message, deviceID, channel_number, message_from_id),
     "wiki": lambda: handle_wiki(message, isDM),
@@ -625,6 +626,50 @@ def handle_whereami(message_from_id, deviceID, channel_number):
     if check_throttle:
         return check_throttle
     return where_am_i(str(location[0]), str(location[1]))
+
+
+def handle_loc(message, message_from_id, deviceID, channel_number):
+    """Show last known position of a mesh node from the NodeDB."""
+    if "?" in message:
+        return (
+            "!loc — Position aus NodeDB. !loc = du, "
+            "!loc <Kurzname>, !loc 1234567890, !loc !a1b2c3d4"
+        )
+    if not my_settings.location_enabled:
+        return "Standortmodul aus ([location] enabled = False)."
+
+    node_id, err = resolve_mesh_node_target(message, deviceID, default_id=message_from_id)
+    if err:
+        return err
+
+    info = get_mesh_node_position_info(node_id, deviceID)
+    short = get_name_from_number(node_id, "short", deviceID)
+    hex_id = decimal_to_hex(node_id)
+
+    if not info["in_db"]:
+        return f"{short} {hex_id}: nicht in NodeDB."
+
+    if not info["from_gps"]:
+        return f"{short} {hex_id}: keine GPS-Position in NodeDB."
+
+    lat, lon = info["lat"], info["lon"]
+    lines = [f"{short} {hex_id}", f"{lat},{lon} GPS"]
+    try:
+        import maidenhead as mh
+
+        lines.append(mh.to_maiden(lat, lon)[:10])
+    except Exception:
+        pass
+    if info.get("last_heard"):
+        lines.append(f"👀{info['last_heard']}")
+    if info.get("iface") and info["iface"] != deviceID:
+        lines.append(f"IF{info['iface']}")
+
+    msg = "\n".join(lines)
+    if len(msg) > my_settings.MESSAGE_CHUNK_SIZE:
+        msg = msg[: my_settings.MESSAGE_CHUNK_SIZE - 1] + "…"
+    return msg
+
 
 def handle_repeaterQuery(message_from_id, deviceID, channel_number):
     location = get_node_location(message_from_id, deviceID, channel_number)
