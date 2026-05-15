@@ -22,6 +22,13 @@ def path_in_repo(rel_or_abs: str) -> str:
     return os.path.normpath(os.path.join(repo_root(), rel_or_abs))
 
 
+def ensure_parent_dir(file_path: str) -> None:
+    """Create parent directory for a file path (e.g. before open(..., 'w'))."""
+    d = os.path.dirname(file_path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+
 def runtime_writable_paths_from_config(config_ini: str | None = None) -> list[str]:
     """Paths the bot / web admin may write (DM alert, news, ban list, …)."""
     import configparser
@@ -31,6 +38,7 @@ def runtime_writable_paths_from_config(config_ini: str | None = None) -> list[st
     paths: set[str] = set()
     for rel in (
         "data/bbs_ban_list.txt",
+        "data/leaderboard.pkl",
         "data/alert.txt",
         "data/news.txt",
         "alert.txt",
