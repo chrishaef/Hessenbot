@@ -11,9 +11,259 @@ import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime
 from html import escape as html_escape
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from modules.paths import path_in_repo, repo_root
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+class _NodeDirectory:
+    """Maps Meshtastic node IDs / names while scanning meshbot.log."""
+
+    def __init__(self) -> None:
+        self._by_id: Dict[int, Dict[str, str]] = {}
+        self._long_to_id: Dict[str, int] = {}
+
+    def register(self, node_id: int, *, short: str = "", long_name: str = "") -> None:
+        entry = self._by_id.setdefault(
+            node_id,
+            {"short": "", "long": "", "hex": f"!{node_id:08x}", "id": str(node_id)},
+        )
+        entry["hex"] = f"!{node_id:08x}"
+        entry["id"] = str(node_id)
+        if short:
+            entry["short"] = short
+        if long_name:
+            entry["long"] = long_name
+            self._long_to_id[long_name] = node_id
+
+    def resolve(self, label: str) -> Dict[str, str]:
+        label = (label or "").strip()
+        if not label:
+            return {"id": "", "hex": "", "short": "", "long": ""}
+
+        if label.startswith("!"):
+            try:
+                node_id = int(label[1:], 16)
+            except ValueError:
+                return {"id": "", "hex": label, "short": "", "long": ""}
+            entry = self._by_id.get(node_id, {})
+            return {
+                "id": str(node_id),
+                "hex": label,
+                "short": entry.get("short", ""),
+                "long": entry.get("long", ""),
+            }
+
+        if label.isdigit():
+            node_id = int(label)
+            entry = self._by_id.get(node_id, {})
+            return {
+                "id": str(node_id),
+                "hex": entry.get("hex", f"!{node_id:08x}"),
+                "short": entry.get("short", ""),
+                "long": entry.get("long", ""),
+            }
+
+        if label in self._long_to_id:
+            node_id = self._long_to_id[label]
+            entry = self._by_id[node_id]
+            return {
+                "id": str(node_id),
+                "hex": entry["hex"],
+                "short": entry.get("short", ""),
+                "long": label,
+            }
+
+        for node_id, entry in self._by_id.items():
+            if entry.get("long") == label:
+                return {
+                    "id": str(node_id),
+                    "hex": entry["hex"],
+                    "short": entry.get("short", ""),
+                    "long": label,
+                }
+            if entry.get("short") == label:
+                return {
+                    "id": str(node_id),
+                    "hex": entry["hex"],
+                    "short": label,
+                    "long": entry.get("long", ""),
+                }
+
+        return {"id": "", "hex": "", "short": "", "long": label}
+
+
+def _extract_message_event(
+    plain: str, timestamp: datetime, nodes: _NodeDirectory
+) -> Optional[Dict[str, Any]]:
+    """Parse one meshbot.log line into a structured message event."""
+    if not timestamp:
+        return None
+
+    dev_m = re.search(r"Device:(\d+)", plain)
+    ch_m = re.search(r"Channel:?\s*(\d+)", plain)
+    device = int(dev_m.group(1)) if dev_m else None
+    channel = int(ch_m.group(1)) if ch_m else None
+    base: Dict[str, Any] = {
+        "time": timestamp.isoformat(),
+        "time_short": timestamp.strftime("%H:%M:%S"),
+        "device": device,
+        "channel": channel,
+    }
+
+    if "Sending DM:" in plain or "Sending Multi-Chunk DM:" in plain:
+        to_m = re.search(r"\sTo:\s*(.+?)$", plain)
+        peer = nodes.resolve(to_m.group(1)) if to_m else {}
+        return {**base, "dir": "out", "kind": "dm", **peer}
+
+    if "SendingChannel:" in plain or "Sending Multi-Chunk Message:" in plain:
+        return {**base, "dir": "out", "kind": "channel", "id": "", "hex": "", "short": "", "long": ""}
+
+    if any(
+        marker in plain
+        for marker in ("Received DM:", "Ignoring DM:", "Ignoring Message:", "ReceivedChannel:")
+    ):
+        from_m = re.search(r"From:\s*(.+?)$", plain)
+        peer = nodes.resolve(from_m.group(1)) if from_m else {}
+        if "Received DM:" in plain or "Ignoring DM:" in plain:
+            kind = "dm"
+        else:
+            kind = "channel"
+        return {**base, "dir": "in", "kind": kind, **peer}
+
+    return None
+
+
+def _format_message_peer(entry: Dict[str, Any]) -> str:
+    short = entry.get("short") or ""
+    node_id = entry.get("id") or ""
+    hex_id = entry.get("hex") or ""
+    long_name = entry.get("long") or ""
+
+    if not hex_id and node_id.isdigit():
+        hex_id = f"!{int(node_id):08x}"
+
+    if short and hex_id and node_id:
+        return f"{short} · {hex_id} (#{node_id})"
+    if short and hex_id:
+        return f"{short} · {hex_id}"
+    if short and node_id:
+        return f"{short} · #{node_id}"
+    if hex_id:
+        return hex_id
+    if node_id:
+        return f"#{node_id}"
+    if long_name:
+        return long_name
+    return "?"
+
+
+def _format_message_line(entry: Dict[str, Any]) -> str:
+    t = entry.get("time_short") or entry.get("time", "")[-8:]
+    direction = "An" if entry.get("dir") == "out" else "Von"
+    peer = _format_message_peer(entry)
+
+    if entry.get("kind") == "channel" and entry.get("dir") == "out":
+        ch = entry.get("channel")
+        return f"{t} · Kanal {ch if ch is not None else '?'} (gesendet)"
+
+    suffix = ""
+    if entry.get("kind") == "dm":
+        suffix = " · DM"
+    elif entry.get("kind") == "channel" and entry.get("channel") is not None:
+        suffix = f" · Kanal {entry['channel']}"
+
+    return f"{t} · {direction}: {peer}{suffix}"
+
+
+def _short_timestamp(ts_iso: str) -> str:
+    """DD.MM HH:MM for dashboard lists."""
+    try:
+        return datetime.fromisoformat(ts_iso).strftime("%d.%m %H:%M")
+    except ValueError:
+        return ts_iso[-8:] if len(ts_iso) >= 8 else ts_iso
+
+
+def _parse_command_from_suffix(text: str) -> tuple[str, bool]:
+    """Strip isDM:/playing: debug tail from mesh_bot command log lines."""
+    text = (text or "").strip()
+    is_dm = False
+    dm_m = re.search(r"\bisDM:(True|False)\b", text)
+    if dm_m:
+        is_dm = dm_m.group(1) == "True"
+        text = re.sub(r"\s*isDM:(True|False)\b", "", text)
+    text = re.sub(r"\s*playing:(?:False|None|True|\w+)\b", "", text)
+    text = re.sub(r"\s+is\s+playing\s+\w+", "", text, flags=re.IGNORECASE)
+    return text.strip(), is_dm
+
+
+def _format_command_label(cmd: str, who_raw: str = "") -> str:
+    who, is_dm = _parse_command_from_suffix(who_raw)
+    parts = [cmd]
+    if who and who != "?":
+        parts.append(who)
+    label = " · ".join(parts)
+    if is_dm:
+        label += " · DM"
+    return label
+
+
+def _format_command_line(ts_iso: str, label: str) -> str:
+    return f"{_short_timestamp(ts_iso)} · {label}"
+
+
+def _command_list_items(entries: List[tuple], empty: str = "Keine Befehle") -> str:
+    if not entries:
+        return f'<li class="text-muted">{html_escape(empty)}</li>'
+    lines = [_format_command_line(ts, label) for ts, label in reversed(entries[-12:])]
+    return "".join(f"<li>{html_escape(line)}</li>" for line in lines)
+
+
+def _parse_messages_log_tail(
+    log_path: str, nodes: _NodeDirectory, *, max_lines: int = 800
+) -> List[Dict[str, Any]]:
+    """Supplement recent messages from logs/messages.log (pipe format)."""
+    if not os.path.isfile(log_path):
+        return []
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return []
+
+    events: List[Dict[str, Any]] = []
+    for line in lines[-max_lines:]:
+        m = re.match(
+            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
+            r"Device:(\d+) Channel:(\d+) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
+            line.strip(),
+        )
+        if not m:
+            continue
+        ts_s, _dev, ch, name, _text = m.groups()
+        try:
+            ts = datetime.strptime(ts_s, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        peer = nodes.resolve(name.strip())
+        is_dm = " DM |" in line
+        events.append(
+            {
+                "time": ts.isoformat(),
+                "time_short": ts.strftime("%H:%M:%S"),
+                "dir": "in",
+                "kind": "dm" if is_dm else "channel",
+                "channel": int(ch),
+                **peer,
+            }
+        )
+    return events
 
 
 def _empty_log_stats() -> Dict[str, Any]:
@@ -29,6 +279,7 @@ def _empty_log_stats() -> Dict[str, Any]:
         "total_messages": 0,
         "command_timestamps": [],
         "message_timestamps": [],
+        "recent_messages": [],
         "firmware1_version": "—",
         "firmware2_version": "—",
         "node1_name": "—",
@@ -90,34 +341,32 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
             if command and timestamp:
                 cmd = command.group(1)
                 command_counts[cmd] += 1
-                who = user.group(1) if user else "?"
-                command_timestamps.append((timestamp.isoformat(), f"{cmd} ({who})"))
+                who_raw = user.group(1) if user else ""
+                command_timestamps.append(
+                    (timestamp.isoformat(), _format_command_label(cmd, who_raw))
+                )
 
-        if any(
-            x in line
-            for x in (
-                "Sending DM:",
-                "Sending Multi-Chunk DM:",
-                "SendingChannel:",
-                "Sending Multi-Chunk Message:",
-            )
-        ):
-            message_types["Ausgehend"] += 1
+        ns_match = re.search(r"NodeID:(\d+)\s+ShortName:(\S+)", plain)
+        if ns_match:
+            nodes.register(int(ns_match.group(1)), short=ns_match.group(2))
+
+        evt = _extract_message_event(plain, timestamp, nodes) if timestamp else None
+        if evt:
+            recent_messages.append(evt)
+            if evt.get("dir") == "out":
+                message_types["Ausgehend"] += 1
+            else:
+                message_types["Eingehend"] += 1
             stats["total_messages"] += 1
             if timestamp:
-                message_timestamps.append((timestamp.isoformat(), "Ausgehend"))
+                peer = _format_message_peer(evt)
+                direction = "An" if evt.get("dir") == "out" else "Von"
+                message_timestamps.append(
+                    (timestamp.isoformat(), f"{direction}: {peer}")
+                )
 
-        if any(
-            x in line
-            for x in ("Received DM:", "Ignoring DM:", "Ignoring Message:", "ReceivedChannel:")
-        ):
-            message_types["Eingehend"] += 1
-            stats["total_messages"] += 1
-            if timestamp:
-                message_timestamps.append((timestamp.isoformat(), "Eingehend"))
-
-        user_match = re.search(r"From: '([^']+)'(?: To:|$)", line) or re.search(
-            r"From: (.+)$", line
+        user_match = re.search(r"From: '([^']+)'(?: To:|$)", plain) or re.search(
+            r"From: (.+)$", plain
         )
         if user_match:
             unique_users.add(user_match.group(1).strip()[:80])
@@ -152,19 +401,28 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
                     stats["firmware2_version"] = fw
                     stats["node2_uptime"] = summary
 
-        if "Autoresponder Started for Device" in line:
+        if "Autoresponder Started for Device" in plain:
             device_match = re.search(
                 r"Autoresponder Started for Device(\d+)\s+([^\s,]+).*?NodeID: (\d+)",
-                line,
+                plain,
             )
             if device_match:
                 dev_id, name, node_id = device_match.groups()
+                nodes.register(int(node_id), short=name)
                 if dev_id == "1":
                     stats["node1_name"] = name
                     stats["node1_ID"] = node_id
                 elif dev_id == "2":
                     stats["node2_name"] = name
                     stats["node2_ID"] = node_id
+
+    msg_log_path = os.path.join(os.path.dirname(log_path), "messages.log")
+    msg_log_events = _parse_messages_log_tail(msg_log_path, nodes)
+    if msg_log_events:
+        merged = {e["time"]: e for e in recent_messages}
+        for e in msg_log_events:
+            merged.setdefault(e["time"], e)
+        recent_messages = sorted(merged.values(), key=lambda x: x["time"])
 
     stats["command_counts"] = command_counts
     stats["message_types"] = message_types
@@ -174,6 +432,7 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     stats["errors"] = errors[:15]
     stats["command_timestamps"] = command_timestamps[-40:]
     stats["message_timestamps"] = message_timestamps[-40:]
+    stats["recent_messages"] = recent_messages[-40:]
     return stats
 
 
@@ -207,6 +466,7 @@ def collect_runtime_stats() -> Dict[str, Any]:
         "bbs_public_count": 0,
         "bbs_dm_count": 0,
         "node_summary": [],
+        "node_tables": [],
         "mesh_nodes_total": 0,
         "interfaces_active": 0,
     }
@@ -224,8 +484,9 @@ def collect_runtime_stats() -> Dict[str, Any]:
         ifaces = ops.iter_radio_interfaces()
         out["interfaces_active"] = len(ifaces)
         total = 0
-        for i in ifaces[:2]:
+        for i in ifaces:
             err, rows = ops.list_node_rows(i)
+            out["node_tables"].append({"iface": i, "error": err, "rows": rows})
             if err:
                 out["node_summary"].append(f"IF{i}: {err}")
                 continue
@@ -255,7 +516,6 @@ def collect_dashboard(log_dir: str) -> Dict[str, Any]:
         "log_path": log_path,
         "log": parse_meshbot_log(log_path),
         "runtime": collect_runtime_stats(),
-        "host": _host_info(),
     }
 
 
@@ -276,10 +536,102 @@ def _list_items(items: List[str], empty: str = "Keine Einträge") -> str:
     return "".join(f"<li>{html_escape(str(x))}</li>" for x in items)
 
 
+def render_host_metrics_html() -> str:
+    """Host uptime/RAM/disk for admin UI."""
+    host = _host_info()
+    return f"""
+<div class="row g-2 mb-0">
+  <div class="col-md-4">
+    <div class="metric-card">
+      <div class="metric-label">Uptime</div>
+      <div class="metric-value small">{html_escape(host["uptime"])}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="metric-card">
+      <div class="metric-label">RAM</div>
+      <div class="metric-value small">{html_escape(host["memory"])}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="metric-card">
+      <div class="metric-label">Disk</div>
+      <div class="metric-value small">{html_escape(host["disk"])}</div>
+    </div>
+  </div>
+</div>
+"""
+
+
+def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
+    if not node_tables:
+        return '<p class="text-muted mb-0">Keine Meshtastic-Schnittstelle verbunden.</p>'
+
+    parts: List[str] = []
+    for block in node_tables:
+        iface = block.get("iface", "?")
+        err = block.get("error")
+        if err:
+            parts.append(
+                f'<p class="alert alert-info py-2 mb-3">'
+                f"Interface {iface}: {html_escape(err)}</p>"
+            )
+            continue
+        rows = block.get("rows") or []
+        if not rows:
+            parts.append(
+                f'<p class="text-muted mb-3">Interface {iface}: Keine Knoten in der NodeDB.</p>'
+            )
+            continue
+
+        trs = []
+        for r in rows:
+            local = (
+                ' <span class="badge bg-success ms-1">lokal</span>'
+                if r.get("is_self")
+                else ""
+            )
+            trs.append(
+                "<tr>"
+                f"<td><code>{r['node_id']}</code></td>"
+                f"<td>{r['shortName']}{local}</td>"
+                f"<td>{r['longName']}</td>"
+                f'<td class="text-nowrap">{html_escape(str(r.get("lastHeard", "—")))}</td>'
+                "</tr>"
+            )
+        parts.append(
+            f"""
+<h3 class="h6 section-title mb-2">
+  <i class="bi bi-reception-4 text-success me-1"></i>Interface {iface}
+  <span class="text-muted fw-normal">({len(rows)} Knoten)</span>
+</h3>
+<div class="table-scroll dash-nodedb-scroll mb-3">
+  <table class="nodes-table table table-sm table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Node ID</th>
+        <th>Kurzname</th>
+        <th>Name</th>
+        <th>Zuletzt gehört</th>
+      </tr>
+    </thead>
+    <tbody>{"".join(trs)}</tbody>
+  </table>
+</div>"""
+        )
+    return "".join(parts)
+
+
+def _message_list_items(entries: List[Dict[str, Any]], empty: str = "Keine Nachrichten") -> str:
+    if not entries:
+        return f'<li class="text-muted">{html_escape(empty)}</li>'
+    lines = [_format_message_line(e) for e in reversed(entries[-12:])]
+    return "".join(f"<li>{html_escape(line)}</li>" for line in lines)
+
+
 def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
     log = data["log"]
     rt = data["runtime"]
-    host = data["host"]
     cmd: Counter = log["command_counts"]
     top_cmds = cmd.most_common(12)
     cmd_chart_labels = json.dumps([c[0] for c in top_cmds])
@@ -308,13 +660,10 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
         _metric_card("Fehler", str(len(log["errors"])), "Log"),
     ]
 
-    recent_cmds = [
-        f"{ts}: {label}" for ts, label in reversed(log["command_timestamps"][-12:])
-    ]
-    recent_msgs = [
-        f"{ts}: {label}" for ts, label in reversed(log["message_timestamps"][-12:])
-    ]
-    node_lines = rt["node_summary"] or ["Kein Radio verbunden"]
+    recent_cmds_html = _command_list_items(log["command_timestamps"][-12:])
+    recent_msgs_html = _message_list_items(log.get("recent_messages") or [])
+    nodedb_html = _render_public_nodedb(rt.get("node_tables") or [])
+    motd_text = html_escape(str(rt.get("motd", "—"))[:500])
     log_note = ""
     if log.get("log_error"):
         log_note = f'<p class="alert alert-info mb-3"><i class="bi bi-info-circle me-2"></i>{html_escape(log["log_error"])}</p>'
@@ -342,27 +691,18 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
 {log_note}
 <div class="row g-2 mb-4">{"".join(f'<div class="col-6 col-md-4 col-xl-3">{c}</div>' for c in cards)}</div>
 
-<div class="row g-3 mb-4">
-  <div class="col-lg-6">
-    <div class="section-card h-100">
-      <h2 class="section-title h5"><i class="bi bi-reception-4 text-success me-2"></i>Funk / NodeDB</h2>
-      <ul class="dash-list mb-0">{_list_items(node_lines)}</ul>
-      <p class="small text-muted mt-3 mb-0">
-        IF1: {html_escape(str(log.get("node1_name", "—")))} · FW {html_escape(str(log.get("firmware1_version", "—")))}<br>
-        IF2: {html_escape(str(log.get("node2_name", "—")))} · FW {html_escape(str(log.get("firmware2_version", "—")))}
-      </p>
-    </div>
-  </div>
-  <div class="col-lg-6">
-    <div class="section-card h-100">
-      <h2 class="section-title h5"><i class="bi bi-pc-display text-success me-2"></i>Host</h2>
-      <ul class="dash-list mb-0">
-        <li>Uptime: {html_escape(host["uptime"])}</li>
-        <li>RAM: {html_escape(host["memory"])}</li>
-        <li>Disk: {html_escape(host["disk"])}</li>
-      </ul>
-    </div>
-  </div>
+<div class="section-card mb-4">
+  <h2 class="section-title h5"><i class="bi bi-chat-quote me-2 text-success"></i>Message of the Day</h2>
+  <p class="motd-box mb-0">{motd_text}</p>
+</div>
+
+<div class="section-card mb-4">
+  <h2 class="section-title h5"><i class="bi bi-diagram-3 me-2 text-success"></i>NodeDB</h2>
+  {nodedb_html}
+  <p class="small text-muted mt-2 mb-0">
+    IF1: {html_escape(str(log.get("node1_name", "—")))} · FW {html_escape(str(log.get("firmware1_version", "—")))}
+    · IF2: {html_escape(str(log.get("node2_name", "—")))} · FW {html_escape(str(log.get("firmware2_version", "—")))}
+  </p>
 </div>
 
 <div class="row g-3 mb-4">
@@ -384,20 +724,15 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
   <div class="col-lg-6">
     <div class="section-card">
       <h2 class="section-title h5"><i class="bi bi-clock-history me-2 text-success"></i>Letzte Befehle</h2>
-      <ul class="dash-list dash-scroll mb-0">{_list_items(recent_cmds, "Noch keine Befehle")}</ul>
+      <ul class="dash-list dash-scroll mb-0">{recent_cmds_html}</ul>
     </div>
   </div>
   <div class="col-lg-6">
     <div class="section-card">
       <h2 class="section-title h5"><i class="bi bi-chat-dots me-2 text-success"></i>Letzte Nachrichten</h2>
-      <ul class="dash-list dash-scroll mb-0">{_list_items(recent_msgs, "Noch keine Nachrichten")}</ul>
+      <ul class="dash-list dash-scroll mb-0">{recent_msgs_html}</ul>
     </div>
   </div>
-</div>
-
-<div class="section-card mb-3">
-  <h2 class="section-title h5"><i class="bi bi-chat-quote me-2 text-success"></i>Message of the Day</h2>
-  <p class="motd-box mb-0">{html_escape(str(rt.get("motd", "—"))[:500])}</p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
