@@ -1,53 +1,52 @@
 #!/bin/bash
-# Set ownership and permissions for Meshing Around application
+# Set ownership and permissions for MeshBot / Hessenbot runtime files (data/, logs/, config.ini).
+# Usage:
+#   sudo ./etc/set-permissions.sh [user] [repo_path]
+# Examples:
+#   sudo ./etc/set-permissions.sh meshbot /opt/meshing-around
+#   sudo ./etc/set-permissions.sh meshbot "$(pwd)"
 
-# Check if run as root
+set -euo pipefail
+
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root"
+  echo "Please run as root (e.g. sudo $0)"
   exit 1
 fi
 
-# Use first argument as user, or default to meshbot
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET_USER="${1:-meshbot}"
-echo "DEBUG: TARGET_USER='$TARGET_USER'"
+REPO_ROOT="${2:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
-# Check if user exists
 if ! id "$TARGET_USER" >/dev/null 2>&1; then
   echo "User '$TARGET_USER' does not exist."
-  CUR_USER="$(whoami)"
-  printf "Would you like to use the current user (%s) instead? [y/N]: " "$CUR_USER"
-  read yn
+  CUR_USER="$(logname 2>/dev/null || whoami)"
+  printf "Use current login user (%s) instead? [y/N]: " "$CUR_USER"
+  read -r yn
   if [ "$yn" = "y" ] || [ "$yn" = "Y" ]; then
     TARGET_USER="$CUR_USER"
-    echo "Using current user: $TARGET_USER"
     if ! id "$TARGET_USER" >/dev/null 2>&1; then
-      echo "Current user '$TARGET_USER' does not exist or cannot be determined."
+      echo "User '$TARGET_USER' does not exist."
       exit 1
     fi
   else
-    echo "Exiting."
     exit 1
   fi
 fi
 
-id "$TARGET_USER"
+echo "Repository: $REPO_ROOT"
+echo "Owner:      $TARGET_USER:$TARGET_USER"
 
-echo "Setting ownership to $TARGET_USER:$TARGET_USER"
-
-for dir in "/opt/meshing-around" "/opt/meshing-around/logs" "/opt/meshing-around/data"; do
-  if [ -d "$dir" ]; then
-    chown -R "$TARGET_USER:$TARGET_USER" "$dir"
-    chmod 775 "$dir"
-  else
-    echo "Warning: Directory $dir does not exist, skipping."
-  fi
+for dir in "$REPO_ROOT/logs" "$REPO_ROOT/data"; do
+  mkdir -p "$dir"
+  chown -R "$TARGET_USER:$TARGET_USER" "$dir"
+  chmod 775 "$dir"
+  find "$dir" -type f -exec chmod 664 {} \;
+  find "$dir" -type d -exec chmod 775 {} \;
 done
 
-if [ -f "/opt/meshing-around/config.ini" ]; then
-  chown "$TARGET_USER:$TARGET_USER" "/opt/meshing-around/config.ini"
-  chmod 664 "/opt/meshing-around/config.ini"
-else
-  echo "Warning: /opt/meshing-around/config.ini does not exist, skipping."
+if [ -f "$REPO_ROOT/config.ini" ]; then
+  chown "$TARGET_USER:$TARGET_USER" "$REPO_ROOT/config.ini"
+  chmod 664 "$REPO_ROOT/config.ini"
 fi
 
-echo "Permissions and ownership have been set."
+echo "Permissions set for $TARGET_USER on data/, logs/, and config.ini (if present)."

@@ -1165,8 +1165,10 @@ def save_bbsBanList():
             for node in bbs_ban_list:
                 f.write(f"{node}\n")
         logger.debug("System: BBS ban list saved")
+        return True
     except Exception as e:
         logger.error(f"System: Error saving BBS ban list: {e}")
+        return False
 
 def load_bbsBanList():
     global bbs_ban_list
@@ -1991,8 +1993,10 @@ def saveLeaderboard():
             pickle.dump(meshLeaderboard, f)
         if logMetaStats:
             logger.debug("System: Mesh Leaderboard saved to leaderboard.pkl")
+        return True
     except Exception as e:
         logger.warning(f"System: Error saving Mesh Leaderboard: {e}")
+        return False
 
 def loadLeaderboard():
     global meshLeaderboard
@@ -2504,13 +2508,12 @@ def saveAllData():
             logger.debug("Persistence: BBS data saved")
 
         # Save leaderboard data if enabled
-        if logMetaStats:
-            saveLeaderboard()
+        if logMetaStats and saveLeaderboard():
             logger.debug("Persistence: Leaderboard data saved")
 
         # Save ban list
-        save_bbsBanList()
-        logger.debug("Persistence: Ban list saved")
+        if save_bbsBanList():
+            logger.debug("Persistence: Ban list saved")
 
         #logger.info("Persistence: Save completed")
     except Exception as e:

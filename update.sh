@@ -124,6 +124,28 @@ fi
 
 echo
 echo "----------------------------------------------"
+echo "Runtime permissions (data/, logs/)"
+echo "----------------------------------------------"
+BOT_USER="meshbot"
+for svc in mesh_bot.service pong_bot.service mesh_bot_w3_server.service; do
+    if $SUDO systemctl cat "$svc" &>/dev/null; then
+        u=$($SUDO systemctl show "$svc" -p User --value 2>/dev/null || true)
+        if [[ -n "$u" && "$u" != "0" ]]; then
+            BOT_USER="$u"
+            break
+        fi
+    fi
+done
+if [[ -x "$REPO_ROOT/etc/set-permissions.sh" ]]; then
+    $SUDO bash "$REPO_ROOT/etc/set-permissions.sh" "$BOT_USER" "$REPO_ROOT" || \
+        echo "WARN: set-permissions.sh failed (user $BOT_USER)."
+else
+    echo "WARN: etc/set-permissions.sh not found — fix manually:"
+    echo "  sudo chown -R $BOT_USER:$BOT_USER $REPO_ROOT/data $REPO_ROOT/logs"
+fi
+
+echo
+echo "----------------------------------------------"
 echo "Starting enabled units"
 echo "----------------------------------------------"
 for svc in "${UNITS[@]}"; do

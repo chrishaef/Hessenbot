@@ -2,11 +2,14 @@
 # Small Flask admin UI: edit alert/news files, browse logs, live messages.log view.
 # Started in a background thread when [webAdmin] enabled in config.ini.
 
+import glob
 import os
 import secrets
 import threading
 from html import escape as html_escape
-from typing import Optional
+from typing import List, Optional
+
+from modules.paths import path_in_repo, repo_root
 
 from flask import (
     Flask,
@@ -31,7 +34,53 @@ from markupsafe import Markup
 
 
 def _abs_path(rel_or_abs: str) -> str:
-    return os.path.abspath(os.path.join(os.getcwd(), rel_or_abs))
+    return path_in_repo(rel_or_abs)
+
+
+def _messages_log_path(log_dir: str) -> str:
+    """Path to the active messages log (handler path or logs/messages.log)."""
+    try:
+        from modules.log import msgLogger
+
+        for handler in msgLogger.handlers:
+            base = getattr(handler, "baseFilename", None)
+            if base:
+                return os.path.normpath(base)
+    except Exception:
+        pass
+    base_dir = os.path.realpath(log_dir)
+    primary = os.path.join(base_dir, "messages.log")
+    if os.path.isfile(primary):
+        return primary
+    rotated: List[str] = sorted(
+        glob.glob(os.path.join(base_dir, "messages.log*")),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    return rotated[0] if rotated else primary
+
+
+def _read_messages_log_tail(log_path: str, max_lines: int = 500) -> str:
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    zeilen = reversed(lines[-max_lines:] if len(lines) > max_lines else lines)
+    gefiltert = []
+    for z in zeilen:
+        try:
+            teile = z.strip().split(" | ")
+            if len(teile) >= 4:
+                if len(teile) > 0 and " " in teile[0]:
+                    zeitstempel = teile[0].split(" ")[1].split(",")[0]
+                else:
+                    zeitstempel = "??:??:??"
+                sender = teile[2] if len(teile) > 2 else "Unbekannt"
+                nachricht = teile[3] if len(teile) > 3 else ""
+                gefiltert.append(f"{zeitstempel} | {sender} | {nachricht}")
+            else:
+                gefiltert.append(z.strip())
+        except Exception:
+            gefiltert.append(f"[Fehler beim Parsen] → {z.strip()}")
+    return "\n".join(gefiltert)
 
 
 def _safe_log_file(log_dir: str, filename: str) -> Optional[str]:
@@ -58,8 +107,6 @@ def create_app(
         "direktnachricht": alert_path,
         "news": news_path,
     }
-    live_datei = os.path.join(log_dir, "messages.log")
-
     login_manager = LoginManager()
     login_manager.init_app(app)
     login_manager.login_view = "login"
@@ -414,28 +461,39 @@ h2 { color: #f8fafc; font-weight: 600; }
     @app.route("/live/messages")
     @login_required
     def live_messages():
-        try:
-            with open(live_datei, encoding="utf-8") as f:
-                zeilen = reversed(f.readlines())
-            gefiltert = []
-            for z in zeilen:
-                try:
-                    teile = z.strip().split(" | ")
-                    if len(teile) >= 4:
-                        if len(teile) > 0 and " " in teile[0]:
-                            zeitstempel = teile[0].split(" ")[1].split(",")[0]
-                        else:
-                            zeitstempel = "??:??:??"
-                        sender = teile[2] if len(teile) > 2 else "Unbekannt"
-                        nachricht = teile[3] if len(teile) > 3 else ""
-                        gefiltert.append(f"{zeitstempel} | {sender} | {nachricht}")
-                    else:
-                        gefiltert.append(z.strip())
-                except Exception:
-                    gefiltert.append(f"[Fehler beim Parsen] → {z.strip()}")
-            inhalt = "\n".join(gefiltert)
-        except OSError:
-            inhalt = "[Fehler beim Öffnen der Datei]"
+        import modules.settings as st
+
+        log_path = _messages_log_path(log_dir)
+        hint = (
+            f'<p class="small text-muted">Repo: <code>{html_escape(repo_root())}</code> · '
+            f'Log: <code>{html_escape(log_path)}</code></p>'
+        )
+        if not st.log_messages_to_file:
+            inhalt = (
+                "Nachrichten-Log ist deaktiviert.\n\n"
+                "In config.ini unter [general] setzen:\n"
+                "  LogMessagesToFile = True\n\n"
+                "Bot neu starten. Die Datei liegt dann unter logs/messages.log."
+            )
+        elif not os.path.isfile(log_path):
+            inhalt = (
+                f"Datei nicht gefunden:\n{log_path}\n\n"
+                "Nach dem Aktivieren von LogMessagesToFile ein paar Mesh-Nachrichten senden, "
+                "damit die Datei angelegt wird."
+            )
+        else:
+            try:
+                inhalt = _read_messages_log_tail(log_path)
+                if not inhalt.strip():
+                    inhalt = "(Datei ist leer — noch keine Nachrichten protokolliert.)"
+            except PermissionError:
+                inhalt = (
+                    f"Keine Leserechte für:\n{log_path}\n\n"
+                    f"Rechte setzen, z. B.:\n"
+                    f"  sudo ./etc/set-permissions.sh <service-user> {repo_root()}"
+                )
+            except OSError as e:
+                inhalt = f"Fehler beim Öffnen:\n{log_path}\n\n{e}"
 
         return render_template_string(
             dark_css
@@ -443,7 +501,8 @@ h2 { color: #f8fafc; font-weight: 600; }
 <meta http-equiv="refresh" content="5">
 <div class="container">
   <h2 class="mb-4 text-center">📡 Bereinigte Live-Ansicht: messages.log</h2>
-  <pre class="admin-pre">{inhalt}</pre>
+  {hint}
+  <pre class="admin-pre">{html_escape(inhalt)}</pre>
   <div class="text-center mt-3">
     <a href="{{{{url_for('choose')}}}}"
        class="btn btn-outline-light">⬅️ Zurück</a>
