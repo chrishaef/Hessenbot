@@ -1027,34 +1027,14 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
   </div>
 </div>
 {log_note}
+
+<div class="dash-panels">
+<div data-dash-panel="stats">
 <div class="row g-2 mb-4">{"".join(f'<div class="col-6 col-md-4 col-xl-3">{c}</div>' for c in cards)}</div>
 
 <div class="section-card mb-4">
   <h2 class="section-title h5"><i class="bi bi-chat-quote me-2 text-success"></i>Message of the Day</h2>
   <p class="motd-box mb-0">{motd_text}</p>
-</div>
-
-<div class="section-card mb-4">
-  <h2 class="section-title h5">
-    <i class="bi bi-inboxes me-2 text-success"></i>BBS öffentlich
-    <span class="badge text-bg-secondary ms-2 fw-normal">{bbs_count}</span>
-  </h2>
-  <p class="small text-muted mb-2">Betreff, Absender und Vorschau · neueste zuerst</p>
-  {bbs_public_html}
-</div>
-
-<div class="section-card mb-4">
-  <h2 class="section-title h5">
-    <i class="bi bi-envelope-paper me-2 text-success"></i>BBS-DM Warteschlange
-    <span class="badge text-bg-secondary ms-2 fw-normal">{dm_count}</span>
-  </h2>
-  <p class="small text-muted mb-2">Ausstehende Direktnachrichten · neueste zuerst</p>
-  {bbs_dm_html}
-</div>
-
-<div class="section-card mb-4">
-  <h2 class="section-title h5"><i class="bi bi-diagram-3 me-2 text-success"></i>NodeDB</h2>
-  {nodedb_html}
 </div>
 
 <div class="section-card mb-4">
@@ -1108,9 +1088,39 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     </div>
   </div>
 </div>
+</div>
+
+<div data-dash-panel="bbs" hidden>
+<div class="section-card mb-4">
+  <h2 class="section-title h5">
+    <i class="bi bi-inboxes me-2 text-success"></i>BBS öffentlich
+    <span class="badge text-bg-secondary ms-2 fw-normal">{bbs_count}</span>
+  </h2>
+  <p class="small text-muted mb-2">Betreff, Absender und Vorschau · neueste zuerst</p>
+  {bbs_public_html}
+</div>
+
+<div class="section-card mb-4">
+  <h2 class="section-title h5">
+    <i class="bi bi-envelope-paper me-2 text-success"></i>BBS-DM Warteschlange
+    <span class="badge text-bg-secondary ms-2 fw-normal">{dm_count}</span>
+  </h2>
+  <p class="small text-muted mb-2">Ausstehende Direktnachrichten · neueste zuerst</p>
+  {bbs_dm_html}
+</div>
+</div>
+
+<div data-dash-panel="nodedb" hidden>
+<div class="section-card mb-4">
+  <h2 class="section-title h5"><i class="bi bi-diagram-3 me-2 text-success"></i>NodeDB</h2>
+  {nodedb_html}
+</div>
+</div>
+</div>
 
 <script type="application/json" id="dash-chart-data">{chart_data_json}</script>
 <script src="/static/portal/chart.umd.min.js"></script>
 <script src="/static/portal/dashboard-charts.js"></script>
+<script src="/static/portal/dashboard-views.js"></script>
 """
 

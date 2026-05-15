@@ -196,6 +196,7 @@ def create_app(
                 title="Statistik – Hessenbot",
                 active_nav="stats",
                 particles=True,
+                dash_view_tabs=True,
             )
             + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
             + '<div class="home-content container-fluid py-4">'
