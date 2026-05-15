@@ -424,6 +424,11 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     if msg_log_events:
         merged = {e["time"]: e for e in recent_messages}
         for e in msg_log_events:
+            if e["time"] not in merged:
+                if e.get("dir") == "out":
+                    message_types["Ausgehend"] += 1
+                else:
+                    message_types["Eingehend"] += 1
             merged.setdefault(e["time"], e)
         recent_messages = sorted(merged.values(), key=lambda x: x["time"])
 
@@ -638,13 +643,18 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     raw_cmd = log.get("command_counts") or {}
     cmd: Counter = raw_cmd if isinstance(raw_cmd, Counter) else Counter(raw_cmd)
     top_cmds = cmd.most_common(12)
-    cmd_chart_labels = json.dumps([c[0] for c in top_cmds])
-    cmd_chart_values = json.dumps([c[1] for c in top_cmds])
     raw_msg = log.get("message_types") or {}
     msg_types: Counter = raw_msg if isinstance(raw_msg, Counter) else Counter(raw_msg)
     msg_keys = list(msg_types.keys())
-    msg_labels = json.dumps(msg_keys)
-    msg_values = json.dumps([msg_types[k] for k in msg_keys])
+    chart_data_json = json.dumps(
+        {
+            "cmdLabels": [c[0] for c in top_cmds],
+            "cmdValues": [c[1] for c in top_cmds],
+            "msgLabels": msg_keys,
+            "msgValues": [int(msg_types[k]) for k in msg_keys],
+        },
+        ensure_ascii=False,
+    )
     cmd_chart_body = (
         '<div class="chart-canvas-wrap"><canvas id="cmdChart"></canvas></div>'
         if top_cmds
@@ -747,54 +757,8 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {{
-  if (typeof Chart === 'undefined') return;
-  const gridColor = 'rgba(128,128,128,0.15)';
-  const tickColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6c757d';
-  const legendColor = {{ labels: {{ color: tickColor }} }} }};
-  const barOpts = {{
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {{ legend: legendColor }},
-    scales: {{
-      x: {{ ticks: {{ color: tickColor }}, grid: {{ color: gridColor }} }} }},
-      y: {{ ticks: {{ color: tickColor }}, grid: {{ color: gridColor }} }}, beginAtZero: true }}
-    }}
-  }};
-  const pieOpts = {{
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {{ legend: legendColor }}
-  }};
-  const cmdLabels = {cmd_chart_labels};
-  const cmdEl = document.getElementById('cmdChart');
-  if (cmdEl && cmdLabels.length) {{
-    new Chart(cmdEl, {{
-      type: 'bar',
-      data: {{
-        labels: cmdLabels,
-        datasets: [{{ label: 'Befehle', data: {cmd_chart_values},
-          backgroundColor: 'rgba(46, 125, 94, 0.65)' }}]
-      }},
-      options: barOpts
-    }});
-  }}
-  const msgLabels = {msg_labels};
-  const msgEl = document.getElementById('msgChart');
-  if (msgEl && msgLabels.length) {{
-    new Chart(msgEl, {{
-      type: 'doughnut',
-      data: {{
-        labels: msgLabels,
-        datasets: [{{ data: {msg_values},
-          backgroundColor: ['#2e7d5e','#20c997','#198754','#6c757d','#0d6efd','#ffc107'] }}]
-      }},
-      options: pieOpts
-    }});
-  }}
-}});
-</script>
+<script type="application/json" id="dash-chart-data">{chart_data_json}</script>
+<script src="/static/portal/chart.umd.min.js"></script>
+<script src="/static/portal/dashboard-charts.js"></script>
 """
 
