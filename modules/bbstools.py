@@ -201,6 +201,7 @@ def bbs_post_dm(toNode, message, fromNode):
 
     # save the bbsdb
     save_bbsdm()
+    logger.info(f"System: BBS DM Queued: from={int(fromNode)} to={int(toNode)}")
     return "BBS DM Posted for node " + str(toNode)
 
 def get_bbs_stats():
