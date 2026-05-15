@@ -502,7 +502,7 @@ enabled = True
 interval = 300
 
 [webAdmin]
-# Flask UI at http://<host>:<port>/ (login); old /login redirects to /
+# Flask UI: http://<host>:<port>/ = Statistik (öffentlich), /admin = Login-Backend; /login → /admin
 enabled = False
 host = 0.0.0.0
 port = 5000

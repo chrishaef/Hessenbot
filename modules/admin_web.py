@@ -109,7 +109,7 @@ def create_app(
     }
     login_manager = LoginManager()
     login_manager.init_app(app)
-    login_manager.login_view = "login"
+    login_manager.login_view = "admin_login"
 
     class User(UserMixin):
         def __init__(self, uid):
@@ -254,6 +254,69 @@ pre.admin-pre {
   line-height: 1.5;
 }
 h2 { color: #f8fafc; font-weight: 600; }
+body.page-dashboard { padding-top: 0; }
+body.page-login { padding-top: 2rem; }
+.dash-header {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 1rem; padding: 1.25rem clamp(1rem, 3vw, 2.5rem);
+  background: linear-gradient(135deg, #1a3a2a 0%, #1a2d4a 55%, #1a1d21 100%);
+  border-bottom: 1px solid #2d3a44; box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+}
+.dash-brand { display: flex; align-items: center; gap: 1rem; }
+.dash-brand h1 { margin: 0; font-size: 1.75rem; color: #f8fafc; font-weight: 700; }
+.dash-tagline { margin: 0; color: #9fb0c0; font-size: 0.95rem; }
+.dash-logo { font-size: 2.5rem; line-height: 1; }
+.btn-admin { white-space: nowrap; font-weight: 600; padding: 0.55rem 1.25rem; }
+.dash-main {
+  max-width: min(100vw - 1.5rem, 1320px); margin: 0 auto;
+  padding: 1.5rem clamp(1rem, 3vw, 2rem) 2.5rem;
+}
+.stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem; margin-bottom: 1.5rem;
+}
+.stat-card {
+  background: #1e2228; border: 1px solid #343a42; border-radius: 10px;
+  padding: 1rem 1.1rem; transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.25); }
+.stat-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: #9fb0c0; }
+.stat-value { font-size: 1.65rem; font-weight: 700; color: #7dd3fc; margin: 0.25rem 0; }
+.stat-sub { font-size: 0.82rem; color: #c5d0db; }
+.dash-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem; margin-bottom: 1.25rem;
+}
+.dash-panel {
+  background: #1a1d21; border: 1px solid #343a42; border-radius: 10px;
+  padding: 1.15rem 1.25rem;
+}
+.dash-panel h2 { font-size: 1.05rem; margin-bottom: 0.75rem; color: #e8edf2; }
+.dash-list { list-style: none; padding: 0; margin: 0; }
+.dash-list li {
+  padding: 0.45rem 0; border-bottom: 1px solid #2a3038;
+  font-size: 0.9rem; color: #dce7f0; word-break: break-word;
+}
+.dash-list li:last-child { border-bottom: none; }
+.dash-scroll { max-height: 220px; overflow-y: auto; }
+.chart-panel canvas { max-height: 200px; }
+.motd-box {
+  background: #25292e; border-radius: 8px; padding: 0.85rem 1rem;
+  border-left: 4px solid #2563eb; margin: 0; color: #eef4f8;
+}
+.login-wrap {
+  max-width: 420px; margin: 2rem auto;
+}
+.login-hero {
+  text-align: center; margin-bottom: 1.5rem;
+}
+.login-hero h1 { font-size: 1.6rem; color: #f8fafc; margin-bottom: 0.35rem; }
+.login-hero p { color: #9fb0c0; margin: 0; }
+.login-card {
+  background: #1a1d21; border: 1px solid #343a42; border-radius: 12px;
+  padding: 1.75rem; box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+}
+.login-back { display: block; text-align: center; margin-top: 1.25rem; }
 </style>
 """
 
@@ -269,15 +332,30 @@ h2 { color: #f8fafc; font-weight: 600; }
 """
         return render_template_string(raw)
 
+    @app.route("/")
+    def index_dashboard():
+        from modules.web_dashboard import collect_dashboard, render_dashboard_page
+
+        try:
+            data = collect_dashboard(log_dir)
+            body = render_dashboard_page(data, admin_url=url_for("admin_login"))
+        except Exception as e:
+            body = f'<p class="alert alert-danger">Dashboard: {html_escape(str(e))}</p>'
+        return render_template_string(
+            dark_css + f'<body class="page-dashboard">{body}</body>'
+        )
+
     @app.route("/login")
+    @app.route("/admin/login")
     def login_legacy_redirect():
-        return redirect(url_for("login"), code=301)
+        return redirect(url_for("admin_login"), code=301)
 
     @limiter.limit("5 per minute")
-    @app.route("/", methods=["GET", "POST"])
-    def login():
+    @app.route("/admin", methods=["GET", "POST"])
+    def admin_login():
         if request.method == "GET" and current_user.is_authenticated:
             return redirect(url_for("choose"))
+        error = ""
         if request.method == "POST":
             if (
                 request.form.get("username") == admin_username
@@ -285,21 +363,36 @@ h2 { color: #f8fafc; font-weight: 600; }
             ):
                 login_user(User("admin"))
                 return redirect(url_for("choose"))
-            return "Falsche Anmeldedaten."
+            error = "Falsche Anmeldedaten."
+        err_html = (
+            f'<p class="alert alert-danger">{html_escape(error)}</p>' if error else ""
+        )
         return render_template_string(
             dark_css
-            + """
-    <div class="container">
-      <h2 class="mb-4 text-center">🔐 Login</h2>
+            + f"""
+<body class="page-login">
+  <div class="login-wrap">
+    <div class="login-hero">
+      <p class="dash-logo mb-2">📡</p>
+      <h1>Hessenbot Admin</h1>
+      <p>Geschützter Bereich — Nachrichten, NodeDB, BBS, Scheduler</p>
+    </div>
+    <div class="login-card">
+      {err_html}
       <form method="post">
-        <input type="text" name="username" placeholder="Benutzername"
-               class="form-control mb-3">
-        <input type="password" name="password" placeholder="Passwort"
-               class="form-control mb-3">
-        <input type="submit" value="Login" class="btn btn-primary w-100">
+        <label class="form-label small text-muted">Benutzername</label>
+        <input type="text" name="username" autocomplete="username"
+               class="form-control mb-3" required>
+        <label class="form-label small text-muted">Passwort</label>
+        <input type="password" name="password" autocomplete="current-password"
+               class="form-control mb-3" required>
+        <input type="submit" value="Anmelden" class="btn btn-primary w-100">
       </form>
     </div>
-    """
+    <a href="{{{{ url_for('index_dashboard') }}}}" class="login-back">← Zurück zur Statistik-Übersicht</a>
+  </div>
+</body>
+"""
         )
 
     @app.route("/choose")
@@ -310,6 +403,8 @@ h2 { color: #f8fafc; font-weight: 600; }
             + """
     <div class="container text-center">
       <h2 class="mb-4">📂 Wähle eine Aktion</h2>
+      <a href="{{ url_for('index_dashboard') }}"
+         class="btn btn-outline-secondary mb-3 w-100">📊 Statistik-Übersicht (öffentlich)</a>
       <a href="{{url_for('edit', dateiname='direktnachricht')}}"
          class="btn btn-outline-light mb-3 w-100">
         ✉️ Direktnachricht bearbeiten
@@ -1154,7 +1249,7 @@ h2 { color: #f8fafc; font-weight: 600; }
     @login_required
     def logout():
         logout_user()
-        return redirect(url_for("login"))
+        return redirect(url_for("index_dashboard"))
 
     return app
 
@@ -1219,4 +1314,6 @@ def start_admin_web_background():
         )
 
     threading.Thread(target=run, daemon=True, name="web_admin").start()
-    logger.info(f"Web admin UI listening on http://{host}:{port}/")
+    logger.info(
+        f"Web UI listening on http://{host}:{port}/ (stats) and http://{host}:{port}/admin (login)"
+    )
