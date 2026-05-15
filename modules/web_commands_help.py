@@ -192,15 +192,58 @@ def _sections() -> List[CommandSection]:
         CommandSection(
             "Bulletin Board (BBS)",
             "bi-inboxes",
-            "Öffentliche Notizen und Bot-zu-Bot-Sync im Mesh.",
             (
-                CommandEntry(f"{p}bbshelp", "Hilfe zu allen BBS-Befehlen."),
-                CommandEntry(f"{p}bbslist", "Liste der BBS-Beiträge."),
-                CommandEntry(f"{p}bbspost", "Neuen Beitrag.", f"{p}bbspost $Titel #Text"),
-                CommandEntry(f"{p}bbsread", "Beitrag lesen.", f"{p}bbsread 1"),
-                CommandEntry(f"{p}bbsdelete", "Eigene Beiträge löschen."),
-                CommandEntry(f"{p}bbslink", "BBS mit anderen Bots synchronisieren."),
-                CommandEntry(f"{p}bbsinfo", "Statistik zum BBS."),
+                "Das BBS hat zwei Bereiche: öffentliche Beiträge für alle (bbsdb) und private "
+                "BBS-DMs an eine bestimmte Node (bbsdm).\n\n"
+                f"Öffentlich: {p}bbslist zeigt Nummern, {p}bbsread #Nr. liest, {p}bbspost $Betreff #Text "
+                f"schreibt. Eigene Beiträge mit {p}bbsdelete #Nr. löschen.\n\n"
+                f"BBS-DM (Store-and-Forward): {p}bbspost @Empfänger #Nachricht legt eine private Nachricht "
+                f"in die Warteschlange. Empfänger = Dezimal-Node-ID, Kurzname oder !hex. Sobald die "
+                f"Ziel-Node wieder im Mesh sendet, liefert der Bot die Mail automatisch per DM "
+                f"(Präfix „Mail:“) und entfernt sie aus der Queue. Es gibt keinen separaten "
+                f"„DM lesen“-Befehl — nur senden und warten auf Zustellung.\n\n"
+                f"Optional: {p}ping @Kurzname legt ebenfalls eine kurze BBS-DM an (wenn BBS aktiv). "
+                f"{p}bbsinfo zeigt Anzahl öffentlicher Beiträge und wartender DMs. "
+                f"{p}bbslink / {p}bbsack synchronisieren öffentliche Beiträge zwischen Bots (bbslink_enabled)."
+            ),
+            (
+                CommandEntry(f"{p}bbshelp", "Kurzliste aller BBS-Befehle (auch im Mesh)."),
+                CommandEntry(
+                    f"{p}bbslist",
+                    "Öffentliche Beiträge mit Nummer [#1], [#2], …",
+                    f"{p}bbslist",
+                ),
+                CommandEntry(
+                    f"{p}bbspost",
+                    "Öffentlicher Beitrag ($Betreff) oder BBS-DM an eine Node (@Empfänger).",
+                    f"{p}bbspost $Treffen #Ort 18 Uhr | {p}bbspost @HB9ABC #Hallo",
+                ),
+                CommandEntry(
+                    f"{p}bbsread",
+                    "Öffentlichen Beitrag anhand der Nummer aus bbslist lesen.",
+                    f"{p}bbsread #3",
+                ),
+                CommandEntry(
+                    f"{p}bbsdelete",
+                    "Eigenen öffentlichen Beitrag löschen (Admins: alle).",
+                    f"{p}bbsdelete #3",
+                ),
+                CommandEntry(
+                    f"{p}bbsinfo",
+                    "Anzahl öffentlicher Beiträge und wartender BBS-DMs.",
+                    f"{p}bbsinfo",
+                ),
+                CommandEntry(
+                    f"{p}bbslink",
+                    "Bot-zu-Bot: öffentliche Beiträge ab einer ID anfragen/senden (Whitelist).",
+                    f"{p}bbslink 0",
+                    enabled=lambda: getattr(st, "bbs_link_enabled", False),
+                ),
+                CommandEntry(
+                    f"{p}bbsack",
+                    "Bestätigung beim bbslink-Sync (nächste Nachricht vom Peer-Bot).",
+                    enabled=lambda: getattr(st, "bbs_link_enabled", False),
+                ),
             ),
             section_enabled=lambda: getattr(st, "bbs_enabled", False),
         ),
@@ -368,12 +411,7 @@ def render_commands_page_body() -> str:
   <h1 class="h3 section-title mb-3">
     <i class="bi bi-terminal text-success me-2"></i>Mesh-Befehle
   </h1>
-  <p class="text-muted mb-2">{usage}</p>
-  <p class="text-muted small mb-0">
-    Übersicht der <strong>Hessenbot</strong>-Funktionen für Mesh-Nutzer.
-    Aktive Befehle hängen von <code>config.ini</code> ab — Kurzliste im Feld mit
-    <code>{p}cmd</code>. Antworten sind oft auf ca. 160 Zeichen begrenzt.
-  </p>
+  <p class="text-muted mb-0">{usage}</p>
 </div>
 """
 

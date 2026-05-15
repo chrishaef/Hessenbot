@@ -430,6 +430,41 @@ def save_ban_list(node_ids: List[str]) -> List[str]:
     return cleaned
 
 
+def _clean_mesh_admin_ids(node_ids: List[str]) -> List[str]:
+    cleaned: List[str] = []
+    seen: set[str] = set()
+    for raw in node_ids:
+        nid = normalize_ban_node_id(str(raw))
+        if not nid or nid in seen:
+            continue
+        seen.add(nid)
+        cleaned.append(nid)
+    return cleaned
+
+
+def read_mesh_admin_list() -> List[str]:
+    import modules.settings as st
+
+    return _clean_mesh_admin_ids(list(st.bbs_admin_list))
+
+
+def save_mesh_admin_list(node_ids: List[str]) -> List[str]:
+    """Persist mesh admin node IDs to config.ini [bbs] bbs_admin_list and runtime."""
+    import modules.settings as st
+
+    cleaned = _clean_mesh_admin_ids(node_ids)
+    st.bbs_admin_list.clear()
+    st.bbs_admin_list.extend(cleaned)
+
+    if "bbs" not in st.config:
+        st.config["bbs"] = {}
+    st.config["bbs"]["bbs_admin_list"] = ",".join(cleaned)
+    with open(st.config_file, "w", encoding="utf-8") as fh:
+        st.config.write(fh)
+
+    return cleaned
+
+
 def rebuild_scheduler_jobs() -> None:
     """Clear all schedule jobs and rebuild main scheduler plus MOTD/News broadcasts."""
     import schedule
