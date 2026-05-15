@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # Small Flask admin UI: edit alert/news files, browse logs, live messages.log view.
 # Started in a background thread when [webAdmin] enabled in config.ini.
 
@@ -10,6 +10,11 @@ from html import escape as html_escape
 from typing import List, Optional
 
 from modules.paths import path_in_repo, repo_root
+from modules.admin_web_theme import (
+    ADMIN_TABS,
+    portal_shell_end,
+    portal_shell_start,
+)
 
 from flask import (
     Flask,
@@ -100,7 +105,11 @@ def create_app(
     admin_password: str,
     secret_key: str,
 ):
-    app = Flask(__name__)
+    app = Flask(
+        __name__,
+        static_folder=path_in_repo("static"),
+        static_url_path="/static",
+    )
     app.secret_key = secret_key
 
     dateien = {
@@ -121,204 +130,45 @@ def create_app(
 
     limiter = Limiter(get_remote_address, app=app, default_limits=[])
 
-    dark_css = """
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-<style>
-body {
-  background-color: #0f1214;
-  color: #e8edf2;
-  font-family: system-ui, "Segoe UI", sans-serif;
-  font-size: 1rem;
-  line-height: 1.55;
-  padding-top: 60px;
-  -webkit-font-smoothing: antialiased;
-}
-.container {
-  max-width: min(100vw - 1.5rem, 1320px);
-  width: 100%;
-  margin-left: auto;
-  margin-right: auto;
-  background-color: #1a1d21;
-  color: #e8edf2;
-  padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2.25rem);
-  border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
-}
-textarea, input[type="text"], input[type="password"], select.form-select, .form-control {
-  background-color: #25292e;
-  color: #eef4f8;
-  border: 1px solid #3d444c;
-}
-textarea:focus, input[type="text"]:focus, input[type="password"]:focus,
-select.form-select:focus, .form-control:focus {
-  background-color: #2a2f35;
-  color: #fff;
-  border-color: #5c7dff;
-  box-shadow: 0 0 0 0.2rem rgba(92, 125, 255, 0.2);
-}
-.btn-primary {
-  background-color: #2563eb;
-  border-color: #2563eb;
-}
-.btn-primary:hover {
-  background-color: #1d4ed8;
-  border-color: #1d4ed8;
-}
-a {
-  color: #7dd3fc;
-}
-a:hover {
-  color: #bae6fd;
-}
-.table-dark {
-  --bs-table-bg: #22262c;
-  --bs-table-color: #e8edf2;
-  --bs-table-border-color: #3a4149;
-  --bs-table-striped-bg: #262b32;
-}
-.alert { border-radius: 8px; padding: 12px 14px; margin-bottom: 1rem; font-size: 0.95rem; }
-.alert-success { background: #16351a; border: 1px solid #2a7a38; color: #ccefd2; }
-.alert-danger { background: #3d1818; border: 1px solid #8b3a3a; color: #fcd4d4; }
-.alert-info { background: #162d3d; border: 1px solid #2f6a8f; color: #c8e7f5; }
-.text-muted, .small.text-muted {
-  color: #9fb0c0 !important;
-}
-small, .small {
-  font-size: 0.92rem;
-  line-height: 1.5;
-  color: #c5d0db;
-}
-code {
-  color: #f0c674;
-  background: rgba(255, 255, 255, 0.06);
-  padding: 0.1em 0.35em;
-  border-radius: 4px;
-  font-size: 0.9em;
-}
-.table-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  margin: 1rem 0;
-  border-radius: 8px;
-  border: 1px solid #343a42;
-  background: #1e2228;
-}
-.table-scroll table { margin-bottom: 0; }
-table.nodes-table {
-  width: 100%;
-  min-width: 640px;
-  font-size: 0.95rem;
-  border-collapse: collapse;
-}
-table.nodes-table thead th {
-  background: #2a3038;
-  color: #f1f5f9;
-  font-weight: 600;
-  padding: 12px 11px;
-  text-align: left;
-  vertical-align: bottom;
-  border-color: #3a4149;
-  white-space: nowrap;
-}
-table.nodes-table td {
-  border-color: #3a4149 !important;
-  padding: 10px 11px;
-  vertical-align: top;
-  color: #e8edf2;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-table.nodes-table tbody tr:hover td {
-  background: rgba(125, 211, 252, 0.06);
-}
-table.nodes-table.table-bbs-dm {
-  min-width: 820px;
-}
-table.nodes-table td.cell-bbs-preview,
-table.nodes-table td.cell-dm-text {
-  min-width: 14rem;
-  max-width: min(52vw, 36rem);
-  font-size: 0.93rem;
-  line-height: 1.5;
-  color: #dce7f0;
-}
-pre.admin-pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background-color: #25292e;
-  color: #eef4f8;
-  padding: 1rem 1.15rem;
-  border-radius: 8px;
-  border: 1px solid #3d444c;
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-h2 { color: #f8fafc; font-weight: 600; }
-body.page-dashboard { padding-top: 0; }
-body.page-login { padding-top: 2rem; }
-.dash-header {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-  gap: 1rem; padding: 1.25rem clamp(1rem, 3vw, 2.5rem);
-  background: linear-gradient(135deg, #1a3a2a 0%, #1a2d4a 55%, #1a1d21 100%);
-  border-bottom: 1px solid #2d3a44; box-shadow: 0 4px 20px rgba(0,0,0,0.35);
-}
-.dash-brand { display: flex; align-items: center; gap: 1rem; }
-.dash-brand h1 { margin: 0; font-size: 1.75rem; color: #f8fafc; font-weight: 700; }
-.dash-tagline { margin: 0; color: #9fb0c0; font-size: 0.95rem; }
-.dash-logo { font-size: 2.5rem; line-height: 1; }
-.btn-admin { white-space: nowrap; font-weight: 600; padding: 0.55rem 1.25rem; }
-.dash-main {
-  max-width: min(100vw - 1.5rem, 1320px); margin: 0 auto;
-  padding: 1.5rem clamp(1rem, 3vw, 2rem) 2.5rem;
-}
-.stat-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 1rem; margin-bottom: 1.5rem;
-}
-.stat-card {
-  background: #1e2228; border: 1px solid #343a42; border-radius: 10px;
-  padding: 1rem 1.1rem; transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.25); }
-.stat-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: #9fb0c0; }
-.stat-value { font-size: 1.65rem; font-weight: 700; color: #7dd3fc; margin: 0.25rem 0; }
-.stat-sub { font-size: 0.82rem; color: #c5d0db; }
-.dash-row {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.25rem; margin-bottom: 1.25rem;
-}
-.dash-panel {
-  background: #1a1d21; border: 1px solid #343a42; border-radius: 10px;
-  padding: 1.15rem 1.25rem;
-}
-.dash-panel h2 { font-size: 1.05rem; margin-bottom: 0.75rem; color: #e8edf2; }
-.dash-list { list-style: none; padding: 0; margin: 0; }
-.dash-list li {
-  padding: 0.45rem 0; border-bottom: 1px solid #2a3038;
-  font-size: 0.9rem; color: #dce7f0; word-break: break-word;
-}
-.dash-list li:last-child { border-bottom: none; }
-.dash-scroll { max-height: 220px; overflow-y: auto; }
-.chart-panel canvas { max-height: 200px; }
-.motd-box {
-  background: #25292e; border-radius: 8px; padding: 0.85rem 1rem;
-  border-left: 4px solid #2563eb; margin: 0; color: #eef4f8;
-}
-.login-wrap {
-  max-width: 420px; margin: 2rem auto;
-}
-.login-hero {
-  text-align: center; margin-bottom: 1.5rem;
-}
-.login-hero h1 { font-size: 1.6rem; color: #f8fafc; margin-bottom: 0.35rem; }
-.login-hero p { color: #9fb0c0; margin: 0; }
-.login-card {
-  background: #1a1d21; border: 1px solid #343a42; border-radius: 12px;
-  padding: 1.75rem; box-shadow: 0 8px 28px rgba(0,0,0,0.35);
-}
-.login-back { display: block; text-align: center; margin-top: 1.25rem; }
-</style>
+    def _admin_tabs_html(active: str) -> str:
+        parts = ['<nav class="admin-tab-bar" aria-label="Admin-Navigation">']
+        for tab_id, label, endpoint in ADMIN_TABS:
+            cls = "admin-tab admin-tab--active" if active == tab_id else "admin-tab"
+            parts.append(
+                f'<a href="{url_for(endpoint)}" class="{cls}">{html_escape(label)}</a>'
+            )
+        parts.append('<span class="admin-tab-spacer"></span>')
+        parts.append(
+            f'<a href="{url_for("logout")}" class="admin-tab admin-tab--logout">Logout</a>'
+        )
+        parts.append("</nav>")
+        return "".join(parts)
+
+    def _render_admin_page(inner_html: str, *, title: str, active_tab: str) -> str:
+        block = f"""
+<div class="portal-wrapper portal-wrapper--admin">
+  <main class="portal-main">
+    <div class="home-content portal-admin-content py-4">
+      <h1 class="h3 section-title mb-3">
+        <i class="bi bi-gear-wide-connected text-success me-2"></i>{html_escape(title)}
+      </h1>
+      {_admin_tabs_html(active_tab)}
+      <div class="portal-card">
+        {inner_html}
+      </div>
+    </div>
+  </main>
+</div>
 """
+        return (
+            portal_shell_start(title=f"{title} – Hessenbot", particles=False, active_nav="stats")
+            + block
+            + portal_shell_end()
+        )
+
+    def _render_admin_template(template: str, *, title: str, active_tab: str, **ctx):
+        body = render_template_string(template, **ctx)
+        return _render_admin_page(_flash_markup() + str(body), title=title, active_tab=active_tab)
 
     def _flash_markup():
         raw = """
@@ -341,8 +191,18 @@ body.page-login { padding-top: 2rem; }
             body = render_dashboard_page(data, admin_url=url_for("admin_login"))
         except Exception as e:
             body = f'<p class="alert alert-danger">Dashboard: {html_escape(str(e))}</p>'
-        return render_template_string(
-            dark_css + f'<body class="page-dashboard">{body}</body>'
+        return (
+            portal_shell_start(
+                title="Statistik – Hessenbot",
+                active_nav="stats",
+                admin_href=url_for("admin_login"),
+                particles=True,
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4">'
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
         )
 
     @app.route("/login")
@@ -367,87 +227,81 @@ body.page-login { padding-top: 2rem; }
         err_html = (
             f'<p class="alert alert-danger">{html_escape(error)}</p>' if error else ""
         )
-        return render_template_string(
-            dark_css
-            + f"""
-<body class="page-login">
-  <div class="login-wrap">
-    <div class="login-hero">
-      <p class="dash-logo mb-2">📡</p>
-      <h1>Hessenbot Admin</h1>
-      <p>Geschützter Bereich — Nachrichten, NodeDB, BBS, Scheduler</p>
+        login_inner = f"""
+<div class="login-page-center">
+  <div class="login-card-wrap w-100" style="max-width:420px">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <div class="text-center mb-4">
+          <i class="bi bi-shield-lock text-success display-6"></i>
+          <h1 class="h4 mt-2 mb-1">Hessenbot Admin</h1>
+          <p class="text-muted small mb-0">NodeDB, BBS, Scheduler, Logs</p>
+        </div>
+        {err_html}
+        <form method="post">
+          <label class="form-label small">Benutzername</label>
+          <input type="text" name="username" autocomplete="username"
+                 class="form-control mb-3" required>
+          <label class="form-label small">Passwort</label>
+          <input type="password" name="password" autocomplete="current-password"
+                 class="form-control mb-3" required>
+          <button type="submit" class="btn btn-success w-100">Anmelden</button>
+        </form>
+        <p class="text-center mt-3 mb-0">
+          <a href="{url_for('index_dashboard')}" class="small text-muted">
+            <i class="bi bi-arrow-left me-1"></i>Zur Statistik
+          </a>
+        </p>
+      </div>
     </div>
-    <div class="login-card">
-      {err_html}
-      <form method="post">
-        <label class="form-label small text-muted">Benutzername</label>
-        <input type="text" name="username" autocomplete="username"
-               class="form-control mb-3" required>
-        <label class="form-label small text-muted">Passwort</label>
-        <input type="password" name="password" autocomplete="current-password"
-               class="form-control mb-3" required>
-        <input type="submit" value="Anmelden" class="btn btn-primary w-100">
-      </form>
-    </div>
-    <a href="{{{{ url_for('index_dashboard') }}}}" class="login-back">← Zurück zur Statistik-Übersicht</a>
   </div>
-</body>
+</div>
 """
+        return (
+            portal_shell_start(
+                title="Admin – Hessenbot",
+                body_class="page-login",
+                active_nav="stats",
+                particles=False,
+            )
+            + login_inner
+            + portal_shell_end()
         )
 
     @app.route("/choose")
     @login_required
     def choose():
-        return render_template_string(
-            dark_css
-            + """
-    <div class="container text-center">
-      <h2 class="mb-4">📂 Wähle eine Aktion</h2>
-      <a href="{{ url_for('index_dashboard') }}"
-         class="btn btn-outline-secondary mb-3 w-100">📊 Statistik-Übersicht (öffentlich)</a>
-      <a href="{{url_for('edit', dateiname='direktnachricht')}}"
-         class="btn btn-outline-light mb-3 w-100">
-        ✉️ Direktnachricht bearbeiten
-      </a>
-      <a href="{{url_for('edit', dateiname='news')}}"
-         class="btn btn-outline-light mb-3 w-100">
-        📰 News bearbeiten
-      </a>
-      <a href="{{url_for('logs')}}"
-         class="btn btn-outline-info mb-3 w-100">
-        📁 Alle Logdateien anzeigen
-      </a>
-      <a href="{{url_for('live_messages')}}"
-         class="btn btn-outline-success w-100">
-        📡 Live-Log: messages.log
-      </a>
-      <hr class="border-secondary my-4">
-      <h3 class="h6 text-secondary mb-3">Bot-Steuerung</h3>
-      <a href="{{url_for('nodes_list')}}"
-         class="btn btn-outline-warning mb-2 w-100">
-        📶 NodeDB (Knoten anzeigen / entfernen)
-      </a>
-      <a href="{{url_for('motd_edit')}}"
-         class="btn btn-outline-warning mb-2 w-100">
-        💬 Message of the Day (MOTD)
-      </a>
-      <a href="{{url_for('scheduler_edit')}}"
-         class="btn btn-outline-warning mb-2 w-100">
-        ⏰ Geplante Nachrichten (Scheduler)
-      </a>
-      <a href="{{url_for('bbs_index')}}"
-         class="btn btn-outline-warning mb-2 w-100">
-        📋 BBS (öffentliche Nachrichten)
-      </a>
-      <a href="{{url_for('bbs_dm_index')}}"
-         class="btn btn-outline-warning mb-2 w-100">
-        ✉️ BBS-Direktnachrichten (DM)
-      </a>
-      <div class="mt-4">
-        <a href="{{url_for('logout')}}" class="btn btn-secondary">🔒 Logout</a>
-      </div>
-    </div>
-    """
+        return _render_admin_template(
+            """
+<div class="row g-3">
+  <div class="col-md-6">
+    <h3 class="h6 section-title"><i class="bi bi-file-earmark-text me-2"></i>Inhalte</h3>
+    <a href="{{ url_for('edit', dateiname='direktnachricht') }}"
+       class="btn btn-outline-secondary mb-2 w-100">Direktnachricht bearbeiten</a>
+    <a href="{{ url_for('edit', dateiname='news') }}"
+       class="btn btn-outline-secondary mb-2 w-100">News bearbeiten</a>
+    <a href="{{ url_for('logs') }}"
+       class="btn btn-outline-secondary mb-2 w-100">Logdateien</a>
+    <a href="{{ url_for('live_messages') }}"
+       class="btn btn-outline-success w-100">Live: messages.log</a>
+  </div>
+  <div class="col-md-6">
+    <h3 class="h6 section-title"><i class="bi bi-broadcast me-2"></i>Bot-Steuerung</h3>
+    <a href="{{ url_for('nodes_list') }}" class="btn btn-outline-success mb-2 w-100">NodeDB</a>
+    <a href="{{ url_for('motd_edit') }}" class="btn btn-outline-success mb-2 w-100">MOTD</a>
+    <a href="{{ url_for('scheduler_edit') }}" class="btn btn-outline-success mb-2 w-100">Scheduler</a>
+    <a href="{{ url_for('bbs_index') }}" class="btn btn-outline-success mb-2 w-100">BBS öffentlich</a>
+    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-success w-100">BBS-DMs</a>
+  </div>
+</div>
+<p class="text-center mt-4 mb-0">
+  <a href="{{ url_for('index_dashboard') }}" class="btn btn-sm btn-link text-muted">
+    <i class="bi bi-bar-chart me-1"></i>Öffentliche Statistik
+  </a>
+</p>
+""",
+            title="Übersicht",
+            active_tab="home",
         )
 
     @app.route("/edit/<dateiname>", methods=["GET", "POST"])
@@ -471,9 +325,7 @@ body.page-login { padding-top: 2rem; }
         else:
             inhalt = ""
 
-        return render_template_string(
-            dark_css
-            + f"""
+        return _render_admin_template(f"""
     <div class="container">
       <h2 class="mb-4 text-center">📝 Datei: {dateiname.capitalize()}</h2>
       <form method="post">
@@ -487,6 +339,8 @@ body.page-login { padding-top: 2rem; }
       </div>
     </div>
     """,
+            title=f"Datei: {dateiname.capitalize()}",
+            active_tab="home",
             inhalt=inhalt,
         )
 
@@ -510,9 +364,7 @@ body.page-login { padding-top: 2rem; }
             for f in sorted(dateien_liste)
         )
 
-        return render_template_string(
-            dark_css
-            + f"""
+        return _render_admin_template(f"""
     <div class="container text-center">
       <h2 class="mb-4">📁 Alle Dateien im Log-Ordner</h2>
       {items if items else "<p>Keine Dateien gefunden.</p>"}
@@ -522,7 +374,9 @@ body.page-login { padding-top: 2rem; }
         </a>
       </div>
     </div>
-    """
+    """,
+            title="Logdateien",
+            active_tab="logs",
         )
 
     @app.route("/view/<filename>")
@@ -538,19 +392,15 @@ body.page-login { padding-top: 2rem; }
         except OSError:
             inhalt = "[Fehler beim Öffnen der Datei]"
 
-        return render_template_string(
-            dark_css
-            + f"""
-    <div class="container">
-      <h2 class="mb-4 text-center">📄 Datei: {filename}</h2>
+        return _render_admin_template(f"""
+      <p class="text-muted small mb-2">Datei: <code>{html_escape(filename)}</code></p>
       <pre class="admin-pre">{inhalt}</pre>
       <div class="text-center mt-3">
-        <a href="{{{{url_for('logs')}}}}" class="btn btn-outline-light">
-          ⬅️ Zurück zur Übersicht
-        </a>
+        <a href="{{{{ url_for('logs') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
       </div>
-    </div>
-    """
+    """,
+            title=f"Log: {filename}",
+            active_tab="logs",
         )
 
     @app.route("/live/messages")
@@ -590,20 +440,17 @@ body.page-login { padding-top: 2rem; }
             except OSError as e:
                 inhalt = f"Fehler beim Öffnen:\n{log_path}\n\n{e}"
 
-        return render_template_string(
-            dark_css
-            + f"""
+        return _render_admin_template(
+            f"""
 <meta http-equiv="refresh" content="5">
-<div class="container">
-  <h2 class="mb-4 text-center">📡 Bereinigte Live-Ansicht: messages.log</h2>
   {hint}
   <pre class="admin-pre">{html_escape(inhalt)}</pre>
   <div class="text-center mt-3">
-    <a href="{{{{url_for('choose')}}}}"
-       class="btn btn-outline-light">⬅️ Zurück</a>
+    <a href="{{{{ url_for('logs') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
   </div>
-</div>
-"""
+""",
+            title="Live messages.log",
+            active_tab="logs",
         )
 
     @app.route("/nodes")
@@ -614,16 +461,12 @@ body.page-login { padding-top: 2rem; }
         try:
             ifaces = ops.iter_radio_interfaces()
         except Exception as e:
-            return (
-                render_template_string(
-                    dark_css
-                    + _flash_markup()
-                    + """
-<div class="container">
+            return (_render_admin_template("""
   <p class="alert alert-danger">System-Modul: {{ err }}</p>
-  <a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a>
-</div>
+  <a href="{{ url_for('nodes_list') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>
 """,
+                    title="NodeDB",
+                    active_tab="nodes",
                     err=str(e),
                 ),
                 500,
@@ -679,18 +522,11 @@ body.page-login { padding-top: 2rem; }
 <thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
 <tbody>{"".join(rows_html)}</tbody></table></div>"""
 
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + """
-<div class="container">
-  <h2 class="mb-4">📶 Meshtastic NodeDB</h2>
+        return _render_admin_template("""
   {{ body }}
-  <div class="text-center mt-4">
-    <a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a>
-  </div>
-</div>
 """,
+            title="NodeDB",
+            active_tab="nodes",
             body=Markup(body),
         )
 
@@ -732,22 +568,15 @@ body.page-login { padding-top: 2rem; }
                 flash("MOTD in config.ini gespeichert und im laufenden Bot übernommen.", "success")
             return redirect(url_for("motd_edit"))
 
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + """
-<div class="container">
-  <h2 class="mb-4">💬 Message of the Day</h2>
+        return _render_admin_template("""
   <form method="post">
     <textarea name="motd" rows="8" class="form-control mb-3">{{ motd }}</textarea>
     <input type="submit" value="Speichern" class="btn btn-success w-100">
   </form>
   <p class="small text-muted mt-3">Wird in <code>[general] motd</code> geschrieben; der Bot nutzt <code>my_settings.MOTD</code>.</p>
-  <div class="text-center mt-3">
-    <a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a>
-  </div>
-</div>
 """,
+            title="MOTD",
+            active_tab="motd",
             motd=st.MOTD,
         )
 
@@ -850,12 +679,7 @@ body.page-login { padding-top: 2rem; }
         opt_parts.append("</select>")
         schedule_select_html = Markup("".join(opt_parts))
 
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + """
-<div class="container">
-  <h2 class="mb-4">⏰ Scheduler</h2>
+        return _render_admin_template("""
   <form method="post">
     <input type="hidden" name="_prev_enabled" value="{{ prev }}">
     <div class="form-check mb-3">
@@ -911,11 +735,9 @@ body.page-login { padding-top: 2rem; }
     <input type="submit" value="Speichern" class="btn btn-success w-100">
   </form>
   <p class="small text-muted mt-3">Vollständige Optionen: <code>config.template</code> → <code>[scheduler]</code>.</p>
-  <div class="text-center mt-3">
-    <a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a>
-  </div>
-</div>
 """,
+            title="Scheduler",
+            active_tab="scheduler",
             prev=prev,
             chk_en=chk_en,
             chk_sm=chk_sm,
@@ -980,16 +802,12 @@ body.page-login { padding-top: 2rem; }
             + f'<a href="{url_for("bbs_dm_index")}">BBS-DMs verwalten</a></p>'
         )
 
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + """
-<div class="container">
-  <h2 class="mb-4">📋 BBS — öffentliche Nachrichten</h2>
+        return _render_admin_template("""
   {{ body|safe }}
-  <div class="text-center mt-3"><a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a></div>
-</div>
+  <div class="text-center mt-3"><a href="{{ url_for('bbs_index') }}" class="btn btn-outline-secondary btn-sm">Liste</a></div>
 """,
+            title="BBS",
+            active_tab="bbs",
             body=Markup(body),
         )
 
@@ -1011,20 +829,17 @@ body.page-login { padding-top: 2rem; }
         except (TypeError, ValueError):
             fn_h = html_escape(str(fn))
         when = html_escape(str(m[4])) if len(m) > 4 else ""
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + f"""
-<div class="container">
-  <h2 class="mb-4">📋 BBS #{mid}</h2>
+        return _render_admin_template(
+            f"""
   <p><strong>Betreff:</strong> {subj}</p>
   <p><strong>Von:</strong> <code>{fn_h}</code> &nbsp; <strong>Zeit:</strong> {when}</p>
   <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
-    <a href="{{{{ url_for('bbs_index') }}}}" class="btn btn-outline-light">Zurück zur Liste</a>
+    <a href="{{{{ url_for('bbs_index') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
   </div>
-</div>
 """,
+            title=f"BBS #{mid}",
+            active_tab="bbs",
         )
 
     @app.route("/bbs/new", methods=["GET", "POST"])
@@ -1041,12 +856,8 @@ body.page-login { padding-top: 2rem; }
                 flash(bbs.bbs_post_message(subj, body_txt, 0), "success")
             return redirect(url_for("bbs_index"))
 
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + """
-<div class="container">
-  <h2 class="mb-4">📋 Neue BBS-Nachricht</h2>
+        return _render_admin_template(
+            """
   <p class="small text-muted">Wird wie <code>bbspost</code> mit Absender-Node <code>0</code> (Web-Admin) eingetragen.</p>
   <form method="post">
     <label>Betreff</label>
@@ -1056,10 +867,11 @@ body.page-login { padding-top: 2rem; }
     <input type="submit" value="Veröffentlichen" class="btn btn-success w-100">
   </form>
   <div class="text-center mt-3">
-    <a href="{{ url_for('bbs_index') }}" class="btn btn-outline-light">Abbrechen / Liste</a>
+    <a href="{{ url_for('bbs_index') }}" class="btn btn-outline-secondary btn-sm">Abbrechen</a>
   </div>
-</div>
 """,
+            title="Neue BBS-Nachricht",
+            active_tab="bbs",
         )
 
     @app.route("/bbs/delete/<int:mid>", methods=["POST"])
@@ -1130,16 +942,12 @@ body.page-login { padding-top: 2rem; }
             + f"<tbody>{table}</tbody></table></div>"
         )
 
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + """
-<div class="container">
-  <h2 class="mb-4">✉️ BBS — Direktnachrichten</h2>
+        return _render_admin_template(
+            """
   {{ body|safe }}
-  <div class="text-center mt-3"><a href="{{ url_for('choose') }}" class="btn btn-outline-light">Zurück</a></div>
-</div>
 """,
+            title="BBS Direktnachrichten",
+            active_tab="bbs",
             body=Markup(body),
         )
 
@@ -1162,19 +970,16 @@ body.page-login { padding-top: 2rem; }
         except (TypeError, ValueError):
             from_h = html_escape(str(from_n))
         body_esc = html_escape(text)
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + f"""
-<div class="container">
-  <h2 class="mb-4">✉️ BBS-DM Zeile #{idx}</h2>
+        return _render_admin_template(
+            f"""
   <p><strong>An:</strong> <code>{to_h}</code> &nbsp; <strong>Von:</strong> <code>{from_h}</code></p>
   <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
-    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-light">Zurück zur Liste</a>
+    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
   </div>
-</div>
 """,
+            title=f"BBS-DM #{idx}",
+            active_tab="bbs",
         )
 
     @app.route("/bbs/dm/new", methods=["GET", "POST"])
@@ -1212,13 +1017,9 @@ body.page-login { padding-top: 2rem; }
                 flash(bbs.bbs_post_dm(to_node, body_txt.strip(), from_node), "success")
             return redirect(url_for("bbs_dm_index"))
 
-        return render_template_string(
-            dark_css
-            + _flash_markup()
-            + """
-<div class="container">
-  <h2 class="mb-4">✉️ Neue BBS-DM</h2>
-  <p class="small text-muted">Wie <code>bbspost @Ziel #Text</code>: Ziel als Dezimal-Node-ID oder Meshtastic-<code>!hex</code> (9 Zeichen).</p>
+        return _render_admin_template(
+            """
+  <p class="small text-muted">Wie <code>bbspost @Ziel #Text</code>: Ziel als Dezimal-Node-ID oder Meshtastic-<code>!hex</code>.</p>
   <form method="post">
     <label>Ziel-Node</label>
     <input type="text" name="to_node" class="form-control mb-2" placeholder="z.B. 2813308004 oder !a1b2c3d4" required>
@@ -1229,10 +1030,11 @@ body.page-login { padding-top: 2rem; }
     <input type="submit" value="Absenden" class="btn btn-success w-100">
   </form>
   <div class="text-center mt-3">
-    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-light">Abbrechen</a>
+    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Abbrechen</a>
   </div>
-</div>
 """,
+            title="Neue BBS-DM",
+            active_tab="bbs",
         )
 
     @app.route("/bbs/dm/delete/<int:idx>", methods=["POST"])

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # Public bot statistics page (Flask), inspired by etc/report_generator5.py log parsing.
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime
 from html import escape as html_escape
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from modules.paths import path_in_repo, repo_root
 
@@ -128,7 +128,7 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
             errors.insert(0, line.strip()[:200])
 
         bbs_match = re.search(
-            r"📡BBSdb has (\d+) messages.*?Messages waiting: (\d+)", line
+            r"ðŸ“¡BBSdb has (\d+) messages.*?Messages waiting: (\d+)", line
         )
         if bbs_match:
             stats["bbs_messages"] = int(bbs_match.group(1))
@@ -150,8 +150,6 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
                     stats["node1_uptime"] = summary
                 elif iface == "2":
                     stats["firmware2_version"] = fw
-                    stats["nodeCount2"] = total
-                    stats["nodeCountOnline2"] = online
                     stats["node2_uptime"] = summary
 
         if "Autoresponder Started for Device" in line:
@@ -191,22 +189,16 @@ def _host_info() -> Dict[str, str]:
                 .strip()
             )
 
-        uptime = run("uptime -p")
-        mem_total = run("free -m | awk '/Mem:/ {print $2}'")
-        mem_avail = run("free -m | awk '/Mem:/ {print $7}'")
-        disk_total = run("df -h / | awk 'NR==2 {print $2}'")
-        disk_free = run("df -h / | awk 'NR==2 {print $4}'")
         return {
-            "uptime": uptime,
-            "memory": f"{mem_avail} / {mem_total} MB frei",
-            "disk": f"{disk_free} frei von {disk_total}",
+            "uptime": run("uptime -p"),
+            "memory": f"{run('free -m | awk \'/Mem:/ {print $7}\'')} / {run('free -m | awk \'/Mem:/ {print $2}\'')} MB frei",
+            "disk": f"{run('df -h / | awk \'NR==2 {print $4}\'')} frei von {run('df -h / | awk \'NR==2 {print $2}\'')}",
         }
     except Exception:
         return {"uptime": "—", "memory": "—", "disk": "—"}
 
 
 def collect_runtime_stats() -> Dict[str, Any]:
-    """Live data from the running bot (settings, BBS, NodeDB)."""
     import modules.settings as st
 
     out: Dict[str, Any] = {
@@ -241,7 +233,7 @@ def collect_runtime_stats() -> Dict[str, Any]:
             local = next((r for r in rows if r.get("is_self")), None)
             if local:
                 out["node_summary"].append(
-                    f"IF{i}: {local['shortName']} ({local['node_id']}) — {len(rows)} Knoten in NodeDB"
+                    f"IF{i}: {local['shortName']} ({local['node_id']}) — {len(rows)} Knoten"
                 )
             else:
                 out["node_summary"].append(f"IF{i}: {len(rows)} Knoten in NodeDB")
@@ -267,19 +259,20 @@ def collect_dashboard(log_dir: str) -> Dict[str, Any]:
     }
 
 
-def _stat_card(title: str, value: str, sub: str = "") -> str:
-    sub_html = f'<div class="stat-sub">{html_escape(sub)}</div>' if sub else ""
+def _metric_card(title: str, value: str, sub: str = "", accent: str = "") -> str:
+    val_cls = f" metric-value {accent}" if accent else "metric-value"
+    sub_html = f'<div class="metric-label">{html_escape(sub)}</div>' if sub else ""
     return f"""
-    <div class="stat-card">
-      <div class="stat-title">{html_escape(title)}</div>
-      <div class="stat-value">{html_escape(value)}</div>
+    <div class="metric-card">
+      <div class="metric-label">{html_escape(title)}</div>
+      <div class="{val_cls.strip()}">{html_escape(value)}</div>
       {sub_html}
     </div>"""
 
 
 def _list_items(items: List[str], empty: str = "Keine Einträge") -> str:
     if not items:
-        return f"<li class='text-muted'>{html_escape(empty)}</li>"
+        return f'<li class="text-muted">{html_escape(empty)}</li>'
     return "".join(f"<li>{html_escape(str(x))}</li>" for x in items)
 
 
@@ -296,22 +289,23 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
     msg_values = json.dumps(list(msg_types.values()) or [0])
 
     cards = [
-        _stat_card("Nachrichten (Log)", str(log["total_messages"]), "aus meshbot.log"),
-        _stat_card("Befehle (unique)", str(len(cmd)), f"{sum(cmd.values())} Aufrufe gesamt"),
-        _stat_card("Nutzer (Log)", str(len(log["unique_users"])), "eindeutige Absender"),
-        _stat_card(
+        _metric_card("Nachrichten", str(log["total_messages"]), "meshbot.log"),
+        _metric_card("Befehle", str(len(cmd)), f"{sum(cmd.values())} Aufrufe", "text-success"),
+        _metric_card("Nutzer", str(len(log["unique_users"])), "eindeutig", "text-info"),
+        _metric_card(
             "BBS öffentlich",
             str(rt["bbs_public_count"]),
-            "live" if rt["bbs_enabled"] else "BBS deaktiviert",
+            "live" if rt["bbs_enabled"] else "deaktiviert",
         ),
-        _stat_card("BBS DMs", str(rt["bbs_dm_count"]), "ohne Platzhalter-Zeile 0"),
-        _stat_card(
+        _metric_card("BBS DMs", str(rt["bbs_dm_count"]), "ohne Zeile 0"),
+        _metric_card(
             "Mesh-Knoten",
             str(rt["mesh_nodes_total"]),
-            f"{rt['interfaces_active']} aktive(s) Radio(s)",
+            f"{rt['interfaces_active']} Radio(s)",
+            "text-success",
         ),
-        _stat_card("Warnungen", str(len(log["warnings"])), "letzte aus Log"),
-        _stat_card("Fehler", str(len(log["errors"])), "letzte aus Log"),
+        _metric_card("Warnungen", str(len(log["warnings"])), "Log"),
+        _metric_card("Fehler", str(len(log["errors"])), "Log"),
     ]
 
     recent_cmds = [
@@ -320,88 +314,103 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
     recent_msgs = [
         f"{ts}: {label}" for ts, label in reversed(log["message_timestamps"][-12:])
     ]
-
     node_lines = rt["node_summary"] or ["Kein Radio verbunden"]
-    log_note = log.get("log_error") or f"{log['log_lines']} Zeilen gelesen"
+    log_note = ""
+    if log.get("log_error"):
+        log_note = f'<p class="alert alert-info mb-3"><i class="bi bi-info-circle me-2"></i>{html_escape(log["log_error"])}</p>'
+    else:
+        log_note = f'<p class="small text-muted mb-3"><i class="bi bi-file-text me-1"></i>{html_escape(str(log["log_lines"]))} Zeilen · {html_escape(data["log_path"])}</p>'
 
     return f"""
-<header class="dash-header">
-  <div class="dash-brand">
-    <span class="dash-logo">📡</span>
-    <div>
-      <h1>Hessenbot</h1>
-      <p class="dash-tagline">Mesh-Statistik · Stand {html_escape(data["generated_at"])}</p>
+<div class="hero-section mb-4">
+  <div class="row align-items-center g-3">
+    <div class="col-lg-8">
+      <h1 class="display-6 fw-bold mb-2">
+        <i class="bi bi-broadcast text-success me-2"></i>Hessenbot
+      </h1>
+      <p class="intro-text mb-0">
+        Live-Statistik aus Log und laufendem Bot · Stand {html_escape(data["generated_at"])}
+      </p>
+    </div>
+    <div class="col-lg-4 text-lg-end">
+      <a href="{html_escape(admin_url)}" class="btn btn-success">
+        <i class="bi bi-shield-lock me-2"></i>Admin-Bereich
+      </a>
     </div>
   </div>
-  <a href="{html_escape(admin_url)}" class="btn btn-primary btn-admin">🔐 Admin-Bereich</a>
-</header>
+</div>
+{log_note}
+<div class="row g-2 mb-4">{"".join(f'<div class="col-6 col-md-4 col-xl-3">{c}</div>' for c in cards)}</div>
 
-<main class="dash-main">
-  {"<p class='alert alert-info'>" + html_escape(log_note) + "</p>" if log.get("log_error") else ""}
-
-  <section class="stat-grid">{"".join(cards)}</section>
-
-  <section class="dash-row">
-    <div class="dash-panel">
-      <h2>📻 Funk / NodeDB</h2>
-      <ul class="dash-list">{_list_items(node_lines)}</ul>
-      <p class="small text-muted mt-2">
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="section-card h-100">
+      <h2 class="section-title h5"><i class="bi bi-reception-4 text-success me-2"></i>Funk / NodeDB</h2>
+      <ul class="dash-list mb-0">{_list_items(node_lines)}</ul>
+      <p class="small text-muted mt-3 mb-0">
         IF1: {html_escape(str(log.get("node1_name", "—")))} · FW {html_escape(str(log.get("firmware1_version", "—")))}<br>
         IF2: {html_escape(str(log.get("node2_name", "—")))} · FW {html_escape(str(log.get("firmware2_version", "—")))}
       </p>
     </div>
-    <div class="dash-panel">
-      <h2>🖥 Host</h2>
-      <ul class="dash-list">
+  </div>
+  <div class="col-lg-6">
+    <div class="section-card h-100">
+      <h2 class="section-title h5"><i class="bi bi-pc-display text-success me-2"></i>Host</h2>
+      <ul class="dash-list mb-0">
         <li>Uptime: {html_escape(host["uptime"])}</li>
         <li>RAM: {html_escape(host["memory"])}</li>
         <li>Disk: {html_escape(host["disk"])}</li>
       </ul>
-      <p class="small text-muted mt-2">Repo: <code>{html_escape(data["repo"])}</code></p>
     </div>
-  </section>
+  </div>
+</div>
 
-  <section class="dash-row">
-    <div class="dash-panel chart-panel">
-      <h2>📊 Top-Befehle</h2>
-      <canvas id="cmdChart" height="120"></canvas>
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="section-card">
+      <h2 class="section-title h5"><i class="bi bi-bar-chart text-success me-2"></i>Top-Befehle</h2>
+      <canvas id="cmdChart" height="140"></canvas>
     </div>
-    <div class="dash-panel chart-panel">
-      <h2>💬 Nachrichtentypen</h2>
-      <canvas id="msgChart" height="120"></canvas>
+  </div>
+  <div class="col-lg-6">
+    <div class="section-card">
+      <h2 class="section-title h5"><i class="bi bi-pie-chart text-success me-2"></i>Nachrichtentypen</h2>
+      <canvas id="msgChart" height="140"></canvas>
     </div>
-  </section>
+  </div>
+</div>
 
-  <section class="dash-row">
-    <div class="dash-panel">
-      <h2>🕐 Letzte Befehle</h2>
-      <ul class="dash-list dash-scroll">{_list_items(recent_cmds, "Noch keine Befehle im Log")}</ul>
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="section-card">
+      <h2 class="section-title h5"><i class="bi bi-clock-history me-2 text-success"></i>Letzte Befehle</h2>
+      <ul class="dash-list dash-scroll mb-0">{_list_items(recent_cmds, "Noch keine Befehle")}</ul>
     </div>
-    <div class="dash-panel">
-      <h2>📨 Letzte Nachrichten</h2>
-      <ul class="dash-list dash-scroll">{_list_items(recent_msgs, "Noch keine Nachrichten im Log")}</ul>
+  </div>
+  <div class="col-lg-6">
+    <div class="section-card">
+      <h2 class="section-title h5"><i class="bi bi-chat-dots me-2 text-success"></i>Letzte Nachrichten</h2>
+      <ul class="dash-list dash-scroll mb-0">{_list_items(recent_msgs, "Noch keine Nachrichten")}</ul>
     </div>
-  </section>
+  </div>
+</div>
 
-  <section class="dash-panel">
-    <h2>💬 Message of the Day</h2>
-    <p class="motd-box">{html_escape(str(rt.get("motd", "—"))[:500])}</p>
-  </section>
-
-  <p class="text-center mt-4 mb-2">
-    <a href="{html_escape(admin_url)}" class="btn btn-outline-light">Zum geschützten Admin-Backend →</a>
-  </p>
-</main>
+<div class="section-card mb-3">
+  <h2 class="section-title h5"><i class="bi bi-chat-quote me-2 text-success"></i>Message of the Day</h2>
+  <p class="motd-box mb-0">{html_escape(str(rt.get("motd", "—"))[:500])}</p>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {{
+  const gridColor = 'rgba(128,128,128,0.15)';
+  const tickColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6c757d';
   const opts = {{
     responsive: true,
-    plugins: {{ legend: {{ labels: {{ color: '#c5d0db' }} }} }},
+    plugins: {{ legend: {{ labels: {{ color: tickColor }} }} }},
     scales: {{
-      x: {{ ticks: {{ color: '#9fb0c0' }}, grid: {{ color: 'rgba(255,255,255,0.06)' }} }} }},
-      y: {{ ticks: {{ color: '#9fb0c0' }}, grid: {{ color: 'rgba(255,255,255,0.06)' }} }}, beginAtZero: true }}
+      x: {{ ticks: {{ color: tickColor }}, grid: {{ color: gridColor }} }} }},
+      y: {{ ticks: {{ color: tickColor }}, grid: {{ color: gridColor }} }}, beginAtZero: true }}
     }}
   }};
   const cmdLabels = {cmd_chart_labels};
@@ -411,7 +420,7 @@ document.addEventListener('DOMContentLoaded', function() {{
       data: {{
         labels: cmdLabels,
         datasets: [{{ label: 'Befehle', data: {cmd_chart_values},
-          backgroundColor: 'rgba(37, 99, 235, 0.65)' }}]
+          backgroundColor: 'rgba(46, 125, 94, 0.65)' }}]
       }},
       options: opts
     }});
@@ -423,11 +432,12 @@ document.addEventListener('DOMContentLoaded', function() {{
       data: {{
         labels: msgLabels,
         datasets: [{{ data: {msg_values},
-          backgroundColor: ['#2563eb','#10b981','#f59e0b','#ef4444'] }}]
+          backgroundColor: ['#2e7d5e','#20c997','#198754','#6c757d'] }}]
       }},
-      options: {{ responsive: true, plugins: {{ legend: {{ labels: {{ color: '#c5d0db' }} }} }} }} }}
+      options: {{ responsive: true, plugins: {{ legend: {{ labels: {{ color: tickColor }} }} }} }} }}
     }});
   }}
 }});
 </script>
 """
+
