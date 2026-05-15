@@ -72,16 +72,12 @@ def setup_scheduler(
     try:
         # Methods imported from mesh_bot for scheduling tasks
         from mesh_bot import (
-            tell_joke,
             welcome_message,
             handle_wxc,
             handle_moon,
             handle_sun,
-            handle_riverFlow,
-            handle_tide,
             handle_satpass,
             handleNews,
-            handle_mwx,
             sysinfo,
         )
         from modules.rss import get_rss_feed
@@ -140,11 +136,6 @@ def setup_scheduler(
             elif 'min' in schedulerValue:
                 schedule.every(schedulerIntervalInt).minutes.do(send_sched_msg)
             logger.debug(f"System: Starting the basic scheduler to send '{scheduler_message}' on schedule '{schedulerValue}' every {effective_interval} interval at time '{schedulerTime}' on Device:{schedulerInterface} Channel:{schedulerChannel}")
-        elif 'joke' in schedulerValue:
-            schedule.every(schedulerIntervalInt).minutes.do(
-                lambda: send_message(tell_joke(), schedulerChannel, 0, schedulerInterface)
-            )
-            logger.debug(f"System: Starting the joke scheduler to send a joke every {schedulerIntervalInt} minutes on Device:{schedulerInterface} Channel:{schedulerChannel}")
         elif 'link' in schedulerValue:
             schedule.every(schedulerIntervalInt).hours.do(
                 lambda: send_message("bbslink MeshBot looking for peers", schedulerChannel, 0, schedulerInterface)
@@ -165,21 +156,11 @@ def setup_scheduler(
                 lambda: send_message(get_rss_feed(''), schedulerChannel, 0, schedulerInterface)
             )
             logger.debug(f"System: Starting the RSS scheduler to send RSS feeds every {schedulerIntervalInt} hours on Device:{schedulerInterface} Channel:{schedulerChannel}")
-        elif 'mwx' in schedulerValue:
-            schedule.every().day.at(schedulerTime).do(
-                lambda: send_message(handle_mwx(0, schedulerInterface, 'mwx'), schedulerChannel, 0, schedulerInterface)
-            )
-            logger.debug(f"System: Starting the marine weather scheduler to send marine weather updates at {schedulerTime} on Device:{schedulerInterface} Channel:{schedulerChannel}")
         elif 'sysinfo' in schedulerValue:
             schedule.every(schedulerIntervalInt).hours.do(
                 lambda: send_message(sysinfo('', 0, schedulerInterface, False), schedulerChannel, 0, schedulerInterface)
             )
             logger.debug(f"System: Starting the sysinfo scheduler to send system information every {schedulerIntervalInt} hours on Device:{schedulerInterface} Channel:{schedulerChannel}")
-        elif 'tide' in schedulerValue:
-            schedule.every().day.at(schedulerTime).do(
-                lambda: send_message(handle_tide(0, schedulerInterface, schedulerChannel), schedulerChannel, 0, schedulerInterface)
-            )
-            logger.debug(f"System: Starting the tide scheduler to send tide information at {schedulerTime} on Device:{schedulerInterface} Channel:{schedulerChannel}")
         elif 'solar' in schedulerValue:
             schedule.every().day.at(schedulerTime).do(
                 lambda: send_message(handle_sun(0, schedulerInterface, schedulerChannel), schedulerChannel, 0, schedulerInterface)
@@ -195,7 +176,7 @@ def setup_scheduler(
             try:
                 from modules.custom_scheduler import setup_custom_schedules # type: ignore
                 setup_custom_schedules(
-                    send_message, tell_joke, welcome_message, handle_wxc, MOTD,
+                    send_message, welcome_message, handle_wxc, MOTD,
                     schedulerChannel, schedulerInterface)
                 logger.debug(f"System: Starting the custom_scheduler.py ")
                 schedule.every().monday.at("12:00").do(

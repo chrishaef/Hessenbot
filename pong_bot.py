@@ -548,15 +548,6 @@ def handle_boot(mesh=True):
                 else:
                     logger.debug("System: Location Telemetry Enabled using NOAA API")
             print("debug my_settings.scheduler_enabled:", my_settings.scheduler_enabled)
-            if my_settings.dad_jokes_enabled:
-                logger.debug("System: Dad Jokes Enabled!")
-            
-            if my_settings.coastalEnabled:
-                logger.debug("System: Coastal Forecast and Tide Enabled!")
-            
-            if games_enabled:
-                logger.debug("System: Games Enabled!")
-            
             if my_settings.wikipedia_enabled:
                 if my_settings.use_kiwix_server:
                     logger.debug(f"System: Wikipedia search Enabled using Kiwix server at {kiwix_url}")

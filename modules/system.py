@@ -85,11 +85,7 @@ if location_enabled:
     from modules.locationdata import * # from the spudgunman/meshing-around repo
     trap_list = trap_list + trap_list_location
     help_message = help_message + ", whereami, wx, howfar"
-    if enableGBalerts and not enableDEalerts:
-        from modules.globalalert import * # from the spudgunman/meshing-around repo
-        logger.warning(f"System: GB Alerts not functional at this time need to find a source API")
-        #help_message = help_message + ", ukalert, ukwx, ukflood"
-    if enableDEalerts and not enableGBalerts:
+    if enableDEalerts:
         from modules.globalalert import * # from the spudgunman/meshing-around repo
         trap_list = trap_list + trap_list_location_de
         help_message = help_message + ", dealert, warning"
@@ -99,33 +95,12 @@ if location_enabled:
         trap_list = trap_list + ("wxc",)
         help_message = help_message + ", wxc"
         from modules.wx_meteo import * # from the spudgunman/meshing-around repo
-    else:
-        # NOAA only features
-        help_message = help_message + ", wxa, wxalert"
-
-    # USGS riverFlow Configuration
-    if riverListDefault != ['']:
-        help_message = help_message + ", riverflow"
-
     if repeater_lookup != False:
         help_message = help_message + ", rlist"
 
     if solar_conditions_enabled:
         help_message = help_message + ", howtall"
 
-# NOAA alerts needs location module
-if wxAlertBroadcastEnabled or ipawsAlertEnabled or volcanoAlertBroadcastEnabled or eAlertBroadcastEnabled: #eAlertBroadcastEnabled depricated
-    from modules.locationdata import * # from the spudgunman/meshing-around repo
-    # limited subset, this should be done better but eh..
-    trap_list = trap_list + ("wx", "wxa", "wxalert", "ea", "ealert", "valert")
-    help_message = help_message + ", ealert, valert"
-
-# NOAA Coastal Waters Forecasts
-if coastalEnabled:
-    from modules.locationdata import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("mwx","tide",)
-    help_message = help_message + ", mwx, tide"
-        
 # BBS Configuration
 if bbs_enabled:
     from modules.bbstools import * # from the spudgunman/meshing-around repo
@@ -134,12 +109,6 @@ if bbs_enabled:
 else:
     bbs_help = False
     bbs_list_messages = False
-
-# Dad Jokes Configuration
-if dad_jokes_enabled:
-    from modules.games.joke import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("joke",)
-    help_message = help_message + ", joke"
 
 if dxspotter_enabled:
     from modules.dxspot import handledxcluster
@@ -169,109 +138,7 @@ if llm_enabled:
     trap_list = trap_list + trap_list_llm # items ask:
     help_message = help_message + ", askai"
 
-# DopeWars Configuration
-if dopewars_enabled:
-    from modules.games.dopewar import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("dopewars",)
-    games_enabled = True
-
-# Lemonade Stand Configuration
-if lemonade_enabled:
-    from modules.games.lemonade import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("lemonstand",)
-    games_enabled = True
-
-# BlackJack Configuration
-if blackjack_enabled:
-    from modules.games.blackjack import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("blackjack",)
-    games_enabled = True
-
-# Video Poker Configuration
-if videoPoker_enabled:
-    from modules.games.videopoker import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("videopoker",)
-    games_enabled = True
-
-if mastermind_enabled:
-    from modules.games.mmind import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("mastermind",)
-    games_enabled = True
-
-if golfSim_enabled:
-    from modules.games.golfsim import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("golfsim",)
-    games_enabled = True
-
-if hangman_enabled:
-    from modules.games.hangman import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("hangman",)
-    games_enabled = True
-
-if hamtest_enabled:
-    from modules.games.hamtest import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("hamtest",)
-    games_enabled = True
-
-if tictactoe_enabled:
-    from modules.games.tictactoe import TicTacToe # from the spudgunman/meshing-around repo
-    tictactoe = TicTacToe(display_module=None)
-    trap_list = trap_list + ("tictactoe","tic-tac-toe",)
-
-if quiz_enabled:
-    from modules.games.quiz import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + trap_list_quiz # items quiz, q:
-    help_message = help_message + ", quiz"
-    # games not enabled for quiz
-
-if survey_enabled:
-    from modules.survey import * # from the spudgunman/meshing-around repo
-    trap_list = trap_list + trap_list_survey # items survey, s:
-    help_message = help_message + ", survey"
-    games_enabled = True
-
-if wordOfTheDay:
-    from modules.games.wodt import WordOfTheDayGame # from the spudgunman/meshing-around repo
-    theWordOfTheDay = WordOfTheDayGame()
-    # this runs in background and wont enable other games
-
-if battleship_enabled:
-    from modules.games.battleship import playBattleship # from the spudgunman/meshing-around repo
-    trap_list = trap_list + ("battleship",)
-    games_enabled = True
-
-# Games Configuration
-if games_enabled is True:
-    help_message = help_message + ", games"
-    trap_list = trap_list + ("games",)
-    gTnW_enabled = True
-    gamesCmdList = "Play via DM🕹️ CMD: "
-    if dopewars_enabled:
-        gamesCmdList += "dopeWars, "
-    if lemonade_enabled:
-        gamesCmdList += "lemonStand, "
-    if gTnW_enabled:
-        trap_list = trap_list + ("globalthermonuclearwar","chess")
-        gamesCmdList += "chess, "
-    if blackjack_enabled:
-        gamesCmdList += "blackJack, "
-    if videoPoker_enabled:
-        gamesCmdList += "videoPoker, "
-    if mastermind_enabled:
-        gamesCmdList += "masterMind, "
-    if golfSim_enabled:
-        gamesCmdList += "golfSim, "
-    if hangman_enabled:
-        gamesCmdList += "hangman, "
-    if hamtest_enabled:
-        gamesCmdList += "hamTest, "
-    if tictactoe_enabled:
-        gamesCmdList += "ticTacToe, "
-    if battleship_enabled:
-        gamesCmdList += "battleship, "
-    gamesCmdList = gamesCmdList[:-2] # remove the last comma
-else:
-    gamesCmdList = ""
+gamesCmdList = ""
 
 # Sentry Configuration
 if sentry_enabled:
@@ -499,9 +366,6 @@ def cleanup_memory():
                 seenNodes = seenNodes[-(MAX_SEEN_NODES // 2):]
                 logger.warning(f"System: Trimmed seenNodes to {len(seenNodes)} entries due to size limit of {MAX_SEEN_NODES}")
         
-        # Clean up stale game tracker entries
-        cleanup_game_trackers(current_time)
-        
         # # Clean up multiPingList of completed or stale entries
         # if 'multiPingList' in globals():
         #     multiPingList[:] = [ping for ping in multiPingList 
@@ -510,33 +374,6 @@ def cleanup_memory():
         
     except Exception as e:
         logger.error(f"System: Error during memory cleanup: {e}")
-
-def cleanup_game_trackers(current_time):
-    """Clean up all game tracker lists of stale entries"""
-    try:
-        # List of game tracker global variable names
-        tracker_names = [
-            'dwPlayerTracker', 'lemonadeTracker', 'jackTracker', 
-            'vpTracker', 'mindTracker', 'golfTracker', 
-            'hangmanTracker', 'hamtestTracker', 'tictactoeTracker', 'surveyTracker', 'battleshipTracker'
-        ]
-        
-        for tracker_name in tracker_names:
-            if tracker_name in globals():
-                tracker = globals()[tracker_name]
-                if isinstance(tracker, list):
-                    initial_count = len(tracker)
-                    # Remove entries older than GAMEDELAY
-                    globals()[tracker_name] = [
-                        entry for entry in tracker 
-                        if current_time - entry.get('last_played', entry.get('time', 0)) < GAMEDELAY
-                    ]
-                    cleaned_count = initial_count - len(globals()[tracker_name])
-                    if cleaned_count > 0:
-                        logger.debug(f"System: Cleaned up {cleaned_count} stale entries from {tracker_name}")
-                        
-    except Exception as e:
-        logger.error(f"System: Error cleaning up game trackers: {e}")
 
 def decimal_to_hex(decimal_number):
     return f"!{decimal_number:08x}"
@@ -1356,8 +1193,7 @@ def should_send_alert(alert_type, new_message, min_interval=1):
 
 def handleAlertBroadcast(deviceID=1):
     try:
-        alertUk = alertDe = alertFema = wxAlert = volcanoAlert = overdueAlerts = NO_ALERTS
-        alertWx = False
+        overdueAlerts = NO_ALERTS
         clock = datetime.now()
 
         # Overdue check-in alert
@@ -1367,31 +1203,15 @@ def handleAlertBroadcast(deviceID=1):
                 if should_send_alert("overdue", overdueAlerts, min_interval=300): # 5 minutes interval for overdue alerts
                     send_message(overdueAlerts, emergency_responder_alert_channel, 0, emergency_responder_alert_interface)
 
+        if not enableDEalerts:
+            return False
+
         # Only allow API call every alert_duration minutes at xx:00, xx:20, xx:40
         if not (clock.minute % alert_duration == 0 and clock.second <= 17):
             return False
 
-        # Collect alerts
-        if wxAlertBroadcastEnabled:
-            alertWx = alertBrodcastNOAA()
-            if alertWx:
-                wxAlert = f"🚨 {alertWx[1]} EAS-WX ALERT: {alertWx[0]}"
-        if eAlertBroadcastEnabled or ipawsAlertEnabled:
-            alertFema = getIpawsAlert(latitudeValue, longitudeValue, shortAlerts=True)
-        if volcanoAlertBroadcastEnabled:
-            volcanoAlert = get_volcano_usgs(latitudeValue, longitudeValue)
-
-        if enableDEalerts:
-            deAlerts = get_nina_alerts()
-
-        if usAlerts:
-            alert_types = [
-                ("fema", alertFema, ipawsAlertEnabled),
-                ("wx", wxAlert, wxAlertBroadcastEnabled),
-                ("volcano", volcanoAlert, volcanoAlertBroadcastEnabled),]
-
-        if enableDEalerts:
-            alert_types = [("de", deAlerts, enableDEalerts)]
+        deAlerts = get_nina_alerts()
+        alert_types = [("de", deAlerts, True)]
 
         for alert_type, alert_msg, enabled in alert_types:
             if enabled and alert_msg and NO_ALERTS not in alert_msg and ERROR_FETCHING_DATA not in alert_msg:

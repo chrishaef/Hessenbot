@@ -152,14 +152,11 @@ if radio_detection_enabled:
 
 if voxDetectionEnabled:
     # methods available for trap word processing, these can be called by VOX detection when trap words are detected
-    from mesh_bot import tell_joke, handle_wxc, handle_moon, handle_sun, handle_riverFlow, handle_tide, handle_satpass
+    from mesh_bot import handle_wxc, handle_moon, handle_sun, handle_satpass
     botMethods = {
-        "joke": tell_joke,
         "weather": handle_wxc,
         "moon": handle_moon,
         "daylight": handle_sun,
-        "river": handle_riverFlow,
-        "tide": handle_tide,
         "satellite": handle_satpass}
     # module global variables
     previousVoxState = False
