@@ -29,3 +29,5 @@ venv/
 
 # Python cache
 __pycache__/
+CLAUDE.md
+.claude/settings.local.json
