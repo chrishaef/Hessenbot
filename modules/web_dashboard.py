@@ -583,22 +583,28 @@ def _format_dm_timestamp(iso_time: str) -> str:
 
 
 def _bbs_dm_party_label(node_id: Any) -> str:
-    """Decimal node ID, short name, and hex for dashboard display."""
+    """Decimal node ID, short name, long name, and hex for dashboard display."""
     try:
         nid = int(node_id)
     except (TypeError, ValueError):
         return str(node_id) if node_id not in (None, "") else "—"
     short = ""
+    long_name = ""
     try:
         from modules.system import get_name_from_number
 
         short = str(get_name_from_number(nid, "short", 1) or "").strip()
+        long_name = str(get_name_from_number(nid, "long", 1) or "").strip()
     except Exception:
         pass
     hex_id = f"!{nid:08x}"
+    parts = [str(nid)]
     if short and short != str(nid):
-        return f"{nid} · {short} · {hex_id}"
-    return f"{nid} · {hex_id}"
+        parts.append(short)
+    if long_name and long_name not in parts:
+        parts.append(long_name)
+    parts.append(hex_id)
+    return " · ".join(parts)
 
 
 def _lookup_dm_sent_time(
@@ -629,25 +635,36 @@ def _bbs_dm_status_badge(status: str) -> str:
     return '<span class="badge text-bg-warning text-dark dash-dm-badge">wartend</span>'
 
 
-def _render_bbs_dm_meta_html(
+def _render_bbs_dm_item_html(
     *,
     from_id: Any,
     to_id: Any,
     sent: str,
     received: str,
+    status: str,
 ) -> str:
     von = html_escape(_bbs_dm_party_label(from_id))
     an = html_escape(_bbs_dm_party_label(to_id))
     sent_disp = html_escape(_format_dm_timestamp(sent))
     recv_disp = html_escape(_format_dm_timestamp(received))
+    state_cls = "delivered" if status == "delivered" else "waiting"
     return (
-        '<div class="dash-dm-meta">'
-        f'<div class="dash-dm-row"><span class="dash-dm-k">Von</span><span class="dash-dm-v">{von}</span></div>'
-        f'<div class="dash-dm-row"><span class="dash-dm-k">An</span><span class="dash-dm-v">{an}</span></div>'
-        f'<div class="dash-dm-row"><span class="dash-dm-k">Abgesendet</span><span class="dash-dm-v">{sent_disp}</span></div>'
-        f'<div class="dash-dm-row"><span class="dash-dm-k">Empfangen</span><span class="dash-dm-v">{recv_disp}</span></div>'
-        "</div>"
-    )
+        f'<li class="dash-dm-item dash-dm-item--{state_cls}">'
+        '<TAG class="dash-dm-body">'
+        f'<TAG class="dash-dm-row"><span class="dash-dm-k">Von</span><span class="dash-dm-v">{von}</span></TAG>'
+        f'<TAG class="dash-dm-row"><span class="dash-dm-k">An</span><span class="dash-dm-v">{an}</span></TAG>'
+        "</TAG>"
+        '<TAG class="dash-dm-aside">'
+        '<TAG class="dash-dm-times">'
+        f'<TAG class="dash-dm-time"><span class="dash-dm-time-k">Eingereicht</span>'
+        f'<span class="dash-dm-time-v">{sent_disp}</span></TAG>'
+        f'<TAG class="dash-dm-time"><span class="dash-dm-time-k">Weitergeleitet</span>'
+        f'<span class="dash-dm-time-v">{recv_disp}</span></TAG>'
+        "</TAG>"
+        f"{_bbs_dm_status_badge(status)}"
+        "</TAG>"
+        "</li>"
+    ).replace("<TAG", "<div").replace("</TAG>", "</div>")
 
 
 def _render_bbs_dm_queue_html(
@@ -664,14 +681,14 @@ def _render_bbs_dm_queue_html(
         to_id = row[0] if len(row) > 0 else 0
         from_id = row[2] if len(row) > 2 else 0
         sent = _lookup_dm_sent_time(queued_log, from_id, to_id)
-        meta = _render_bbs_dm_meta_html(
-            from_id=from_id,
-            to_id=to_id,
-            sent=sent,
-            received="",
-        )
         items.append(
-            f'<li class="dash-dm-item">{meta}{_bbs_dm_status_badge("waiting")}</li>'
+            _render_bbs_dm_item_html(
+                from_id=from_id,
+                to_id=to_id,
+                sent=sent,
+                received="",
+                status="waiting",
+            )
         )
     for entry in reversed(delivered[-15:]):
         to_id = entry.get("to_id") or ""
@@ -682,18 +699,22 @@ def _render_bbs_dm_queue_html(
         sent = _lookup_dm_sent_time(
             queued_log, from_id, to_id, before=received
         )
-        meta = _render_bbs_dm_meta_html(
-            from_id=from_id or "—",
-            to_id=to_id or "—",
-            sent=sent,
-            received=received,
-        )
         items.append(
-            f'<li class="dash-dm-item">{meta}{_bbs_dm_status_badge("delivered")}</li>'
+            _render_bbs_dm_item_html(
+                from_id=from_id or "—",
+                to_id=to_id or "—",
+                sent=sent,
+                received=received,
+                status="delivered",
+            )
         )
     if not items:
         return '<p class="text-muted small mb-0">Keine BBS-DMs.</p>'
-    return '<ul class="dash-list dash-scroll mb-0">' + "".join(items) + "</ul>"
+    return (
+        '<ul class="dash-list dash-list--dm dash-scroll dash-scroll--dm mb-0">'
+        + "".join(items)
+        + "</ul>"
+    )
 
 
 def _resolve_node_label(node_id: Any) -> str:
