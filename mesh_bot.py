@@ -628,10 +628,10 @@ def handle_whereami(message_from_id, deviceID, channel_number):
 
 
 def handle_loc(message, message_from_id, deviceID, channel_number):
-    """Show last known position of a mesh node from the NodeDB."""
+    """Show last known position of a mesh node from NodeDB or mesh map snapshot."""
     if "?" in message:
         return (
-            "!loc — Position aus NodeDB. !loc = du, "
+            "!loc — Position aus NodeDB oder Mesh-Karte (nodes.json). !loc = du, "
             "!loc <Kurzname>, !loc 1234567890, !loc !a1b2c3d4"
         )
     if not my_settings.location_enabled:
@@ -645,14 +645,21 @@ def handle_loc(message, message_from_id, deviceID, channel_number):
     short = get_name_from_number(node_id, "short", deviceID)
     hex_id = decimal_to_hex(node_id)
 
-    if not info["in_db"]:
-        return f"{short} {hex_id}: nicht in NodeDB."
+    has_pos = info["from_gps"] or info.get("from_mesh_map")
+    if not info["in_db"] and not has_pos:
+        return f"{short} {hex_id}: nicht in NodeDB, keine Koordinaten in der Mesh-Karte."
 
-    if not info["from_gps"]:
-        return f"{short} {hex_id}: keine GPS-Position in NodeDB."
+    if not has_pos:
+        return f"{short} {hex_id}: keine Koordinaten (NodeDB ohne GPS, keine Mesh-Karte)."
 
     lat, lon = info["lat"], info["lon"]
-    lines = [f"{short} {hex_id}", f"{lat},{lon} GPS"]
+    if info["from_gps"]:
+        src = "GPS"
+    elif info.get("from_mesh_map"):
+        src = "Mesh-Karte"
+    else:
+        src = "?"
+    lines = [f"{short} {hex_id}", f"{lat},{lon} {src}"]
     try:
         import maidenhead as mh
 

@@ -117,6 +117,10 @@ zuluTime = False
 # wait time for URL requests
 urlTimeout = 15
 
+# Leaderboard / !loc: merge regional mesh map JSON (node id -> metrics + lat/lon scaled 1e7).
+leaderboardMeshMapEnable = True
+leaderboardMeshMapURL = https://map.meshhessen.de/nodes.json
+
 # logging to file of the non Bot messages (required for Web-Admin live view: messages.log)
 LogMessagesToFile = False
 # Logging of system messages to file

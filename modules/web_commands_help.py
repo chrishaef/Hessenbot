@@ -93,7 +93,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 CommandEntry(
                     f"{p}loc",
-                    "Letzte GPS-Position aus der NodeDB (eigene Node oder Name/!hex/Dezimal-ID).",
+                    "Letzte Position: zuerst GPS aus der NodeDB, sonst Koordinaten aus der konfigurierten Mesh-Karten-JSON (leaderboardMeshMapURL).",
                     f"{p}loc HB9ABC",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
@@ -291,7 +291,10 @@ def _sections() -> List[CommandSection]:
                 ),
                 CommandEntry(
                     f"{p}leaderboard",
-                    "Aktivitäts-Rangliste.",
+                    "Extremwerte aus dem Mesh (u. a. kälteste/heißeste °C, Akku, Höhe) — "
+                    "aus NodeDB & Telemetrie dieses Bots; optional ergänzt um regionale Karten-JSON "
+                    "(config: leaderboardMeshMapURL), z. B. meshhessen nodes.json. Kein Wetter-App-Ersatz. "
+                    f"Admins: {p}leaderboard reset löscht die Liste.",
                     enabled=lambda: getattr(st, "sitrep_enabled", False),
                 ),
                 CommandEntry(f"{p}messages", "Letzte empfangene Nachrichten."),
