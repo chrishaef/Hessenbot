@@ -58,6 +58,28 @@ def portal_head(title: str = "Hessenbot") -> str:
     return THEME_SCRIPT + PORTAL_ASSETS + f"<title>{html_escape(title)}</title>"
 
 
+def _dash_nav_link(label: str, icon: str, href: str, *, active: bool = False) -> str:
+    active_cls = " dash-view-btn--active" if active else ""
+    return f"""
+        <li class="nav-item">
+          <a class="btn btn-sm dash-view-btn{active_cls}" href="{html_escape(href)}">
+            <i class="bi bi-{html_escape(icon)} me-1"></i>{html_escape(label)}
+          </a>
+        </li>"""
+
+
+def _dash_nav_button(view: str, label: str, icon: str, *, active: bool = False) -> str:
+    active_cls = " dash-view-btn--active" if active else ""
+    pressed = "true" if active else "false"
+    return f"""
+        <li class="nav-item">
+          <button type="button" class="btn btn-sm dash-view-btn{active_cls}"
+                  data-dash-view="{html_escape(view)}" aria-pressed="{pressed}">
+            <i class="bi bi-{html_escape(icon)} me-1"></i>{html_escape(label)}
+          </button>
+        </li>"""
+
+
 def portal_navbar(
     *,
     active: str = "stats",
@@ -73,35 +95,24 @@ def portal_navbar(
             f'<a class="btn btn-success btn-sm" href="{html_escape(admin_href)}">'
             '<i class="bi bi-shield-lock me-1"></i>Admin</a>'
         )
-    chref = html_escape(commands_href or "/befehle")
-    commands_link = f"""
-        <li class="nav-item">
-          <a class="nav-link px-3{commands_active}" href="{chref}">
-            <i class="bi bi-terminal me-1"></i>Befehle
-          </a>
-        </li>"""
-    if dash_view_tabs:
-        nav_primary = f"""
+    chref = commands_href or "/befehle"
+    use_dash_nav = dash_view_tabs or active == "commands"
+    if use_dash_nav:
+        if active == "commands":
+            nav_primary = f"""
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
-        <li class="nav-item">
-          <button type="button" class="btn btn-sm dash-view-btn dash-view-btn--active"
-                  data-dash-view="stats" aria-pressed="true">
-            <i class="bi bi-bar-chart-line me-1"></i>Statistik
-          </button>
-        </li>
-        {commands_link}
-        <li class="nav-item">
-          <button type="button" class="btn btn-sm dash-view-btn"
-                  data-dash-view="bbs" aria-pressed="false">
-            <i class="bi bi-inboxes me-1"></i>BBS
-          </button>
-        </li>
-        <li class="nav-item">
-          <button type="button" class="btn btn-sm dash-view-btn"
-                  data-dash-view="nodedb" aria-pressed="false">
-            <i class="bi bi-diagram-3 me-1"></i>NodeDB
-          </button>
-        </li>
+        {_dash_nav_link("Statistik", "bar-chart-line", "/#stats")}
+        {_dash_nav_link("Befehle", "terminal", chref, active=True)}
+        {_dash_nav_link("BBS", "inboxes", "/#bbs")}
+        {_dash_nav_link("NodeDB", "diagram-3", "/#nodedb")}
+      </ul>"""
+        else:
+            nav_primary = f"""
+      <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
+        {_dash_nav_button("stats", "Statistik", "bar-chart-line", active=active == "stats")}
+        {_dash_nav_link("Befehle", "terminal", chref)}
+        {_dash_nav_button("bbs", "BBS", "inboxes")}
+        {_dash_nav_button("nodedb", "NodeDB", "diagram-3")}
       </ul>"""
     else:
         nav_primary = f"""
@@ -111,7 +122,11 @@ def portal_navbar(
             <i class="bi bi-bar-chart-line me-1"></i>Statistik
           </a>
         </li>
-        {commands_link}
+        <li class="nav-item">
+          <a class="nav-link px-3{commands_active}" href="{html_escape(chref)}">
+            <i class="bi bi-terminal me-1"></i>Befehle
+          </a>
+        </li>
       </ul>"""
     return f"""
 <nav class="navbar navbar-expand-lg sticky-top portal-navbar" data-bs-theme="dark">

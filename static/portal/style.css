@@ -712,6 +712,9 @@ body.page-login {
   color: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: transparent;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 .dash-view-nav .dash-view-btn:hover {
@@ -1021,15 +1024,4 @@ pre.admin-pre {
   white-space: nowrap;
   width: 1%;
   vertical-align: top;
-}
-
-.dash-view-nav .nav-item a.nav-link {
-  padding: 0.35rem 0.75rem;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-}
-
-.dash-view-nav .nav-item a.nav-link.active {
-  background: var(--green);
-  color: #fff;
 }
