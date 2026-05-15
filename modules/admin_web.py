@@ -182,6 +182,28 @@ def create_app(
 """
         return render_template_string(raw)
 
+    @app.route("/befehle")
+    @app.route("/commands")
+    def commands_help():
+        from modules.web_commands_help import render_commands_page_body
+
+        body = render_commands_page_body()
+        return (
+            portal_shell_start(
+                title="Befehle – Hessenbot",
+                active_nav="commands",
+                particles=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4 cmd-help-page">'
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
+        )
+
     @app.route("/")
     def index_dashboard():
         from modules.web_dashboard import collect_dashboard, render_dashboard_page

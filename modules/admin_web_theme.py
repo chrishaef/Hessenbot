@@ -62,17 +62,26 @@ def portal_navbar(
     *,
     active: str = "stats",
     admin_href: str | None = None,
+    commands_href: str = "/befehle",
     dash_view_tabs: bool = False,
 ) -> str:
     stats_active = " active" if active == "stats" else ""
+    commands_active = " active" if active == "commands" else ""
     admin_btn = ""
     if admin_href:
         admin_btn = (
             f'<a class="btn btn-success btn-sm" href="{html_escape(admin_href)}">'
             '<i class="bi bi-shield-lock me-1"></i>Admin</a>'
         )
+    chref = html_escape(commands_href or "/befehle")
+    commands_link = f"""
+        <li class="nav-item">
+          <a class="nav-link px-3{commands_active}" href="{chref}">
+            <i class="bi bi-terminal me-1"></i>Befehle
+          </a>
+        </li>"""
     if dash_view_tabs:
-        nav_primary = """
+        nav_primary = f"""
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
         <li class="nav-item">
           <button type="button" class="btn btn-sm dash-view-btn dash-view-btn--active"
@@ -80,6 +89,7 @@ def portal_navbar(
             <i class="bi bi-bar-chart-line me-1"></i>Statistik
           </button>
         </li>
+        {commands_link}
         <li class="nav-item">
           <button type="button" class="btn btn-sm dash-view-btn"
                   data-dash-view="bbs" aria-pressed="false">
@@ -101,6 +111,7 @@ def portal_navbar(
             <i class="bi bi-bar-chart-line me-1"></i>Statistik
           </a>
         </li>
+        {commands_link}
       </ul>"""
     return f"""
 <nav class="navbar navbar-expand-lg sticky-top portal-navbar" data-bs-theme="dark">
