@@ -122,7 +122,9 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "valert": lambda: get_volcano_usgs(),
     "verse": lambda: read_verse(),
     "videopoker": lambda: handleVideoPoker(message, message_from_id, deviceID),
-    "warning": lambda: handle_warning(message_from_id, deviceID),
+    "warning": lambda: handle_warning(
+        message_from_id, deviceID, channel_number, isDM
+    ),
     "dealert": lambda: handle_dealert(message_from_id, deviceID),
     "whereami": lambda: handle_whereami(message_from_id, deviceID, channel_number),
     "whoami": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
@@ -1379,11 +1381,18 @@ def handle_dealert(message_from_id, deviceID):
         return get_nina_alerts()
     return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
 
-def handle_warning(message_from_id, deviceID):
+def handle_warning(message_from_id, deviceID, channel_number, isDM):
     if not my_settings.enableDEalerts:
         return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
-    location = get_node_location(message_from_id, deviceID)
-    return get_nina_alerts_for_location(str(location[0]), str(location[1]))
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    parts = build_warning_messages(lat, lon, from_gps)
+    if not parts:
+        return WARNING_NONE_MSG
+    dest = message_from_id if my_settings.useDMForResponse or isDM else 0
+    for extra in parts[1:]:
+        time.sleep(my_settings.splitDelay)
+        send_message(extra, channel_number, dest, deviceID)
+    return parts[0]
 
 def handle_emergency_alerts(message, message_from_id, deviceID):
     location = get_node_location(message_from_id, deviceID)
