@@ -679,7 +679,39 @@ def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
         return fuzzed_position
     else:
         return config_position
-    
+
+
+def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
+    """Returns [latitude, longitude, from_gps] for warning/location replies."""
+    interface = globals()[f'interface{nodeInt}']
+    fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
+    config_position = [latitudeValue, longitudeValue]
+
+    if interface.nodes:
+        for node in interface.nodes.values():
+            if nodeID == node['num']:
+                pos = node.get('position')
+                if (
+                    pos and isinstance(pos, dict)
+                    and pos.get('latitude') is not None
+                    and pos.get('longitude') is not None
+                ):
+                    try:
+                        latitude = pos['latitude']
+                        longitude = pos['longitude']
+                        if fuzzItAll:
+                            latitude = round(latitude, round_digits)
+                            longitude = round(longitude, round_digits)
+                        return [latitude, longitude, True]
+                    except Exception as e:
+                        logger.warning(
+                            f"System: Error processing position for node {nodeID}: {e}"
+                        )
+
+    if fuzz_config_location:
+        return [fuzzed_position[0], fuzzed_position[1], False]
+    return [config_position[0], config_position[1], False]
+
 async def get_closest_nodes(nodeInt=1,returnCount=3, channel=publicChannel):
         interface = globals()[f'interface{nodeInt}']
         node_list = []

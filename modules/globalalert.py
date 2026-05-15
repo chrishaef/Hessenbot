@@ -9,7 +9,14 @@ import requests # pip install requests
 import bs4 as bs # pip install beautifulsoup4
 #import xml.dom.minidom 
 from modules.log import logger
-from modules.settings import urlTimeoutSeconds, NO_ALERTS, myRegionalKeysDE
+from modules.settings import (
+    urlTimeoutSeconds,
+    NO_ALERTS,
+    myRegionalKeysDE,
+    MESSAGE_CHUNK_SIZE,
+)
+
+WARNING_NONE_MSG = "Keine Aktiven Nina oder Katwarn Meldungen"
 
 trap_list_location_eu = ("ukalert",)
 trap_list_location_de = ("dealert", "warning")
@@ -158,7 +165,95 @@ def get_nina_alerts_for_location(lat, lon, max_alerts: int = 3) -> str:
 
 
 def get_warnings_for_location(lat, lon) -> str:
-    return get_nina_alerts_for_location(lat, lon)
+    parts = build_warning_messages(lat, lon, from_gps=True)
+    return parts[0] if parts else WARNING_NONE_MSG
+
+
+def _short_coord(lat, lon, digits: int = 2) -> str:
+    return f"{float(lat):.{digits}f},{float(lon):.{digits}f}"
+
+
+def _short_alert_title(title: str, max_len: int = 72) -> str:
+    for prefix in (
+        "Amtliche WARNUNG vor ",
+        "Amtliche WARNSCHWELLENWERT ",
+        "Entwarnung: ",
+    ):
+        if title.startswith(prefix):
+            title = title[len(prefix):]
+            break
+    title = title.strip()
+    if len(title) > max_len:
+        return title[: max_len - 1] + "…"
+    return title
+
+
+def _split_mesh_chunks(text: str, max_len: int = None) -> list[str]:
+    if max_len is None:
+        max_len = MESSAGE_CHUNK_SIZE
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_len:
+        return [text]
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= max_len:
+            chunks.append(remaining)
+            break
+        split_at = remaining.rfind(" ", 0, max_len)
+        if split_at <= 0:
+            split_at = max_len
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    return chunks
+
+
+def _warning_location_line(lat, lon, from_gps: bool) -> str:
+    if from_gps:
+        return "Location: ✓"
+    return f"Location: ✗ Fallback {_short_coord(lat, lon)}"
+
+
+def _fetch_warning_items(lat, lon) -> list[dict]:
+    ars = lat_lon_to_ars_kreis(lat, lon)
+    if not ars:
+        return []
+    try:
+        data = fetch_nina_dashboard(ars)
+    except Exception as exc:
+        logger.warning(f"NINA DE alerts for {lat},{lon} (ARS {ars}): {exc}")
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5) -> list[str]:
+    """
+    Mesh-sized reply parts for !warning: location line, then none-msg or alert lines.
+    Each part is at most MESSAGE_CHUNK_SIZE characters.
+    """
+    header = _warning_location_line(lat, lon, from_gps)
+    items = _fetch_warning_items(lat, lon)
+
+    if not items:
+        body = f"{header}\n{WARNING_NONE_MSG}"
+        return _split_mesh_chunks(body)
+
+    messages: list[str] = []
+    messages.extend(_split_mesh_chunks(header))
+
+    for item in items[:max_alerts]:
+        provider = _alert_provider(item)
+        title = _short_alert_title(_alert_title(item))
+        line = f"🚨 {provider}: {title}"
+        messages.extend(_split_mesh_chunks(line))
+
+    if len(items) > max_alerts:
+        more = f"+{len(items) - max_alerts} weitere"
+        messages.extend(_split_mesh_chunks(more))
+
+    return messages
 
 
 def get_govUK_alerts(lat, lon):
