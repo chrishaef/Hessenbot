@@ -293,6 +293,7 @@ def _empty_log_stats() -> Dict[str, Any]:
         "nodeCountOnline1": "—",
         "log_lines": 0,
         "log_error": None,
+        "node_rx_counts_by_id": {},
     }
 
 
@@ -473,6 +474,18 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
             merged.setdefault(e["time"], e)
         recent_messages = sorted(merged.values(), key=lambda x: x["time"])
 
+    node_rx_counts: defaultdict[int, int] = defaultdict(int)
+    for e in recent_messages:
+        if e.get("dir") != "in":
+            continue
+        eid = e.get("id")
+        if not eid:
+            continue
+        try:
+            node_rx_counts[int(eid)] += 1
+        except (TypeError, ValueError):
+            continue
+
     stats["command_counts"] = command_counts
     stats["message_types"] = message_types
     stats["hourly_activity"] = dict(hourly)
@@ -484,6 +497,7 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     stats["recent_messages"] = recent_messages[-40:]
     stats["bbs_dm_delivered"] = bbs_dm_delivered[-25:]
     stats["bbs_dm_queued"] = bbs_dm_queued[-50:]
+    stats["node_rx_counts_by_id"] = dict(node_rx_counts)
     return stats
 
 
@@ -820,9 +834,41 @@ def _render_mesh_leaderboard_html(lb: Dict[str, Any]) -> str:
     )
 
 
-def _render_toplist_html(cmd: Counter, lb: Dict[str, Any]) -> str:
+def _mesh_node_counts_for_dash(
+    lb: Dict[str, Any], log: Dict[str, Any]
+) -> tuple[Dict[Any, Any], str]:
+    """Prefer leaderboard nodeMessageCounts (TEXT_MESSAGE tallies); else use log-derived rx."""
+    mc = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
+
+    def _pos_total(d: Any) -> int:
+        if not isinstance(d, dict):
+            return 0
+        t = 0
+        for v in d.values():
+            try:
+                iv = int(v)  # type: ignore[arg-type]
+                if iv > 0:
+                    t += iv
+            except (TypeError, ValueError):
+                continue
+        return t
+
+    if _pos_total(mc) > 0:
+        return mc, ""
+    rx = log.get("node_rx_counts_by_id") if isinstance(log.get("node_rx_counts_by_id"), dict) else {}
+    if _pos_total(rx) > 0:
+        return rx, (
+            "Nach meshbot.log / messages.log — "
+            "Zähler aus leaderboard.pkl (TEXT_MESSAGE) sind leer oder fehlen."
+        )
+    return mc, ""
+
+
+def _render_toplist_html(
+    cmd: Counter, lb: Dict[str, Any], log: Optional[Dict[str, Any]] = None
+) -> str:
     cmd_rows = cmd.most_common(10)
-    msg_counts = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
+    msg_counts, count_note = _mesh_node_counts_for_dash(lb, log or {})
 
     def _count_val(x: object) -> int:
         try:
@@ -843,6 +889,9 @@ def _render_toplist_html(cmd: Counter, lb: Dict[str, Any]) -> str:
         if cmd_rows
         else '<li class="text-muted">Keine Befehle im Log</li>'
     )
+    node_note_html = (
+        f'<p class="small text-muted mb-2">{html_escape(count_note)}</p>' if count_note else ""
+    )
     node_items = (
         "".join(
             f"<li>{html_escape(_resolve_node_label(nid))} · {cnt}</li>"
@@ -859,6 +908,7 @@ def _render_toplist_html(cmd: Counter, lb: Dict[str, Any]) -> str:
   </div>
   <div class="col-md-6">
     <h3 class="h6 text-muted mb-2">Aktivste Knoten (Mesh)</h3>
+    {node_note_html}
     <ul class="dash-list dash-scroll mb-0">{node_items}</ul>
   </div>
 </div>
@@ -1201,7 +1251,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
         log.get("bbs_dm_queued") or [],
         enabled=bool(rt.get("bbs_enabled")),
     )
-    toplist_html = _render_toplist_html(cmd, lb)
+    toplist_html = _render_toplist_html(cmd, lb, log)
     leaderboard_html = _render_mesh_leaderboard_html(lb)
     log_note = ""
     if log.get("log_error"):

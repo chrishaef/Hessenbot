@@ -126,6 +126,7 @@ LogMessagesToFile = False
 # Logging of system messages to file
 SyslogToFile = True
 # logging level for the bot (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# DEBUG = alles in meshbot.log; INFO reicht für normale Betrieb + „Letzte Befehle“ im Portal (Bot detected Commands).
 sysloglevel = DEBUG
 # Number of log files to keep in days, 0 to keep all
 log_backup_count = 32
