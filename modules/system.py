@@ -5,7 +5,9 @@ import meshtastic.serial_interface #pip install meshtastic or use launch.sh for 
 import meshtastic.tcp_interface
 import meshtastic.ble_interface
 import time
+import json
 import asyncio
+import urllib.request
 import random
 import base64
 # not ideal but needed?
@@ -461,14 +463,43 @@ def resolve_mesh_node_target(message, nodeInt=1, default_id=None):
     return 0, f"Knoten '{token}' nicht in der NodeDB."
 
 
+def _ensure_mesh_map_positions_loaded() -> None:
+    """If mesh map URL is enabled and we have no snapshot yet, fetch once (uses HTTP cache)."""
+    if not globals().get("leaderboard_mesh_map_enabled"):
+        return
+    if mesh_map_node_positions:
+        return
+    remote = fetch_leaderboard_mesh_map_nodes_cached()
+    if isinstance(remote, dict):
+        merge_leaderboard_from_mesh_map_nodes(remote, time.time())
+
+
+def _apply_mesh_map_position_to_info(info: dict, nodeID: int, round_digits: int) -> None:
+    if info.get("lat") is not None:
+        return
+    snap = mesh_map_node_positions.get(int(nodeID))
+    if not snap:
+        return
+    lat = float(snap["lat"])
+    lon = float(snap["lon"])
+    if fuzzItAll:
+        lat = round(lat, round_digits)
+        lon = round(lon, round_digits)
+    info["from_mesh_map"] = True
+    info["lat"] = lat
+    info["lon"] = lon
+
+
 def get_mesh_node_position_info(nodeID, nodeInt=1, round_digits=2):
     """
     Look up a node across enabled interfaces.
-    Returns dict: in_db, from_gps, lat, lon, last_heard (str|None), iface (int|None).
+    Returns dict: in_db, from_gps, from_mesh_map, lat, lon, last_heard (str|None), iface (int|None).
     """
+    _ensure_mesh_map_positions_loaded()
     info = {
         "in_db": False,
         "from_gps": False,
+        "from_mesh_map": False,
         "lat": None,
         "lon": None,
         "last_heard": None,
@@ -507,7 +538,9 @@ def get_mesh_node_position_info(nodeID, nodeInt=1, round_digits=2):
                     info["lon"] = lon
                 except (TypeError, ValueError) as e:
                     logger.warning(f"System: Error reading position for node {nodeID}: {e}")
+            _apply_mesh_map_position_to_info(info, nodeID, round_digits)
             return info
+    _apply_mesh_map_position_to_info(info, nodeID, round_digits)
     return info
 
 def get_node_list(nodeInt=1):
@@ -571,6 +604,7 @@ def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
     - Always returns a fuzzed (rounded) config location as fallback.
     - returns their actual position if available, else fuzzed config location.
     """
+    _ensure_mesh_map_positions_loaded()
     interface = globals()[f'interface{nodeInt}']
 
     fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
@@ -599,6 +633,15 @@ def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
                     except Exception as e:
                         logger.warning(f"System: Error processing position for node {nodeID}: {e}")
 
+    snap = mesh_map_node_positions.get(int(nodeID))
+    if snap:
+        lat = float(snap["lat"])
+        lon = float(snap["lon"])
+        if fuzzItAll:
+            lat = round(lat, round_digits)
+            lon = round(lon, round_digits)
+        return [lat, lon]
+
     if fuzz_config_location:
         # Return fuzzed config location if no valid position found
         return fuzzed_position
@@ -608,6 +651,7 @@ def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
 
 def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
     """Returns [latitude, longitude, from_gps] for warning/location replies."""
+    _ensure_mesh_map_positions_loaded()
     interface = globals()[f'interface{nodeInt}']
     fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
     config_position = [latitudeValue, longitudeValue]
@@ -632,6 +676,15 @@ def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
                         logger.warning(
                             f"System: Error processing position for node {nodeID}: {e}"
                         )
+
+    snap = mesh_map_node_positions.get(int(nodeID))
+    if snap:
+        lat = float(snap["lat"])
+        lon = float(snap["lon"])
+        if fuzzItAll:
+            lat = round(lat, round_digits)
+            lon = round(lon, round_digits)
+        return [lat, lon, True]
 
     if fuzz_config_location:
         return [fuzzed_position[0], fuzzed_position[1], False]
@@ -1480,6 +1533,8 @@ def displayNodeTelemetry(nodeID=0, rxNode=0, userRequested=False):
     return dataResponse
 
 positionMetadata = {}
+# Last nodes.json snapshot: node_id -> {lat, lon, updated, shortName?} (degrees WGS84)
+mesh_map_node_positions: dict[int, dict] = {}
 meshLeaderboard = {}
 def initializeMeshLeaderboard():
     global meshLeaderboard
@@ -1519,6 +1574,394 @@ PKI_ROUTING_ERROR_HINTS = {
     'PKI_UNKNOWN_PUBKEY': 'Receiver could not decrypt PKI packet due to missing sender public key. Trigger a NodeInfo exchange both directions, then retry.',
     'PKI_FAILED': 'PKI was explicitly requested but send prerequisites were not met. Verify PKI-capable firmware/config, key material, and direct-send destination.',
 }
+
+# Plausible range for EnvironmentMetrics.temperature (°C); filters wrong units / corrupt values.
+_LEADERBOARD_TEMP_MIN_C = -90.0
+_LEADERBOARD_TEMP_MAX_C = 70.0
+
+
+def _ambient_temperature_plausible_celsius(temp: float) -> bool:
+    return _LEADERBOARD_TEMP_MIN_C <= temp <= _LEADERBOARD_TEMP_MAX_C
+
+
+_LEADERBOARD_MESH_MAP_CACHE_SEC = 90.0
+_leaderboard_mesh_map_cache: tuple[float, dict | None] = (0.0, None)
+
+
+def _local_mesh_bot_node_nums() -> set[int]:
+    out: set[int] = set()
+    for i in range(1, 10):
+        if not globals().get(f"interface{i}_enabled"):
+            continue
+        n = globals().get(f"myNodeNum{i}")
+        if n is None:
+            continue
+        try:
+            out.add(int(n))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def fetch_leaderboard_mesh_map_nodes_cached() -> dict | None:
+    """GET leaderboardMeshMapURL; returns dict nodeId(str)->metrics or None. Short-lived cache."""
+    global _leaderboard_mesh_map_cache
+    if not globals().get("leaderboard_mesh_map_enabled"):
+        return None
+    url = (globals().get("leaderboard_mesh_map_url") or "").strip()
+    if not url:
+        return None
+    now_t = time.time()
+    ts, cached = _leaderboard_mesh_map_cache
+    if isinstance(cached, dict) and (now_t - ts) < _LEADERBOARD_MESH_MAP_CACHE_SEC:
+        return cached
+
+    timeout = globals().get("urlTimeoutSeconds", 15) or 15
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "HessenBot/leaderboard (mesh-map snapshot)"},
+        )
+        with urllib.request.urlopen(req, timeout=float(timeout)) as resp:
+            raw = resp.read().decode()
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            _leaderboard_mesh_map_cache = (now_t, parsed)
+            return parsed
+    except Exception as e:
+        logger.debug(f"System: leaderboard mesh map JSON fetch/parse failed: {e}")
+
+    _leaderboard_mesh_map_cache = (now_t, None)
+    return None
+
+
+def _lat_lon_degrees_from_map_json(lat_raw, lon_raw) -> tuple[float | None, float | None]:
+    """map.meshhessen nodes.json uses lat/lon as 1e7-scaled integers (Meshtastic convention)."""
+    if lat_raw is None or lon_raw is None:
+        return None, None
+    try:
+        lat = float(lat_raw)
+        lon = float(lon_raw)
+    except (TypeError, ValueError):
+        return None, None
+    if abs(lat) > 90:
+        lat /= 1e7
+    if abs(lon) > 180:
+        lon /= 1e7
+    if abs(lat) > 90 or abs(lon) > 180:
+        return None, None
+    return lat, lon
+
+
+def merge_leaderboard_from_mesh_map_nodes(data: dict, now: float) -> None:
+    """Merge flat Meshtastic map-style nodes dict (e.g. map.meshhessen.de nodes.json).
+
+    Typical fields per node: batteryLevel, uptime, temperature, altitude; latitude/longitude
+    update mesh_map_node_positions for !loc / get_node_location fallbacks.
+
+    No SNR / groundSpeed on this feed; those stay from local RX / NodeDB.
+    """
+    global mesh_map_node_positions
+    if not isinstance(data, dict):
+        return
+    my_nodes = _local_mesh_bot_node_nums()
+    rx_fallback = 1
+
+    new_positions: dict[int, dict] = {}
+
+    for key, raw in data.items():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            nid = int(str(key))
+        except (TypeError, ValueError):
+            continue
+        if not nid:
+            continue
+
+        la, lo = _lat_lon_degrees_from_map_json(
+            raw.get("latitude"),
+            raw.get("longitude"),
+        )
+        if la is not None and lo is not None:
+            snap: dict = {"lat": la, "lon": lo, "updated": now}
+            sn = raw.get("shortName")
+            if isinstance(sn, str) and sn.strip():
+                snap["shortName"] = sn.strip()
+            new_positions[nid] = snap
+
+        bl = raw.get("batteryLevel")
+        if bl is not None:
+            try:
+                battery = float(bl)
+                if battery > 0 and battery < float(meshLeaderboard["lowestBattery"]["value"]):
+                    meshLeaderboard["lowestBattery"] = {
+                        "nodeID": nid,
+                        "value": battery,
+                        "timestamp": now,
+                    }
+            except (TypeError, ValueError):
+                pass
+
+        if nid not in my_nodes:
+            uptime_val = raw.get("uptime")
+            if uptime_val is not None:
+                try:
+                    uptime = float(uptime_val)
+                    if uptime > float(meshLeaderboard["longestUptime"]["value"]):
+                        meshLeaderboard["longestUptime"] = {
+                            "nodeID": nid,
+                            "value": uptime,
+                            "timestamp": now,
+                        }
+                except (TypeError, ValueError):
+                    pass
+
+        temp_val = raw.get("temperature")
+        if temp_val is not None:
+            try:
+                apply_environment_temperature_to_leaderboard(
+                    nid, float(temp_val), rx_node=rx_fallback
+                )
+            except (TypeError, ValueError):
+                pass
+
+        alt = raw.get("altitude")
+        if alt is not None:
+            try:
+                pos = {"altitude": float(alt)}
+                apply_leaderboard_altitude_speed_from_position(nid, pos, now)
+            except (TypeError, ValueError):
+                pass
+
+    mesh_map_node_positions = new_positions
+
+
+def apply_environment_temperature_to_leaderboard(
+    node_id: int, temp: float, rx_node: int = 1
+) -> None:
+    """Update coldest/hottest records from one environment temperature reading (°C)."""
+    global meshLeaderboard
+    if not node_id:
+        return
+    try:
+        temp = float(temp)
+    except (TypeError, ValueError):
+        return
+    if not _ambient_temperature_plausible_celsius(temp):
+        return
+    current_time = time.time()
+    try:
+        if temp < float(meshLeaderboard['coldestTemp']['value']):
+            meshLeaderboard['coldestTemp'] = {
+                'nodeID': node_id,
+                'value': temp,
+                'timestamp': current_time,
+            }
+            if logMetaStats:
+                logger.info(
+                    f"System: 🥶 New coldest temp record: {temp}°C from NodeID:{node_id} "
+                    f"ShortName:{get_name_from_number(node_id, 'short', rx_node)}"
+                )
+        if temp > float(meshLeaderboard['hottestTemp']['value']):
+            meshLeaderboard['hottestTemp'] = {
+                'nodeID': node_id,
+                'value': temp,
+                'timestamp': current_time,
+            }
+            if logMetaStats:
+                logger.info(
+                    f"System: 🥵 New hottest temp record: {temp}°C from NodeID:{node_id} "
+                    f"ShortName:{get_name_from_number(node_id, 'short', rx_node)}"
+                )
+    except Exception as e:
+        logger.debug(f"System: leaderboard temperature update error: {e}")
+
+
+def apply_leaderboard_altitude_speed_from_position(
+    node_id: int, position_data: dict, timestamp: float
+) -> None:
+    """Update tallest / highest altitude / ground & airspeed from a position dict (NodeDB or packet)."""
+    global meshLeaderboard
+    if not node_id or not isinstance(position_data, dict):
+        return
+    try:
+        if position_data.get("altitude") is None:
+            return
+        altitude = position_data["altitude"]
+        highflying = altitude > highfly_altitude
+
+        if altitude < (highfly_altitude - 100):
+            if altitude > meshLeaderboard["tallestNode"]["value"]:
+                meshLeaderboard["tallestNode"] = {
+                    "nodeID": node_id,
+                    "value": altitude,
+                    "timestamp": timestamp,
+                }
+        if highflying:
+            if altitude > meshLeaderboard["highestAltitude"]["value"]:
+                meshLeaderboard["highestAltitude"] = {
+                    "nodeID": node_id,
+                    "value": altitude,
+                    "timestamp": timestamp,
+                }
+        if position_data.get("groundSpeed") is not None:
+            speed = position_data["groundSpeed"]
+            if not highflying and speed > meshLeaderboard["fastestSpeed"]["value"]:
+                meshLeaderboard["fastestSpeed"] = {
+                    "nodeID": node_id,
+                    "value": speed,
+                    "timestamp": timestamp,
+                }
+            elif highflying and speed > meshLeaderboard["fastestAirSpeed"]["value"]:
+                meshLeaderboard["fastestAirSpeed"] = {
+                    "nodeID": node_id,
+                    "value": speed,
+                    "timestamp": timestamp,
+                }
+    except Exception as e:
+        logger.debug(f"System: leaderboard position metrics error: {e}")
+
+
+def apply_environment_iaq_to_leaderboard(
+    node_id: int, iaq: float, rx_node: int = 1
+) -> None:
+    global meshLeaderboard
+    if not node_id:
+        return
+    try:
+        iaq = float(iaq)
+        if iaq > float(meshLeaderboard["worstAirQuality"]["value"]):
+            meshLeaderboard["worstAirQuality"] = {
+                "nodeID": node_id,
+                "value": iaq,
+                "timestamp": time.time(),
+            }
+            if logMetaStats:
+                logger.info(
+                    f"System: 💨 New worst air quality record: IAQ {iaq} from NodeID:{node_id} "
+                    f"ShortName:{get_name_from_number(node_id, 'short', rx_node)}"
+                )
+    except (TypeError, ValueError):
+        return
+
+
+def sync_leaderboard_from_nodedb() -> None:
+    """Merge NodeDB snapshot into meshLeaderboard (telemetry + last SNR + position).
+
+    Meshtastic merges incoming packets into per-node dicts; this matches the map/explorer
+    view and refreshes records that would otherwise stay stuck in leaderboard.pkl.
+
+    Optionally merges a regional map snapshot (leaderboardMeshMapURL), e.g. mesh map JSON,
+    into the same scoreboard (temperature, altitude, uptime, battery) without replacing
+    local SNR/spikes from your own radios.
+
+    Message-count leaderboards stay packet-driven only (no NodeDB / map snapshot source).
+    """
+    now = time.time()
+    for i in range(1, 10):
+        if not globals().get(f"interface{i}_enabled"):
+            continue
+        iface = globals().get(f"interface{i}")
+        if iface is None:
+            continue
+        myn = globals().get(f"myNodeNum{i}", 777)
+        nodes_by_num = getattr(iface, "nodesByNum", None)
+        if nodes_by_num:
+            node_iter = list(nodes_by_num.values())
+        else:
+            raw = getattr(iface, "nodes", None) or {}
+            node_iter = list(raw.values()) if isinstance(raw, dict) else []
+
+        for node in node_iter:
+            if not isinstance(node, dict):
+                continue
+            num = node.get("num")
+            if num is None:
+                continue
+            try:
+                nid = int(num)
+            except (TypeError, ValueError):
+                continue
+            if not nid:
+                continue
+
+            # Last heard SNR (same field as Sitrep / admin NodeDB table)
+            if nid != myn:
+                snr = node.get("snr")
+                if snr is not None:
+                    try:
+                        dbm = float(snr)
+                        if dbm > meshLeaderboard["highestDBm"]["value"]:
+                            meshLeaderboard["highestDBm"] = {
+                                "nodeID": nid,
+                                "value": dbm,
+                                "timestamp": now,
+                            }
+                        if dbm < meshLeaderboard["weakestDBm"]["value"]:
+                            meshLeaderboard["weakestDBm"] = {
+                                "nodeID": nid,
+                                "value": dbm,
+                                "timestamp": now,
+                            }
+                    except (TypeError, ValueError):
+                        pass
+
+            dm = node.get("deviceMetrics") or node.get("device_metrics")
+            if isinstance(dm, dict):
+                bl = dm.get("batteryLevel") if dm.get("batteryLevel") is not None else dm.get("battery_level")
+                if bl is not None:
+                    try:
+                        battery = float(bl)
+                        if battery > 0 and battery < float(meshLeaderboard["lowestBattery"]["value"]):
+                            meshLeaderboard["lowestBattery"] = {
+                                "nodeID": nid,
+                                "value": battery,
+                                "timestamp": now,
+                            }
+                    except (TypeError, ValueError):
+                        pass
+                if nid != myn:
+                    up = (
+                        dm.get("uptimeSeconds")
+                        if dm.get("uptimeSeconds") is not None
+                        else dm.get("uptime_seconds")
+                    )
+                    if up is not None:
+                        try:
+                            uptime = float(up)
+                            if uptime > float(meshLeaderboard["longestUptime"]["value"]):
+                                meshLeaderboard["longestUptime"] = {
+                                    "nodeID": nid,
+                                    "value": uptime,
+                                    "timestamp": now,
+                                }
+                        except (TypeError, ValueError):
+                            pass
+
+            env = node.get("environmentMetrics") or node.get("environment_metrics")
+            if isinstance(env, dict):
+                t = env.get("temperature")
+                if t is not None:
+                    try:
+                        apply_environment_temperature_to_leaderboard(nid, float(t), rx_node=i)
+                    except (TypeError, ValueError):
+                        pass
+                iq = env.get("iaq")
+                if iq is not None:
+                    try:
+                        apply_environment_iaq_to_leaderboard(nid, float(iq), rx_node=i)
+                    except (TypeError, ValueError):
+                        pass
+
+            pos = node.get("position")
+            if isinstance(pos, dict):
+                apply_leaderboard_altitude_speed_from_position(nid, pos, now)
+
+    remote = fetch_leaderboard_mesh_map_nodes_cached()
+    if isinstance(remote, dict):
+        merge_leaderboard_from_mesh_map_nodes(remote, now)
+
 
 def consumeMetadata(packet, rxNode=0, channel=-1):
     global positionMetadata, localTelemetryData, meshLeaderboard
@@ -1567,13 +2010,19 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
             print(f"DEBUG TELEMETRY_APP: {packet}\n\n")
         telemetry_packet = packet['decoded']['telemetry']
         # Track device metrics (battery, uptime)
-        if telemetry_packet.get('deviceMetrics'):
-            deviceMetrics = telemetry_packet['deviceMetrics']
+        dm_raw = telemetry_packet.get("deviceMetrics") or telemetry_packet.get(
+            "device_metrics"
+        )
+        if dm_raw and isinstance(dm_raw, dict):
+            deviceMetrics = dm_raw
             current_time = time.time()
             # Track lowest battery 🪫
             try:
-                if deviceMetrics.get('batteryLevel') is not None:
-                    battery = float(deviceMetrics['batteryLevel'])
+                bl_raw = deviceMetrics.get("batteryLevel")
+                if bl_raw is None:
+                    bl_raw = deviceMetrics.get("battery_level")
+                if bl_raw is not None:
+                    battery = float(bl_raw)
                     if battery > 0 and battery < float(meshLeaderboard['lowestBattery']['value']):
                         meshLeaderboard['lowestBattery'] = {'nodeID': nodeID, 'value': battery, 'timestamp': current_time}
                         if logMetaStats:
@@ -1585,8 +2034,11 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
             try:
                 # if not a bot ID track it
                 if nodeID != globals().get(f'myNodeNum{rxNode}') and nodeID != 0:
-                    if deviceMetrics.get('uptimeSeconds') is not None:
-                        uptime = float(deviceMetrics['uptimeSeconds'])
+                    up_raw = deviceMetrics.get("uptimeSeconds")
+                    if up_raw is None:
+                        up_raw = deviceMetrics.get("uptime_seconds")
+                    if up_raw is not None:
+                        uptime = float(up_raw)
                         longest_uptime = float(meshLeaderboard['longestUptime']['value'])
                         if uptime > longest_uptime:
                             meshLeaderboard['longestUptime'] = {'nodeID': nodeID, 'value': uptime, 'timestamp': current_time}
@@ -1594,33 +2046,31 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                 logger.debug(f"System: TELEMETRY_APP uptimeSeconds error: Device: {rxNode} Channel: {channel} {e} packet {packet}")
 
         # Track environment metrics (temperature, air quality)
-        if telemetry_packet.get('environmentMetrics'):
-            envMetrics = telemetry_packet['environmentMetrics']
+        envMetrics = telemetry_packet.get('environmentMetrics') or telemetry_packet.get(
+            'environment_metrics'
+        )
+        if envMetrics and isinstance(envMetrics, dict):
             current_time = time.time()
             try:
-                if envMetrics.get('temperature') is not None:
+                if envMetrics.get('temperature') is not None and nodeID:
                     temp = float(envMetrics['temperature'])
-                    if temp < float(meshLeaderboard['coldestTemp']['value']):
-                        meshLeaderboard['coldestTemp'] = {'nodeID': nodeID, 'value': temp, 'timestamp': current_time}
-                        if logMetaStats:
-                            logger.info(f"System: 🥶 New coldest temp record: {temp}°C from NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
-                    if temp > float(meshLeaderboard['hottestTemp']['value']):
-                        meshLeaderboard['hottestTemp'] = {'nodeID': nodeID, 'value': temp, 'timestamp': current_time}
-                        if logMetaStats:
-                            logger.info(f"System: 🥵 New hottest temp record: {temp}°C from NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
+                    apply_environment_temperature_to_leaderboard(
+                        int(nodeID), temp, rx_node=rxNode
+                    )
             except Exception as e:
-                logger.debug(f"System: TELEMETRY_APP temperature error: Device: {rxNode} Channel: {channel} {e} packet {packet}")
+                logger.debug(
+                    f"System: TELEMETRY_APP temperature error: Device: {rxNode} Channel: {channel} {e} packet {packet}"
+                )
 
             try:
-                # Track worst air quality 💨 (IAQ - higher is worse)
-                if envMetrics.get('iaq') is not None:
-                    iaq = float(envMetrics['iaq'])
-                    if iaq > float(meshLeaderboard['worstAirQuality']['value']):
-                        meshLeaderboard['worstAirQuality'] = {'nodeID': nodeID, 'value': iaq, 'timestamp': current_time}
-                        if logMetaStats:
-                            logger.info(f"System: 💨 New worst air quality record: IAQ {iaq} from NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
+                if envMetrics.get("iaq") is not None and nodeID:
+                    apply_environment_iaq_to_leaderboard(
+                        int(nodeID), float(envMetrics["iaq"]), rx_node=rxNode
+                    )
             except Exception as e:
-                logger.debug(f"System: TELEMETRY_APP iaq error: Device: {rxNode} Channel: {channel} {e} packet {packet}")
+                logger.debug(
+                    f"System: TELEMETRY_APP iaq error: Device: {rxNode} Channel: {channel} {e} packet {packet}"
+                )
 
         # Update localStats in telemetryData
         if telemetry_packet.get('localStats'):
@@ -1644,38 +2094,45 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
             for key in position_stats_keys:
                 positionMetadata[nodeID][key] = position_data.get(key, 0)
  
-            # Track altitude and speed records
-            if position_data.get('altitude') is not None:
-                altitude = position_data['altitude']
+            lb_ts = time.time()
+            if position_data.get("altitude") is not None:
+                apply_leaderboard_altitude_speed_from_position(
+                    nodeID, position_data, lb_ts
+                )
+                altitude = position_data["altitude"]
                 highflying = altitude > highfly_altitude
-            
-                # Tallest node (below highfly_altitude - 100m)
-                if altitude < (highfly_altitude - 100):
-                    if altitude > meshLeaderboard['tallestNode']['value']:
-                        meshLeaderboard['tallestNode'] = {'nodeID': nodeID, 'value': altitude, 'timestamp': time.time()}
-                        if logMetaStats:
-                            logger.info(f"System: 🪜 New tallest node record: {altitude}m from NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
-            
-                # Highest altitude (above highfly_altitude)
-                if highflying:
-                    if altitude > meshLeaderboard['highestAltitude']['value']:
-                        meshLeaderboard['highestAltitude'] = {'nodeID': nodeID, 'value': altitude, 'timestamp': time.time()}
-                        if logMetaStats:
-                            logger.info(f"System: 🚀 New altitude record: {altitude}m from NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
-            
-                # Track speed records
-                if position_data.get('groundSpeed') is not None:
-                    speed = position_data['groundSpeed']
-                    # Fastest ground speed (not highflying)
-                    if not highflying and speed > meshLeaderboard['fastestSpeed']['value']:
-                        meshLeaderboard['fastestSpeed'] = {'nodeID': nodeID, 'value': speed, 'timestamp': time.time()}
-                        if logMetaStats:
-                            logger.info(f"System: 🚓 New speed record: {speed} km/h from NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
-                    # Fastest air speed (highflying)
-                    elif highflying and speed > meshLeaderboard['fastestAirSpeed']['value']:
-                        meshLeaderboard['fastestAirSpeed'] = {'nodeID': nodeID, 'value': speed, 'timestamp': time.time()}
-                        if logMetaStats:
-                            logger.info(f"System: ✈️ New air speed record: {speed} km/h from NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
+                if logMetaStats:
+
+                    def _lb_just_updated(key: str) -> bool:
+                        r = meshLeaderboard[key]
+                        return r.get("nodeID") == nodeID and abs(
+                            float(r.get("timestamp", 0)) - lb_ts
+                        ) < 0.05
+
+                    if altitude < (highfly_altitude - 100) and _lb_just_updated(
+                        "tallestNode"
+                    ):
+                        logger.info(
+                            f"System: 🪜 New tallest node record: {altitude}m from NodeID:{nodeID} "
+                            f"ShortName:{get_name_from_number(nodeID, 'short', rxNode)}"
+                        )
+                    if highflying and _lb_just_updated("highestAltitude"):
+                        logger.info(
+                            f"System: 🚀 New altitude record: {altitude}m from NodeID:{nodeID} "
+                            f"ShortName:{get_name_from_number(nodeID, 'short', rxNode)}"
+                        )
+                    sp = position_data.get("groundSpeed")
+                    if sp is not None:
+                        if not highflying and _lb_just_updated("fastestSpeed"):
+                            logger.info(
+                                f"System: 🚓 New speed record: {sp} km/h from NodeID:{nodeID} "
+                                f"ShortName:{get_name_from_number(nodeID, 'short', rxNode)}"
+                            )
+                        elif highflying and _lb_just_updated("fastestAirSpeed"):
+                            logger.info(
+                                f"System: ✈️ New air speed record: {sp} km/h from NodeID:{nodeID} "
+                                f"ShortName:{get_name_from_number(nodeID, 'short', rxNode)}"
+                            )
             # if altitude is over highfly_altitude send a log and message for high-flying nodes and not in highfly_ignoreList
             if position_data.get('altitude', 0) > highfly_altitude and highfly_enabled and str(nodeID) not in highfly_ignoreList and not isNodeBanned(nodeID):
                 logger.info(f"System: High Altitude {position_data['altitude']}m on Device: {rxNode} Channel: {channel} NodeID:{nodeID} Lat:{position_data.get('latitude', 0)} Lon:{position_data.get('longitude', 0)}")
@@ -1970,15 +2427,18 @@ def loadLeaderboard():
         initializeMeshLeaderboard()  # sets meshLeaderboard to default structure
         for k, v in loaded.items():
             meshLeaderboard[k] = v
+        sync_leaderboard_from_nodedb()
         if logMetaStats:
             logger.debug("System: Mesh Leaderboard loaded from leaderboard.pkl")
     except FileNotFoundError:
         if logMetaStats:
             logger.debug("System: No existing Mesh Leaderboard found, starting fresh")
         initializeMeshLeaderboard()
+        sync_leaderboard_from_nodedb()
     except Exception as e:
         logger.warning(f"System: Error loading Mesh Leaderboard: {e}")
         initializeMeshLeaderboard()
+        sync_leaderboard_from_nodedb()
 
 def get_mesh_leaderboard(msg, fromID, deviceID):
     """Get formatted leaderboard of extreme mesh metrics"""
@@ -1988,6 +2448,8 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
     if "reset" in msg.lower() and str(fromID) in bbs_admin_list:
         initializeMeshLeaderboard()
         return "✅ Leaderboard has been reset."
+
+    sync_leaderboard_from_nodedb()
 
     # Lowest battery
     if meshLeaderboard['lowestBattery']['nodeID']:
@@ -2471,8 +2933,10 @@ def saveAllData():
             logger.debug("Persistence: BBS data saved")
 
         # Save leaderboard data if enabled
-        if logMetaStats and saveLeaderboard():
-            logger.debug("Persistence: Leaderboard data saved")
+        if logMetaStats:
+            sync_leaderboard_from_nodedb()
+            if saveLeaderboard():
+                logger.debug("Persistence: Leaderboard data saved")
 
         # Save ban list
         if save_bbsBanList():

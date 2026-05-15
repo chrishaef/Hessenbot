@@ -253,6 +253,10 @@ try:
     syslog_to_file = config['general'].getboolean('SyslogToFile', True) # default on
     LOGGING_LEVEL = config['general'].get('sysloglevel', 'DEBUG') # default DEBUG
     urlTimeoutSeconds = config['general'].getint('urlTimeout', 15) # default 15 seconds for URL fetch timeout
+    leaderboard_mesh_map_enabled = config['general'].getboolean('leaderboardMeshMapEnable', True)
+    leaderboard_mesh_map_url = config['general'].get(
+        'leaderboardMeshMapURL', 'https://map.meshhessen.de/nodes.json'
+    ).strip()
     store_forward_enabled = config['general'].getboolean('StoreForward', True)
     storeFlimit = config['general'].getint('StoreLimit', 3) # default 3 messages for S&F
     reverseSF = config['general'].getboolean('reverseSF', False) # default False, send oldest first
