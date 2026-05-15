@@ -697,6 +697,201 @@ def create_app(
             flash(msg, "success")
         return redirect(url_for("nodes_list", iface=iface_id))
 
+    @app.route("/mesh-admin", methods=["GET", "POST"])
+    @login_required
+    def mesh_admin_index():
+        from modules import admin_web_ops as ops
+
+        iface_q = request.args.get("iface", type=int)
+        redirect_kw = {"iface": iface_q} if iface_q else {}
+
+        if request.method == "POST":
+            action = (request.form.get("action") or "").strip()
+            current = ops.read_mesh_admin_list()
+            try:
+                post_iface = int(request.form.get("iface_id") or "0")
+            except (TypeError, ValueError):
+                post_iface = 0
+            if post_iface > 0:
+                redirect_kw["iface"] = post_iface
+
+            if action == "add":
+                nid = ops.normalize_ban_node_id(request.form.get("node_id", ""))
+                if not nid:
+                    flash("Ungültige Knoten-ID (Dezimalzahl oder !xxxxxxxx).", "error")
+                elif nid in current:
+                    flash(f"Knoten {nid} ist bereits Mesh-Admin.", "info")
+                else:
+                    current.append(nid)
+                    try:
+                        ops.save_mesh_admin_list(current)
+                    except OSError as e:
+                        flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                    else:
+                        flash(f"Knoten {nid} als Mesh-Admin eingetragen.", "success")
+            elif action == "remove":
+                nid = (request.form.get("node_id") or "").strip()
+                if nid in current:
+                    current = [x for x in current if x != nid]
+                    try:
+                        ops.save_mesh_admin_list(current)
+                    except OSError as e:
+                        flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                    else:
+                        flash(f"Knoten {nid} ist kein Mesh-Admin mehr.", "success")
+                else:
+                    flash("Knoten ist kein Mesh-Admin.", "error")
+            elif action == "save":
+                lines = (request.form.get("admin_list_text") or "").splitlines()
+                merged = [ln.strip() for ln in lines if ln.strip()]
+                try:
+                    ops.save_mesh_admin_list(merged)
+                except OSError as e:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                else:
+                    flash(f"Mesh-Admin-Liste gespeichert ({len(merged)} Einträge).", "success")
+            else:
+                flash("Unbekannte Aktion.", "error")
+            return redirect(url_for("mesh_admin_index", **redirect_kw))
+
+        admins = ops.read_mesh_admin_list()
+        admin_set = set(admins)
+
+        admin_rows = []
+        for nid in sorted(admins, key=lambda x: int(x) if x.isdigit() else 0):
+            label = html_escape(ops.ban_node_label(nid))
+            try:
+                hex_h = html_escape(f"!{int(nid):08x}")
+            except (TypeError, ValueError):
+                hex_h = html_escape(nid)
+            admin_rows.append(
+                "<tr>"
+                f"<td><code>{html_escape(nid)}</code></td>"
+                f"<td><code>{hex_h}</code></td>"
+                f"<td>{label}</td>"
+                f'<td><form method="post" style="display:inline" '
+                f'onsubmit="return confirm(\'Mesh-Admin {html_escape(nid)} entfernen?\');">'
+                '<input type="hidden" name="action" value="remove">'
+                f'<input type="hidden" name="node_id" value="{html_escape(nid)}">'
+                '<button type="submit" class="btn btn-sm btn-outline-danger">Entfernen</button>'
+                "</form></td>"
+                "</tr>"
+            )
+        admin_table = (
+            "".join(admin_rows)
+            if admin_rows
+            else '<tr><td colspan="4">Noch keine Mesh-Admins eingetragen.</td></tr>'
+        )
+        list_text = "\n".join(admins)
+
+        nodedb_block = (
+            '<p class="alert alert-info">Keine aktive Meshtastic-Schnittstelle — '
+            "NodeDB-Auswahl nicht verfügbar. Knoten-ID manuell eintragen.</p>"
+        )
+        try:
+            ifaces = ops.iter_radio_interfaces()
+        except Exception as e:
+            nodedb_block = f'<p class="alert alert-danger">{html_escape(str(e))}</p>'
+            ifaces = []
+
+        if ifaces:
+            q = request.args.get("iface", type=int)
+            iface_id = q if q in ifaces else ifaces[0]
+            err, rows = ops.list_node_rows(iface_id)
+            if err:
+                nodedb_block = f'<p class="alert alert-danger">{html_escape(err)}</p>'
+            else:
+                tab_parts = []
+                for i in ifaces:
+                    cls = "btn-light" if i == iface_id else "btn-outline-secondary"
+                    tab_parts.append(
+                        f'<a class="btn btn-sm {cls}" href="{url_for("mesh_admin_index", iface=i)}">IF {i}</a>'
+                    )
+                tabs = " ".join(tab_parts)
+                node_rows = []
+                for r in rows:
+                    num = str(r["num"])
+                    if r["is_self"]:
+                        admin_cell = '<span class="text-muted">(lokal)</span>'
+                    elif num in admin_set:
+                        admin_cell = (
+                            '<span class="badge bg-success me-1">Admin</span>'
+                            f'<form method="post" style="display:inline">'
+                            '<input type="hidden" name="action" value="remove">'
+                            f'<input type="hidden" name="node_id" value="{html_escape(num)}">'
+                            f'<input type="hidden" name="iface_id" value="{iface_id}">'
+                            '<button type="submit" class="btn btn-sm btn-outline-danger">Entfernen</button>'
+                            "</form>"
+                        )
+                    else:
+                        admin_cell = (
+                            f'<form method="post" style="display:inline">'
+                            '<input type="hidden" name="action" value="add">'
+                            f'<input type="hidden" name="node_id" value="{html_escape(num)}">'
+                            f'<input type="hidden" name="iface_id" value="{iface_id}">'
+                            '<button type="submit" class="btn btn-sm btn-success">+ Admin</button>'
+                            "</form>"
+                        )
+                    node_rows.append(
+                        f"<tr{ops.nodedb_row_search_attr(r)}>"
+                        f"<td><code>{r['num']}</code></td>"
+                        f"<td><code>{r['node_id']}</code></td>"
+                        f"<td>{r['shortName']}</td>"
+                        f"<td>{r['longName']}</td>"
+                        f"<td>{admin_cell}</td>"
+                        "</tr>"
+                    )
+                nodedb_block = f"""
+<p class="small text-muted mb-2">Aus NodeDB (Schnittstelle): {tabs}</p>
+<div class="nodedb-search-block">
+{ops.nodedb_search_toolbar_html()}
+<div class="table-scroll"><table class="nodes-table table-dark table-bordered">
+<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Admin</th></tr></thead>
+<tbody>{"".join(node_rows) if node_rows else '<tr><td colspan="5">Keine Knoten in der NodeDB.</td></tr>'}
+<tr class="nodedb-search-empty" hidden><td colspan="5" class="text-muted small">Keine Treffer für die Suche.</td></tr>
+</tbody></table></div>
+</div>
+<script src="/static/portal/nodedb-search.js"></script>"""
+
+        body = (
+            '<p class="small text-muted">'
+            "Mesh-Admins (<code>[bbs] bbs_admin_list</code>) dürfen u. a. fremde BBS-Beiträge löschen, "
+            "<code>bannode</code> per DM nutzen und weitere Admin-Befehle. "
+            "Web-Login (<code>[webAdmin]</code>) ist davon getrennt.</p>"
+            "<h2 class=\"h5 section-title mt-3\">Aktuelle Mesh-Admins</h2>"
+            '<form method="post" class="row g-2 align-items-end mb-3">'
+            '<input type="hidden" name="action" value="add">'
+            '<div class="col-md-8">'
+            '<label class="form-label small">Knoten-ID manuell</label>'
+            '<input type="text" name="node_id" class="form-control" '
+            'placeholder="Dezimal-ID oder !a1b2c3d4" required>'
+            "</div>"
+            '<div class="col-md-4">'
+            '<button type="submit" class="btn btn-success w-100">Als Admin hinzufügen</button>'
+            "</div></form>"
+            '<div class="table-scroll"><table class="nodes-table table-dark table-bordered">'
+            "<thead><tr><th>Node-ID</th><th>Hex</th><th>Anzeige</th><th></th></tr></thead>"
+            f"<tbody>{admin_table}</tbody></table></div>"
+            '<form method="post" class="mt-3">'
+            '<input type="hidden" name="action" value="save">'
+            '<label class="form-label small">Liste bearbeiten (eine Node-ID pro Zeile)</label>'
+            f'<textarea name="admin_list_text" rows="6" class="form-control font-monospace mb-2">'
+            f"{html_escape(list_text)}</textarea>"
+            '<button type="submit" class="btn btn-success">Speichern</button>'
+            "</form>"
+            '<h2 class="h5 section-title mt-4">Aus NodeDB übernehmen</h2>'
+            f"{nodedb_block}"
+        )
+
+        return _render_admin_template(
+            """
+  {{ body|safe }}
+""",
+            title="Mesh-Admin",
+            active_tab="meshadmin",
+            body=Markup(body),
+        )
+
     @app.route("/motd", methods=["GET", "POST"])
     @login_required
     def motd_edit():
