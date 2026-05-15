@@ -664,6 +664,27 @@ body.page-login {
   height: 240px;
 }
 
+.dash-view-nav .dash-view-btn {
+  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+}
+
+.dash-view-nav .dash-view-btn:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.dash-view-nav .dash-view-btn--active {
+  color: #fff;
+  background: var(--green, #2e7d5e);
+  border-color: var(--green, #2e7d5e);
+}
+
+[data-dash-panel][hidden] {
+  display: none !important;
+}
+
 .motd-box {
   background: var(--card-bg-muted);
   border-radius: 8px;

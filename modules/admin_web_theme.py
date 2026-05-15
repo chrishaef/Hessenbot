@@ -54,7 +54,12 @@ def portal_head(title: str = "Hessenbot") -> str:
     return THEME_SCRIPT + PORTAL_ASSETS + f"<title>{html_escape(title)}</title>"
 
 
-def portal_navbar(*, active: str = "stats", admin_href: str | None = None) -> str:
+def portal_navbar(
+    *,
+    active: str = "stats",
+    admin_href: str | None = None,
+    dash_view_tabs: bool = False,
+) -> str:
     stats_active = " active" if active == "stats" else ""
     admin_btn = ""
     if admin_href:
@@ -62,6 +67,37 @@ def portal_navbar(*, active: str = "stats", admin_href: str | None = None) -> st
             f'<a class="btn btn-success btn-sm" href="{html_escape(admin_href)}">'
             '<i class="bi bi-shield-lock me-1"></i>Admin</a>'
         )
+    if dash_view_tabs:
+        nav_primary = """
+      <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
+        <li class="nav-item">
+          <button type="button" class="btn btn-sm dash-view-btn dash-view-btn--active"
+                  data-dash-view="stats" aria-pressed="true">
+            <i class="bi bi-bar-chart-line me-1"></i>Statistik
+          </button>
+        </li>
+        <li class="nav-item">
+          <button type="button" class="btn btn-sm dash-view-btn"
+                  data-dash-view="bbs" aria-pressed="false">
+            <i class="bi bi-inboxes me-1"></i>BBS
+          </button>
+        </li>
+        <li class="nav-item">
+          <button type="button" class="btn btn-sm dash-view-btn"
+                  data-dash-view="nodedb" aria-pressed="false">
+            <i class="bi bi-diagram-3 me-1"></i>NodeDB
+          </button>
+        </li>
+      </ul>"""
+    else:
+        nav_primary = f"""
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item">
+          <a class="nav-link px-3{stats_active}" href="/">
+            <i class="bi bi-bar-chart-line me-1"></i>Statistik
+          </a>
+        </li>
+      </ul>"""
     return f"""
 <nav class="navbar navbar-expand-lg sticky-top portal-navbar" data-bs-theme="dark">
   <div class="container-fluid px-3">
@@ -74,13 +110,7 @@ def portal_navbar(*, active: str = "stats", admin_href: str | None = None) -> st
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="portalNav">
-      <ul class="navbar-nav me-auto">
-        <li class="nav-item">
-          <a class="nav-link px-3{stats_active}" href="/">
-            <i class="bi bi-bar-chart-line me-1"></i>Statistik
-          </a>
-        </li>
-      </ul>
+{nav_primary}
       <ul class="navbar-nav align-items-center gap-2">
         <li class="nav-item">
           <button id="theme-toggle" type="button" class="btn btn-link nav-link px-2"
@@ -112,10 +142,13 @@ def portal_shell_start(
     active_nav: str = "stats",
     admin_href: str | None = None,
     particles: bool = True,
+    dash_view_tabs: bool = False,
 ) -> str:
     extra = " particles-page" if particles else ""
     bg = portal_particles_html() if particles else ""
-    nav = portal_navbar(active=active_nav, admin_href=admin_href)
+    nav = portal_navbar(
+        active=active_nav, admin_href=admin_href, dash_view_tabs=dash_view_tabs
+    )
     return f"""<!DOCTYPE html>
 <html lang="de">
 <head>
