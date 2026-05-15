@@ -539,7 +539,7 @@ def create_app(
                     else:
                         del_btn = '<span class="text-muted">(lokal)</span>'
                     rows_html.append(
-                        "<tr>"
+                        f"<tr{ops.nodedb_row_search_attr(r)}>"
                         f"<td><code>{r['num']}</code></td>"
                         f"<td><code>{r['node_id']}</code></td>"
                         f"<td>{r['shortName']}</td>"
@@ -552,9 +552,15 @@ def create_app(
                 body = f"""
 <p class="small text-muted mb-2">Schnittstelle: {tabs}</p>
 <p class="small">Entfernen sendet einen Admin-Befehl an dein lokales Gerät (wie meshtastic --remove-node).</p>
+<div class="nodedb-search-block">
+{ops.nodedb_search_toolbar_html()}
 <div class="table-scroll"><table class="nodes-table table-dark table-bordered">
 <thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
-<tbody>{"".join(rows_html)}</tbody></table></div>"""
+<tbody>{"".join(rows_html)}
+<tr class="nodedb-search-empty" hidden><td colspan="7" class="text-muted small">Keine Treffer für die Suche.</td></tr>
+</tbody></table></div>
+</div>
+<script src="/static/portal/nodedb-search.js"></script>"""
 
         return _render_admin_template("""
   {{ body }}
