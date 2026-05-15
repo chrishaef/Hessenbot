@@ -293,23 +293,9 @@ def create_app(
         return _render_admin_template(
             host_block
             + """
-<p class="text-muted small mb-3">
-  NodeDB, MOTD, Scheduler, BBS und Logs findest du in den Tabs oben.
+<p class="text-muted small mb-0">
+  DM, News, Messages, NodeDB, MOTD, Scheduler, BBS, Banliste und Logs erreichst du über die Tabs oben.
 </p>
-<div class="row g-3">
-  <div class="col-md-6">
-    <h3 class="h6 section-title"><i class="bi bi-file-earmark-text me-2"></i>Texte</h3>
-    <a href="{{ url_for('edit', dateiname='direktnachricht') }}"
-       class="btn btn-outline-secondary mb-2 w-100">Direktnachricht bearbeiten</a>
-    <a href="{{ url_for('edit', dateiname='news') }}"
-       class="btn btn-outline-secondary w-100">News bearbeiten</a>
-  </div>
-  <div class="col-md-6">
-    <h3 class="h6 section-title"><i class="bi bi-activity me-2"></i>Live</h3>
-    <a href="{{ url_for('live_messages') }}"
-       class="btn btn-outline-success w-100">messages.log (Auto-Refresh)</a>
-  </div>
-</div>
 <p class="text-center mt-4 mb-0">
   <a href="{{ url_for('index_dashboard') }}" class="btn btn-sm btn-link text-muted">
     <i class="bi bi-bar-chart me-1"></i>Öffentliche Statistik
@@ -320,9 +306,13 @@ def create_app(
             active_tab="home",
         )
 
-    @app.route("/edit/<dateiname>", methods=["GET", "POST"])
-    @login_required
-    def edit(dateiname):
+    def _render_text_file_editor(
+        dateiname: str,
+        *,
+        active_tab: str,
+        page_title: str,
+        file_hint: str = "",
+    ):
         pfad = dateien.get(dateiname)
         if not pfad:
             return "Ungültiger Dateiname.", 404
@@ -334,6 +324,8 @@ def create_app(
         if request.method == "POST":
             with open(pfad, "w", encoding="utf-8") as f:
                 f.write(request.form.get("text", ""))
+            flash(f"{page_title} gespeichert.", "success")
+            return redirect(request.url)
 
         if os.path.isfile(pfad):
             with open(pfad, encoding="utf-8") as f:
@@ -341,24 +333,55 @@ def create_app(
         else:
             inhalt = ""
 
-        return _render_admin_template(f"""
-    <div class="container">
-      <h2 class="mb-4 text-center">📝 Datei: {dateiname.capitalize()}</h2>
-      <form method="post">
-        <textarea name="text" rows="20" class="form-control mb-3">{{{{ inhalt }}}}</textarea>
-        <input type="submit" value="Speichern" class="btn btn-success w-100">
-      </form>
-      <div class="text-center mt-3">
-        <a href="{{{{url_for('choose')}}}}" class="btn btn-outline-light">
-          ⬅️ Zurück
-        </a>
-      </div>
-    </div>
-    """,
-            title=f"Datei: {dateiname.capitalize()}",
-            active_tab="home",
+        hint_html = ""
+        if file_hint:
+            hint_html = f'<p class="text-muted small mb-3">{html_escape(file_hint)}</p>'
+        path_line = (
+            f'<p class="text-muted small mb-3">Datei: <code>{html_escape(pfad)}</code></p>'
+        )
+
+        return _render_admin_template(
+            f"""
+{path_line}
+{hint_html}
+<form method="post">
+  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{{{ inhalt }}}}</textarea>
+  <button type="submit" class="btn btn-success">Speichern</button>
+</form>
+""",
+            title=page_title,
+            active_tab=active_tab,
             inhalt=inhalt,
         )
+
+    @app.route("/dm", methods=["GET", "POST"])
+    @login_required
+    def edit_dm():
+        return _render_text_file_editor(
+            "direktnachricht",
+            active_tab="dm",
+            page_title="DM",
+            file_hint="Direktnachricht des Bots (Alert-Text).",
+        )
+
+    @app.route("/news", methods=["GET", "POST"])
+    @login_required
+    def edit_news():
+        return _render_text_file_editor(
+            "news",
+            active_tab="news",
+            page_title="News",
+            file_hint="News-Text für geplante News-Ausgaben.",
+        )
+
+    @app.route("/edit/<dateiname>", methods=["GET", "POST"])
+    @login_required
+    def edit(dateiname):
+        if dateiname == "direktnachricht":
+            return redirect(url_for("edit_dm"))
+        if dateiname == "news":
+            return redirect(url_for("edit_news"))
+        return "Ungültiger Dateiname.", 404
 
     @app.route("/logs")
     @login_required
@@ -460,8 +483,8 @@ def create_app(
   <pre class="admin-pre">{html_escape(inhalt)}</pre>
 </div>
 """,
-            title="Live messages.log",
-            active_tab="logs",
+            title="Messages",
+            active_tab="messages",
         )
 
     @app.route("/nodes")

@@ -678,8 +678,12 @@ body.page-login {
 .dash-scroll { max-height: 220px; overflow-y: auto; }
 
 /* BBS / NodeDB panels: taller lists, less in-card scrolling */
-[data-dash-panel="bbs"] .dash-scroll {
-  max-height: min(42vh, 420px);
+[data-dash-panel="bbs"] .dash-scroll:not(.dash-scroll--dm) {
+  max-height: min(48vh, 480px);
+}
+
+[data-dash-panel="bbs"] .dash-scroll--dm {
+  max-height: min(58vh, 560px);
 }
 
 [data-dash-panel="nodedb"] .dash-nodedb-scroll {
@@ -725,45 +729,131 @@ body.page-login {
   display: none !important;
 }
 
-.dash-dm-item {
+.dash-list--dm {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.55rem 0;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.dash-dm-meta {
+.dash-list--dm > .dash-dm-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 0.85rem;
+  margin: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--card-bg-muted);
+  border-bottom: none;
+}
+
+.dash-dm-item--waiting {
+  border-left: 3px solid #ffc107;
+}
+
+.dash-dm-item--delivered {
+  border-left: 3px solid #198754;
+}
+
+.dash-dm-body {
   flex: 1;
   min-width: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dash-dm-aside {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+  text-align: right;
+}
+
+.dash-dm-times {
+  display: flex;
+  flex-direction: column;
   gap: 0.2rem;
-  font-size: 0.82rem;
+}
+
+.dash-dm-time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.05rem;
+  line-height: 1.25;
+}
+
+.dash-dm-time-k {
+  color: #6c757d;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.dash-dm-time-v {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-secondary);
 }
 
 .dash-dm-row {
   display: grid;
-  grid-template-columns: 6.5rem minmax(0, 1fr);
-  gap: 0.5rem;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 0.45rem;
   align-items: baseline;
+  font-size: 0.82rem;
 }
 
 .dash-dm-k {
   color: #6c757d;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  font-weight: 600;
 }
 
 .dash-dm-v {
   word-break: break-word;
+  line-height: 1.35;
 }
 
 .dash-dm-badge {
   flex-shrink: 0;
-  align-self: flex-start;
   font-size: 0.7rem;
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .dash-list--dm > .dash-dm-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dash-dm-aside {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--card-border);
+    padding-top: 0.45rem;
+    margin-top: 0.15rem;
+  }
+
+  .dash-dm-times {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.65rem 1rem;
+  }
+
+  .dash-dm-time {
+    align-items: flex-start;
+  }
 }
 
 .motd-box {
