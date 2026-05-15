@@ -649,6 +649,7 @@ def create_app(
                         f"<td><code>{r['node_id']}</code></td>"
                         f"<td>{r['shortName']}</td>"
                         f"<td>{r['longName']}</td>"
+                        f"<td>{r['location_html']}</td>"
                         f"<td>{r['lastHeard']}</td>"
                         f"<td>{html_escape(str(r['snr']))}</td>"
                         f"<td>{del_btn}</td>"
@@ -660,9 +661,9 @@ def create_app(
 <div class="nodedb-search-block">
 {ops.nodedb_search_toolbar_html()}
 <div class="table-scroll"><table class="nodes-table table-dark table-bordered">
-<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
+<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Standort</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
 <tbody>{"".join(rows_html)}
-<tr class="nodedb-search-empty" hidden><td colspan="7" class="text-muted small">Keine Treffer für die Suche.</td></tr>
+<tr class="nodedb-search-empty" hidden><td colspan="8" class="text-muted small">Keine Treffer für die Suche.</td></tr>
 </tbody></table></div>
 </div>
 <script src="/static/portal/nodedb-search.js"></script>"""
@@ -838,6 +839,7 @@ def create_app(
                         f"<td><code>{r['node_id']}</code></td>"
                         f"<td>{r['shortName']}</td>"
                         f"<td>{r['longName']}</td>"
+                        f"<td>{r['location_html']}</td>"
                         f"<td>{admin_cell}</td>"
                         "</tr>"
                     )
@@ -846,9 +848,9 @@ def create_app(
 <div class="nodedb-search-block">
 {ops.nodedb_search_toolbar_html()}
 <div class="table-scroll"><table class="nodes-table table-dark table-bordered">
-<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Admin</th></tr></thead>
-<tbody>{"".join(node_rows) if node_rows else '<tr><td colspan="5">Keine Knoten in der NodeDB.</td></tr>'}
-<tr class="nodedb-search-empty" hidden><td colspan="5" class="text-muted small">Keine Treffer für die Suche.</td></tr>
+<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Standort</th><th>Admin</th></tr></thead>
+<tbody>{"".join(node_rows) if node_rows else '<tr><td colspan="6">Keine Knoten in der NodeDB.</td></tr>'}
+<tr class="nodedb-search-empty" hidden><td colspan="6" class="text-muted small">Keine Treffer für die Suche.</td></tr>
 </tbody></table></div>
 </div>
 <script src="/static/portal/nodedb-search.js"></script>"""
