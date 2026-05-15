@@ -660,6 +660,10 @@ body.page-login {
   height: 100% !important;
 }
 
+.chart-canvas-wrap--wide {
+  height: 240px;
+}
+
 .motd-box {
   background: var(--card-bg-muted);
   border-radius: 8px;
