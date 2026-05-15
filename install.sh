@@ -356,6 +356,12 @@ sudo usermod -a -G tty "$bot_user"
 sudo usermod -a -G bluetooth "$bot_user"
 echo "Added user $bot_user to dialout, tty, and bluetooth groups"
 
+# data/ may have been created as root during install — fix before first service start
+if [[ -f "$program_path/etc/set-permissions.sh" ]] && [[ -d "$program_path/data" ]]; then
+    sudo bash "$program_path/etc/set-permissions.sh" "$bot_user" "$program_path" || \
+        echo "WARN: Early permission setup failed; will retry at end of install."
+fi
+
 # check and see if some sort of NTP is running
 if ! systemctl is-active --quiet ntp.service && \
    ! systemctl is-active --quiet systemd-timesyncd.service && \
@@ -520,14 +526,20 @@ echo "Finalizing permissions..."
 echo "----------------------------------------------"
 export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-sudo chown -R "$bot_user:$bot_user" "$program_path/logs"
-sudo chown -R "$bot_user:$bot_user" "$program_path/data"
-sudo chown "$bot_user:$bot_user" "$program_path/config.ini"
-sudo chmod 664 "$program_path/config.ini"
-echo "Permissions set for meshbot on config.ini"
-sudo chmod 775 "$program_path/logs"
-sudo chmod 775 "$program_path/data"
-echo "Permissions set for meshbot on logs and data directories"
+if [[ -f "$program_path/etc/set-permissions.sh" ]]; then
+    sudo bash "$program_path/etc/set-permissions.sh" "$bot_user" "$program_path" || {
+        echo "WARN: set-permissions.sh failed — fix manually:"
+        echo "  sudo bash $program_path/etc/set-permissions.sh $bot_user $program_path"
+    }
+else
+    sudo mkdir -p "$program_path/logs" "$program_path/data"
+    sudo touch "$program_path/data/bbs_ban_list.txt" 2>/dev/null || true
+    sudo chown -R "$bot_user:$bot_user" "$program_path/logs" "$program_path/data"
+    sudo chown "$bot_user:$bot_user" "$program_path/config.ini" 2>/dev/null || true
+    sudo chmod 664 "$program_path/config.ini" 2>/dev/null || true
+    sudo chmod 775 "$program_path/logs" "$program_path/data"
+    echo "Permissions set for $bot_user on logs and data (fallback, no set-permissions.sh)"
+fi
 
 printf "\nGood time to reboot? (y/n)"
 read reboot

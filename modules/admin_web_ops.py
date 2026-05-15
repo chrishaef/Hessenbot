@@ -143,6 +143,156 @@ def save_motd_to_config(motd: str) -> None:
     st.MOTD = text
 
 
+BROADCAST_MODES = [
+    ("day", "Täglich zur Uhrzeit"),
+    ("hour", "Alle N Stunden"),
+    ("min", "Alle N Minuten"),
+    ("mon", "Montags zur Uhrzeit"),
+    ("tue", "Dienstags zur Uhrzeit"),
+    ("wed", "Mittwochs zur Uhrzeit"),
+    ("thu", "Donnerstags zur Uhrzeit"),
+    ("fri", "Freitags zur Uhrzeit"),
+    ("sat", "Samstags zur Uhrzeit"),
+    ("sun", "Sonntags zur Uhrzeit"),
+]
+
+_WEEKDAY_MODES = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
+
+
+def parse_broadcast_schedule_form(form) -> Tuple[bool, int, int, str, str, str]:
+    enabled = form.get("bc_enabled") == "on"
+    iface = int(form.get("bc_interface", "1"))
+    channel = int(form.get("bc_channel", "0"))
+    mode = (form.get("bc_mode") or "day").strip().lower()
+    interval = (form.get("bc_interval") or "1").strip()
+    sched_time = (form.get("bc_time") or "").strip()
+    return enabled, iface, channel, mode, interval, sched_time
+
+
+def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Optional[str]:
+    mode = (mode or "").strip().lower()
+    if mode in ("day",) | _WEEKDAY_MODES and not sched_time:
+        return "Bitte eine Uhrzeit (HH:MM) angeben."
+    if mode in ("hour", "min"):
+        try:
+            if int(interval or "0") < 1:
+                return "Intervall muss mindestens 1 sein."
+        except ValueError:
+            return "Intervall muss eine Zahl sein."
+    if sched_time and len(sched_time) >= 5:
+        parts = sched_time.split(":")
+        if len(parts) != 2:
+            return "Uhrzeit im Format HH:MM (z. B. 09:30)."
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                return "Uhrzeit ungültig (00:00–23:59)."
+        except ValueError:
+            return "Uhrzeit ungültig."
+    return None
+
+
+def broadcast_schedule_form_html(
+    *,
+    enabled: bool,
+    iface: int,
+    channel: int,
+    mode: str,
+    interval: str,
+    sched_time: str,
+    config_section: str,
+) -> str:
+    chk = " checked" if enabled else ""
+    cur = (mode or "day").strip().lower()
+    opts = ['<select name="bc_mode" class="form-select mb-2" required>']
+    for val, label in BROADCAST_MODES:
+        sel = " selected" if cur == val else ""
+        opts.append(
+            f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(label)}</option>'
+        )
+    opts.append("</select>")
+    ivl = html.escape(str(interval or "1"))
+    tim = html.escape(str(sched_time or ""))
+    sec = html.escape(config_section)
+    return f"""
+<hr class="my-4">
+<h2 class="h5 mb-3">Automatischer Versand</h2>
+<p class="text-muted small">Einstellungen in <code>config.ini</code> → <code>[{sec}]</code>.
+Unabhängig vom allgemeinen Scheduler.</p>
+<div class="form-check mb-3">
+  <input class="form-check-input" type="checkbox" name="bc_enabled" id="bc_en"{chk}>
+  <label class="form-check-label" for="bc_en">Automatisch senden</label>
+</div>
+<div class="row mb-2">
+  <div class="col-md-6"><label class="form-label">Interface (Radio)</label>
+    <input type="number" name="bc_interface" class="form-control" min="1" max="9" value="{iface}"></div>
+  <div class="col-md-6"><label class="form-label">Kanal</label>
+    <input type="number" name="bc_channel" class="form-control" value="{channel}"></div>
+</div>
+<label class="form-label">Rhythmus</label>
+{"".join(opts)}
+<label class="form-label">Intervall</label>
+<input type="number" name="bc_interval" class="form-control mb-2" min="1" step="1" value="{ivl}">
+<p class="small text-muted mb-2">
+  <strong>day:</strong> Intervall = alle N Tage (1 = täglich), Uhrzeit erforderlich.
+  <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
+  <strong>Mo–So:</strong> Uhrzeit erforderlich.
+</p>
+<label class="form-label">Uhrzeit (HH:MM)</label>
+<input type="text" name="bc_time" class="form-control mb-3" placeholder="z. B. 09:00" value="{tim}"
+       pattern="[0-2][0-9]:[0-5][0-9]" title="Format 00:00 bis 23:59">
+"""
+
+
+def save_motd_broadcast_to_config(
+    enabled: bool, iface: int, channel: int, mode: str, interval: str, sched_time: str
+) -> None:
+    _save_broadcast_section(
+        "motdBroadcast", enabled, iface, channel, mode, interval, sched_time, prefix="motd_broadcast"
+    )
+
+
+def save_news_broadcast_to_config(
+    enabled: bool, iface: int, channel: int, mode: str, interval: str, sched_time: str
+) -> None:
+    _save_broadcast_section(
+        "newsBroadcast", enabled, iface, channel, mode, interval, sched_time, prefix="news_broadcast"
+    )
+
+
+def _save_broadcast_section(
+    section: str,
+    enabled: bool,
+    iface: int,
+    channel: int,
+    mode: str,
+    interval: str,
+    sched_time: str,
+    *,
+    prefix: str,
+) -> None:
+    import modules.settings as st
+
+    if section not in st.config:
+        st.config[section] = {}
+    sec = st.config[section]
+    sec["enabled"] = "True" if enabled else "False"
+    sec["interface"] = str(iface)
+    sec["channel"] = str(channel)
+    sec["mode"] = mode.strip().lower()
+    sec["interval"] = interval.strip()
+    sec["time"] = sched_time.strip()
+    with open(st.config_file, "w", encoding="utf-8") as fh:
+        st.config.write(fh)
+
+    setattr(st, f"{prefix}_enabled", enabled)
+    setattr(st, f"{prefix}_interface", iface)
+    setattr(st, f"{prefix}_channel", channel)
+    setattr(st, f"{prefix}_mode", sec["mode"])
+    setattr(st, f"{prefix}_interval", sec["interval"])
+    setattr(st, f"{prefix}_time", sec["time"])
+
+
 def save_scheduler_to_config(
     enabled: bool,
     iface: int,
@@ -180,7 +330,9 @@ def save_scheduler_to_config(
 
 
 def ban_list_file_path() -> str:
-    return path_in_repo("data/bbs_ban_list.txt")
+    from modules.system import bbs_ban_list_file_path
+
+    return bbs_ban_list_file_path()
 
 
 def normalize_ban_node_id(raw: str) -> Optional[str]:
@@ -239,6 +391,7 @@ def reload_ban_list_runtime() -> List[str]:
 def save_ban_list(node_ids: List[str]) -> List[str]:
     """Persist ban list to data/bbs_ban_list.txt, config.ini, and runtime settings."""
     import modules.settings as st
+    import modules.system as sysm
     from modules.system import save_bbsBanList
 
     cleaned: List[str] = []
@@ -250,14 +403,13 @@ def save_ban_list(node_ids: List[str]) -> List[str]:
         seen.add(nid)
         cleaned.append(nid)
 
-    st.bbs_ban_list = cleaned
-    path = ban_list_file_path()
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        for nid in cleaned:
-            fh.write(f"{nid}\n")
+    st.bbs_ban_list.clear()
+    st.bbs_ban_list.extend(cleaned)
+    if sysm.bbs_ban_list is not st.bbs_ban_list:
+        sysm.bbs_ban_list = st.bbs_ban_list
+
+    if not save_bbsBanList():
+        raise OSError(f"Keine Schreibrechte für {ban_list_file_path()}")
 
     if "bbs" not in st.config:
         st.config["bbs"] = {}
@@ -265,21 +417,18 @@ def save_ban_list(node_ids: List[str]) -> List[str]:
     with open(st.config_file, "w", encoding="utf-8") as fh:
         st.config.write(fh)
 
-    save_bbsBanList()
     return cleaned
 
 
 def rebuild_scheduler_jobs() -> None:
-    """Clear schedule jobs and rebuild from modules.settings (no-op if scheduler disabled)."""
+    """Clear all schedule jobs and rebuild main scheduler plus MOTD/News broadcasts."""
+    import schedule
+    from modules.scheduler import setup_all_scheduled_jobs
+
     import modules.settings as st
 
-    if not st.scheduler_enabled:
-        return
-    import schedule
-    from modules.scheduler import setup_scheduler
-
     schedule.clear()
-    setup_scheduler(
+    setup_all_scheduled_jobs(
         st.schedulerMotd,
         st.MOTD,
         st.schedulerMessage,

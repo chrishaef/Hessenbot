@@ -1276,10 +1276,18 @@ async def main():
         if my_settings.js8call_detection_enabled:
             tasks.append(asyncio.create_task(handleJs8callWatcher(), name="js8call_monitor"))
 
-        if my_settings.scheduler_enabled:
-            from modules.scheduler import run_scheduler_loop, setup_scheduler
-            setup_scheduler(schedulerMotd, MOTD, schedulerMessage, schedulerChannel, schedulerInterface,
-    schedulerValue, schedulerTime, schedulerInterval)
+        from modules.scheduler import run_scheduler_loop, scheduler_loop_needed, setup_all_scheduled_jobs
+        if scheduler_loop_needed():
+            setup_all_scheduled_jobs(
+                schedulerMotd,
+                MOTD,
+                schedulerMessage,
+                schedulerChannel,
+                schedulerInterface,
+                schedulerValue,
+                schedulerTime,
+                schedulerInterval,
+            )
             tasks.append(asyncio.create_task(run_scheduler_loop(), name="scheduler"))
         
         logger.debug(f"System: Starting {len(tasks)} async tasks")

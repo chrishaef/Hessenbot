@@ -187,3 +187,145 @@ def setup_scheduler(
     except Exception as e:
         logger.error(f"System: Scheduler Error {e}")
     return True
+
+
+def register_recurring_broadcast(
+    *,
+    mode: str,
+    interval: str,
+    sched_time: str,
+    interface: int,
+    channel: int,
+    job_fn,
+    log_label: str,
+) -> None:
+    """Register one timed send job (day/hour/min/weekdays). job_fn is called with no arguments."""
+    mode = (mode or "day").lower().strip()
+    sched_time = (sched_time or "").strip()
+    interval_int = safe_int(interval, 1, type="interval")
+    if interval_int < 1:
+        interval_int = 1
+    interface = safe_int(interface, 1, type="interface")
+    channel = safe_int(channel, 0, type="channel")
+
+    if mode == "day":
+        if sched_time:
+            if interval_int == 1:
+                schedule.every().day.at(sched_time).do(job_fn)
+            else:
+                schedule.every(interval_int).days.at(sched_time).do(job_fn)
+        else:
+            schedule.every(interval_int).days.do(job_fn)
+    elif mode == "mon" and sched_time:
+        schedule.every().monday.at(sched_time).do(job_fn)
+    elif mode == "tue" and sched_time:
+        schedule.every().tuesday.at(sched_time).do(job_fn)
+    elif mode == "wed" and sched_time:
+        schedule.every().wednesday.at(sched_time).do(job_fn)
+    elif mode == "thu" and sched_time:
+        schedule.every().thursday.at(sched_time).do(job_fn)
+    elif mode == "fri" and sched_time:
+        schedule.every().friday.at(sched_time).do(job_fn)
+    elif mode == "sat" and sched_time:
+        schedule.every().saturday.at(sched_time).do(job_fn)
+    elif mode == "sun" and sched_time:
+        schedule.every().sunday.at(sched_time).do(job_fn)
+    elif mode == "hour":
+        schedule.every(interval_int).hours.do(job_fn)
+    elif mode == "min":
+        schedule.every(interval_int).minutes.do(job_fn)
+    else:
+        logger.warning(
+            f"System: {log_label} — ungültiger Modus '{mode}' oder fehlende Uhrzeit; Job nicht registriert"
+        )
+        return
+    logger.debug(
+        f"System: {log_label} — mode={mode} interval={interval_int} time={sched_time!r} "
+        f"IF={interface} CH={channel}"
+    )
+
+
+def setup_motd_broadcast() -> None:
+    import modules.settings as st
+
+    if not st.motd_broadcast_enabled:
+        return
+
+    def _send():
+        send_message(st.MOTD, st.motd_broadcast_channel, 0, st.motd_broadcast_interface)
+
+    register_recurring_broadcast(
+        mode=st.motd_broadcast_mode,
+        interval=st.motd_broadcast_interval,
+        sched_time=st.motd_broadcast_time,
+        interface=st.motd_broadcast_interface,
+        channel=st.motd_broadcast_channel,
+        job_fn=_send,
+        log_label="MOTD broadcast",
+    )
+
+
+def setup_news_broadcast() -> None:
+    import modules.settings as st
+
+    if not st.news_broadcast_enabled:
+        return
+    try:
+        from mesh_bot import handleNews
+    except ImportError as e:
+        logger.warning(f"System: News broadcast disabled — handleNews unavailable: {e}")
+        return
+
+    iface = st.news_broadcast_interface
+    ch = st.news_broadcast_channel
+
+    def _send():
+        send_message(handleNews(0, iface, "readnews", False), ch, 0, iface)
+
+    register_recurring_broadcast(
+        mode=st.news_broadcast_mode,
+        interval=st.news_broadcast_interval,
+        sched_time=st.news_broadcast_time,
+        interface=iface,
+        channel=ch,
+        job_fn=_send,
+        log_label="News broadcast",
+    )
+
+
+def setup_all_scheduled_jobs(
+    schedulerMotd,
+    MOTD,
+    schedulerMessage,
+    schedulerChannel,
+    schedulerInterface,
+    schedulerValue,
+    schedulerTime,
+    schedulerInterval,
+) -> None:
+    """Register main [scheduler] job plus MOTD/News broadcast jobs."""
+    import modules.settings as st
+
+    if st.scheduler_enabled:
+        setup_scheduler(
+            schedulerMotd,
+            MOTD,
+            schedulerMessage,
+            schedulerChannel,
+            schedulerInterface,
+            schedulerValue,
+            schedulerTime,
+            schedulerInterval,
+        )
+    setup_motd_broadcast()
+    setup_news_broadcast()
+
+
+def scheduler_loop_needed() -> bool:
+    import modules.settings as st
+
+    return bool(
+        st.scheduler_enabled
+        or st.motd_broadcast_enabled
+        or st.news_broadcast_enabled
+    )

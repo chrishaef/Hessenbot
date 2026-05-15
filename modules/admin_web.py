@@ -322,8 +322,12 @@ def create_app(
             os.makedirs(parent, exist_ok=True)
 
         if request.method == "POST":
-            with open(pfad, "w", encoding="utf-8") as f:
-                f.write(request.form.get("text", ""))
+            try:
+                with open(pfad, "w", encoding="utf-8") as f:
+                    f.write(request.form.get("text", ""))
+            except OSError as e:
+                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                return redirect(request.url)
             flash(f"{page_title} gespeichert.", "success")
             return redirect(request.url)
 
@@ -345,7 +349,7 @@ def create_app(
 {path_line}
 {hint_html}
 <form method="post">
-  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{{{ inhalt }}}}</textarea>
+  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{ inhalt }}</textarea>
   <button type="submit" class="btn btn-success">Speichern</button>
 </form>
 """,
@@ -367,11 +371,80 @@ def create_app(
     @app.route("/news", methods=["GET", "POST"])
     @login_required
     def edit_news():
-        return _render_text_file_editor(
-            "news",
+        from modules import admin_web_ops as ops
+        import modules.settings as st
+
+        dateiname = "news"
+        pfad = dateien.get(dateiname)
+        if not pfad:
+            return "Ungültiger Dateiname.", 404
+
+        parent = os.path.dirname(pfad)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent, exist_ok=True)
+
+        if request.method == "POST":
+            try:
+                enabled, iface, channel, mode, interval, sched_time = ops.parse_broadcast_schedule_form(
+                    request.form
+                )
+            except ValueError:
+                flash("Interface/Kanal ungültig.", "error")
+                return redirect(url_for("edit_news"))
+            err = ops.validate_broadcast_schedule(mode, interval, sched_time)
+            if enabled and err:
+                flash(err, "error")
+                return redirect(url_for("edit_news"))
+            try:
+                with open(pfad, "w", encoding="utf-8") as f:
+                    f.write(request.form.get("text", ""))
+                ops.save_news_broadcast_to_config(
+                    enabled, iface, channel, mode, interval, sched_time
+                )
+                ops.rebuild_scheduler_jobs()
+            except OSError as e:
+                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                return redirect(url_for("edit_news"))
+            except Exception as e:
+                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                return redirect(url_for("edit_news"))
+            flash("News und Versandzeit gespeichert.", "success")
+            return redirect(url_for("edit_news"))
+
+        if os.path.isfile(pfad):
+            with open(pfad, encoding="utf-8") as f:
+                inhalt = f.read()
+        else:
+            inhalt = ""
+
+        bc_form = ops.broadcast_schedule_form_html(
+            enabled=st.news_broadcast_enabled,
+            iface=st.news_broadcast_interface,
+            channel=st.news_broadcast_channel,
+            mode=st.news_broadcast_mode,
+            interval=st.news_broadcast_interval,
+            sched_time=st.news_broadcast_time,
+            config_section="newsBroadcast",
+        )
+        path_line = (
+            f'<p class="text-muted small mb-3">Datei: <code>{html_escape(pfad)}</code></p>'
+        )
+        return _render_admin_template(
+            f"""
+{path_line}
+<p class="text-muted small mb-3">News-Text für <code>!readnews</code> und automatischen Versand.</p>
+<form method="post">
+  <h2 class="h5 mb-3">News-Text</h2>
+  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{ inhalt }}</textarea>
+"""
+            + bc_form
+            + """
+  <button type="submit" class="btn btn-success w-100">Speichern</button>
+</form>
+""",
+            title="News",
             active_tab="news",
-            page_title="News",
-            file_hint="News-Text für geplante News-Ausgaben.",
+            inhalt=inhalt,
         )
 
     @app.route("/edit/<dateiname>", methods=["GET", "POST"])
@@ -601,19 +674,55 @@ def create_app(
         if request.method == "POST":
             text = request.form.get("motd", "")
             try:
+                enabled, iface, channel, mode, interval, sched_time = ops.parse_broadcast_schedule_form(
+                    request.form
+                )
+            except ValueError:
+                flash("Interface/Kanal ungültig.", "error")
+                return redirect(url_for("motd_edit"))
+            err = ops.validate_broadcast_schedule(mode, interval, sched_time)
+            if enabled and err:
+                flash(err, "error")
+                return redirect(url_for("motd_edit"))
+            try:
                 ops.save_motd_to_config(text)
+                ops.save_motd_broadcast_to_config(
+                    enabled, iface, channel, mode, interval, sched_time
+                )
+                ops.rebuild_scheduler_jobs()
             except Exception as e:
                 flash(f"Speichern fehlgeschlagen: {e!s}", "error")
             else:
-                flash("MOTD in config.ini gespeichert und im laufenden Bot übernommen.", "success")
+                flash("MOTD und Versandzeit gespeichert.", "success")
+                if enabled and not (
+                    st.scheduler_enabled or st.news_broadcast_enabled
+                ):
+                    flash(
+                        "Hinweis: Zeitplan läuft nur, wenn der Bot läuft. Nach erstem Aktivieren ggf. Bot neu starten.",
+                        "info",
+                    )
             return redirect(url_for("motd_edit"))
 
-        return _render_admin_template("""
+        bc_form = ops.broadcast_schedule_form_html(
+            enabled=st.motd_broadcast_enabled,
+            iface=st.motd_broadcast_interface,
+            channel=st.motd_broadcast_channel,
+            mode=st.motd_broadcast_mode,
+            interval=st.motd_broadcast_interval,
+            sched_time=st.motd_broadcast_time,
+            config_section="motdBroadcast",
+        )
+        return _render_admin_template(
+            """
   <form method="post">
+    <h2 class="h5 mb-3">MOTD-Text</h2>
     <textarea name="motd" rows="8" class="form-control mb-3">{{ motd }}</textarea>
-    <input type="submit" value="Speichern" class="btn btn-success w-100">
+"""
+            + bc_form
+            + """
+    <button type="submit" class="btn btn-success w-100">Speichern</button>
   </form>
-  <p class="small text-muted mt-3">Wird in <code>[general] motd</code> geschrieben; der Bot nutzt <code>my_settings.MOTD</code>.</p>
+  <p class="small text-muted mt-3">Text in <code>[general] motd</code>; Versand in <code>[motdBroadcast]</code>.</p>
 """,
             title="MOTD",
             active_tab="motd",
@@ -651,10 +760,8 @@ def create_app(
                 flash(f"Speichern fehlgeschlagen: {e!s}", "error")
                 return redirect(url_for("scheduler_edit"))
 
-            import schedule
-
+            ops.rebuild_scheduler_jobs()
             if enabled:
-                ops.rebuild_scheduler_jobs()
                 flash("Scheduler-Einstellungen gespeichert; Jobliste wurde neu aufgebaut.", "success")
                 if not prev_en:
                     flash(
@@ -662,8 +769,10 @@ def create_app(
                         "info",
                     )
             else:
-                schedule.clear()
-                flash("Scheduler deaktiviert; alle geplanten Jobs wurden entfernt.", "info")
+                flash(
+                    "Allgemeiner Scheduler deaktiviert. MOTD-/News-Versand bleibt aktiv, falls dort eingeschaltet.",
+                    "info",
+                )
 
             if prev_en != enabled:
                 flash("Ein/Aus-Status geändert: bei unerwartetem Verhalten Bot einmal neu starten.", "info")
@@ -811,13 +920,21 @@ def create_app(
                     flash(f"Knoten {nid} steht bereits auf der Banliste.", "info")
                 else:
                     current.append(nid)
-                    ops.save_ban_list(current)
-                    flash(f"Knoten {nid} zur Banliste hinzugefügt.", "success")
+                    try:
+                        ops.save_ban_list(current)
+                    except OSError as e:
+                        flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                    else:
+                        flash(f"Knoten {nid} zur Banliste hinzugefügt.", "success")
             elif action == "remove":
                 nid = (request.form.get("node_id") or "").strip()
                 if nid in current:
                     current = [x for x in current if x != nid]
-                    ops.save_ban_list(current)
+                    try:
+                        ops.save_ban_list(current)
+                    except OSError as e:
+                        flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                        return redirect(url_for("banlist_index"))
                     auto = getattr(st, "autoBanlist", None)
                     if isinstance(auto, list) and nid in auto:
                         auto.remove(nid)
@@ -827,8 +944,12 @@ def create_app(
             elif action == "save":
                 lines = (request.form.get("ban_list_text") or "").splitlines()
                 merged = [ln.strip() for ln in lines if ln.strip()]
-                ops.save_ban_list(merged)
-                flash(f"Banliste gespeichert ({len(merged)} Einträge).", "success")
+                try:
+                    ops.save_ban_list(merged)
+                except OSError as e:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                else:
+                    flash(f"Banliste gespeichert ({len(merged)} Einträge).", "success")
             elif action == "reload":
                 ops.reload_ban_list_runtime()
                 flash("Banliste von der Datei neu geladen.", "success")
@@ -1013,7 +1134,7 @@ def create_app(
   <p><strong>Von:</strong> <code>{fn_h}</code> &nbsp; <strong>Zeit:</strong> {when}</p>
   <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
-    <a href="{{{{ url_for('bbs_index') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
+    <a href="{{ url_for('bbs_index') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>
   </div>
 """,
             title=f"BBS #{mid}",
@@ -1031,7 +1152,10 @@ def create_app(
             if not subj:
                 flash("Betreff darf nicht leer sein.", "error")
             else:
-                flash(bbs.bbs_post_message(subj, body_txt, 0), "success")
+                try:
+                    flash(bbs.bbs_post_message(subj, body_txt, 0), "success")
+                except Exception as e:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
             return redirect(url_for("bbs_index"))
 
         return _render_admin_template(
@@ -1153,7 +1277,7 @@ def create_app(
   <p><strong>An:</strong> <code>{to_h}</code> &nbsp; <strong>Von:</strong> <code>{from_h}</code></p>
   <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
-    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
+    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>
   </div>
 """,
             title=f"BBS-DM #{idx}",
@@ -1192,7 +1316,10 @@ def create_app(
             elif not body_txt.strip():
                 flash("Nachricht darf nicht leer sein.", "error")
             else:
-                flash(bbs.bbs_post_dm(to_node, body_txt.strip(), from_node), "success")
+                try:
+                    flash(bbs.bbs_post_dm(to_node, body_txt.strip(), from_node), "success")
+                except Exception as e:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
             return redirect(url_for("bbs_dm_index"))
 
         return _render_admin_template(
