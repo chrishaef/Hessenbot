@@ -84,7 +84,7 @@ if enableCmdHistory:
 if location_enabled:
     from modules.locationdata import * # from the spudgunman/meshing-around repo
     trap_list = trap_list + trap_list_location
-    help_message = help_message + ", whereami, wx, howfar"
+    help_message = help_message + ", whereami, wx, howfar, loc"
     if enableDEalerts:
         from modules.globalalert import * # from the spudgunman/meshing-around repo
         trap_list = trap_list + trap_list_location_de
@@ -421,7 +421,98 @@ def get_num_from_short_name(short_name, nodeInt=1):
             pass
 
     return 0
-    
+
+
+def _enabled_interface_order(preferred: int = 1):
+    """Interface indices to search (preferred first)."""
+    order = []
+    if globals().get(f"interface{preferred}_enabled"):
+        order.append(preferred)
+    for i in range(1, 10):
+        if i != preferred and globals().get(f"interface{i}_enabled"):
+            order.append(i)
+    return order or [preferred]
+
+
+def resolve_mesh_node_target(message, nodeInt=1, default_id=None):
+    """
+    Parse a node reference from a command message (short name, decimal id, !hex).
+    Returns (node_id, error_message). node_id is 0 if unresolved.
+    """
+    parts = (message or "").strip().split(maxsplit=1)
+    token = parts[1].strip() if len(parts) > 1 else ""
+    if not token:
+        if default_id is not None:
+            try:
+                return int(default_id), None
+            except (TypeError, ValueError):
+                return 0, "Ungültige Knoten-ID."
+        return 0, "Bitte Kurzname, Dezimal-ID oder !xxxxxxxx angeben."
+
+    if token.startswith("!") and len(token) == 9:
+        try:
+            return int(token[1:], 16), None
+        except ValueError:
+            return 0, "Ungültige !hex Node-ID."
+
+    if token.isdigit():
+        return int(token), None
+
+    nid = get_num_from_short_name(token, nodeInt)
+    if nid:
+        return nid, None
+    return 0, f"Knoten '{token}' nicht in der NodeDB."
+
+
+def get_mesh_node_position_info(nodeID, nodeInt=1, round_digits=2):
+    """
+    Look up a node across enabled interfaces.
+    Returns dict: in_db, from_gps, lat, lon, last_heard (str|None), iface (int|None).
+    """
+    info = {
+        "in_db": False,
+        "from_gps": False,
+        "lat": None,
+        "lon": None,
+        "last_heard": None,
+        "iface": None,
+    }
+    for iface_num in _enabled_interface_order(nodeInt):
+        interface = globals().get(f"interface{iface_num}")
+        if interface is None or not getattr(interface, "nodes", None):
+            continue
+        for node in interface.nodes.values():
+            if nodeID != node.get("num"):
+                continue
+            info["in_db"] = True
+            info["iface"] = iface_num
+            lh = node.get("lastHeard") or 0
+            if lh:
+                try:
+                    info["last_heard"] = time.strftime("%m-%d %H:%M", time.localtime(lh))
+                except (OSError, OverflowError, TypeError):
+                    info["last_heard"] = None
+            pos = node.get("position")
+            if (
+                pos
+                and isinstance(pos, dict)
+                and pos.get("latitude") is not None
+                and pos.get("longitude") is not None
+            ):
+                try:
+                    lat = float(pos["latitude"])
+                    lon = float(pos["longitude"])
+                    if fuzzItAll:
+                        lat = round(lat, round_digits)
+                        lon = round(lon, round_digits)
+                    info["from_gps"] = True
+                    info["lat"] = lat
+                    info["lon"] = lon
+                except (TypeError, ValueError) as e:
+                    logger.warning(f"System: Error reading position for node {nodeID}: {e}")
+            return info
+    return info
+
 def get_node_list(nodeInt=1):
     interface = globals()[f'interface{nodeInt}']
     # Get a list of nodes on the device

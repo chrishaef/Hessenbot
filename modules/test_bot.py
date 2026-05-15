@@ -145,6 +145,19 @@ class TestBot(unittest.TestCase):
         response = handledxcluster("DX band=20m mode=SSB of=K7MHI", nodeID=0, deviceID='testdevice')
         self.assertIsInstance(response, str)
 
+    def test_resolve_mesh_node_target(self):
+        from modules.system import resolve_mesh_node_target
+
+        nid, err = resolve_mesh_node_target("loc !00a1b2c3", 1)
+        self.assertIsNone(err)
+        self.assertEqual(nid, 0x00A1B2C3)
+        nid, err = resolve_mesh_node_target("loc", 1, default_id=12345)
+        self.assertEqual(nid, 12345)
+        self.assertIsNone(err)
+        nid, err = resolve_mesh_node_target("loc unknownnode", 1)
+        self.assertEqual(nid, 0)
+        self.assertIn("nicht", (err or "").lower())
+
     @_skip_unless_checkall()
     def test_where_am_i(self):
         from modules.locationdata import where_am_i

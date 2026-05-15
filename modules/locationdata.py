@@ -14,7 +14,7 @@ import csv
 import os
 import sqlite3
 
-trap_list_location = ("whereami", "wx", "rlist", "howfar", "map",)
+trap_list_location = ("whereami", "wx", "rlist", "howfar", "map", "loc",)
 
 def where_am_i(lat=0, lon=0, short=False, zip=False):
     whereIam = ""
