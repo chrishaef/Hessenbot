@@ -92,7 +92,7 @@ if location_enabled:
     if enableDEalerts and not enableGBalerts:
         from modules.globalalert import * # from the spudgunman/meshing-around repo
         trap_list = trap_list + trap_list_location_de
-        #help_message = help_message + ", dealert, dewx, deflood"
+        help_message = help_message + ", dealert, warning"
     
     # Open-Meteo Configuration for worldwide weather
     if use_meteo_wxApi:
