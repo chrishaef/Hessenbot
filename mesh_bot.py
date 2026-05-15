@@ -143,7 +143,8 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
         # sort the commands by index value
         cmds = sorted(cmds, key=lambda k: k['index'])
     
-        logger.debug(f"System: Bot detected Commands:{cmds} From: {get_name_from_number(message_from_id)} isDM:{isDM}")
+        # INFO so logs/meshbot.log contains this line when sysloglevel>=INFO (dashboard „Letzte Befehle“).
+        logger.info(f"System: Bot detected Commands:{cmds} From: {get_name_from_number(message_from_id)} isDM:{isDM}")
         bot_response = command_handler[cmds[0]['cmd']]()
         if len(cmdHistory) > 50:
             cmdHistory.pop(0)
