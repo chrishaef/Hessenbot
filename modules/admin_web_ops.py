@@ -157,6 +157,7 @@ BROADCAST_MODES = [
 ]
 
 _WEEKDAY_MODES = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
+_TIME_REQUIRED_MODES = frozenset({"day"}) | _WEEKDAY_MODES
 
 
 def parse_broadcast_schedule_form(form) -> Tuple[bool, int, int, str, str, str]:
@@ -171,7 +172,7 @@ def parse_broadcast_schedule_form(form) -> Tuple[bool, int, int, str, str, str]:
 
 def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Optional[str]:
     mode = (mode or "").strip().lower()
-    if mode in ("day",) | _WEEKDAY_MODES and not sched_time:
+    if mode in _TIME_REQUIRED_MODES and not sched_time:
         return "Bitte eine Uhrzeit (HH:MM) angeben."
     if mode in ("hour", "min"):
         try:
