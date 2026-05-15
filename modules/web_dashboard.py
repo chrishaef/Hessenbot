@@ -1010,6 +1010,8 @@ def render_host_metrics_html() -> str:
 
 
 def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
+    from modules.admin_web_ops import nodedb_row_search_attr, nodedb_search_toolbar_html
+
     if not node_tables:
         return '<p class="text-muted mb-0">Keine Meshtastic-Schnittstelle verbunden.</p>'
 
@@ -1038,18 +1040,22 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
                 else ""
             )
             trs.append(
-                "<tr>"
+                f"<tr{nodedb_row_search_attr(r)}>"
                 f"<td><code>{r['node_id']}</code></td>"
                 f"<td>{r['shortName']}{local}</td>"
                 f"<td>{r['longName']}</td>"
                 f'<td class="text-nowrap">{html_escape(str(r.get("lastHeard", "—")))}</td>'
                 "</tr>"
             )
+        trs.append(
+            '<tr class="nodedb-search-empty" hidden>'
+            '<td colspan="4" class="text-muted small">Keine Treffer für die Suche.</td></tr>'
+        )
         parts.append(
             f"""
 <h3 class="h6 section-title mb-2">
   <i class="bi bi-reception-4 text-success me-1"></i>Interface {iface}
-  <span class="text-muted fw-normal">({len(rows)} Knoten)</span>
+  <span class="text-muted fw-normal nodedb-iface-count">({len(rows)} Knoten)</span>
 </h3>
 <div class="table-scroll dash-nodedb-scroll mb-3">
   <table class="nodes-table table table-sm table-hover mb-0">
@@ -1065,7 +1071,14 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
   </table>
 </div>"""
         )
-    return "".join(parts)
+    return (
+        '<div class="nodedb-search-block">'
+        + nodedb_search_toolbar_html()
+        + '<div class="nodedb-search-scope">'
+        + "".join(parts)
+        + "</div></div>"
+        '<script src="/static/portal/nodedb-search.js"></script>'
+    )
 
 
 def _message_list_items(entries: List[Dict[str, Any]], empty: str = "Keine Nachrichten") -> str:

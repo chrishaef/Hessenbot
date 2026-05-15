@@ -879,6 +879,30 @@ body.page-login {
   overflow: auto;
 }
 
+.nodedb-search-toolbar .input-group-text {
+  background: var(--card-bg-muted);
+  border-color: var(--card-border);
+}
+
+.nodedb-search-toolbar .form-control {
+  border-color: var(--card-border);
+}
+
+.nodedb-search-count {
+  min-width: 4.5rem;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+}
+
+.portal-admin-content .nodedb-search-block .table-scroll {
+  margin-top: 0;
+}
+
+tbody tr[data-search][hidden] {
+  display: none;
+}
+
 .table-scroll table { margin-bottom: 0; }
 
 table.nodes-table {

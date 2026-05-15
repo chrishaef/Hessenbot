@@ -76,6 +76,43 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     return None, rows
 
 
+def nodedb_row_search_text(row: Dict[str, Any]) -> str:
+    """Plain-text blob for client-side NodeDB table filtering."""
+    parts: List[str] = []
+    num = row.get("num")
+    if num is not None:
+        parts.append(str(num))
+        try:
+            parts.append(f"!{int(num):08x}")
+        except (TypeError, ValueError):
+            pass
+    for key in ("node_id", "shortName", "longName", "lastHeard", "snr"):
+        val = row.get(key)
+        if val is None:
+            continue
+        text = html.unescape(str(val)).strip()
+        if text and text != "—":
+            parts.append(text)
+    return " ".join(parts).lower()
+
+
+def nodedb_row_search_attr(row: Dict[str, Any]) -> str:
+    return f' data-search="{html.escape(nodedb_row_search_text(row), quote=True)}"'
+
+
+def nodedb_search_toolbar_html(*, placeholder: str = "Knoten suchen (ID, Name, …)") -> str:
+    ph = html.escape(placeholder)
+    return f"""
+<div class="nodedb-search-toolbar mb-2">
+  <div class="input-group input-group-sm">
+    <span class="input-group-text" aria-hidden="true"><i class="bi bi-search"></i></span>
+    <input type="search" class="form-control nodedb-search-input" placeholder="{ph}"
+           autocomplete="off" spellcheck="false" aria-label="NodeDB durchsuchen">
+    <span class="input-group-text nodedb-search-count text-muted" aria-live="polite"></span>
+  </div>
+</div>"""
+
+
 def remove_node_from_radio(iface_id: int, node_num: int) -> str:
     """Remove a node from the radio's NodeDB (Admin message). Returns user-facing German status."""
     from meshtastic import LOCAL_ADDR
