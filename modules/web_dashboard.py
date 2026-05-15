@@ -632,16 +632,29 @@ def _message_list_items(entries: List[Dict[str, Any]], empty: str = "Keine Nachr
     return "".join(f"<li>{html_escape(line)}</li>" for line in lines)
 
 
-def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
+def render_dashboard_page(data: Dict[str, Any]) -> str:
     log = data["log"]
     rt = data["runtime"]
-    cmd: Counter = log["command_counts"]
+    raw_cmd = log.get("command_counts") or {}
+    cmd: Counter = raw_cmd if isinstance(raw_cmd, Counter) else Counter(raw_cmd)
     top_cmds = cmd.most_common(12)
     cmd_chart_labels = json.dumps([c[0] for c in top_cmds])
     cmd_chart_values = json.dumps([c[1] for c in top_cmds])
-    msg_types = log["message_types"]
-    msg_labels = json.dumps(list(msg_types.keys()) or ["—"])
-    msg_values = json.dumps(list(msg_types.values()) or [0])
+    raw_msg = log.get("message_types") or {}
+    msg_types: Counter = raw_msg if isinstance(raw_msg, Counter) else Counter(raw_msg)
+    msg_keys = list(msg_types.keys())
+    msg_labels = json.dumps(msg_keys)
+    msg_values = json.dumps([msg_types[k] for k in msg_keys])
+    cmd_chart_body = (
+        '<div class="chart-canvas-wrap"><canvas id="cmdChart"></canvas></div>'
+        if top_cmds
+        else '<p class="text-muted small mb-0">Noch keine Befehle im Log.</p>'
+    )
+    msg_chart_body = (
+        '<div class="chart-canvas-wrap"><canvas id="msgChart"></canvas></div>'
+        if msg_keys
+        else '<p class="text-muted small mb-0">Noch keine Nachrichten im Log.</p>'
+    )
 
     cards = [
         _metric_card("Nachrichten", str(log["total_messages"]), "meshbot.log"),
@@ -670,24 +683,24 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
     log_note = ""
     if log.get("log_error"):
         log_note = f'<p class="alert alert-info mb-3"><i class="bi bi-info-circle me-2"></i>{html_escape(log["log_error"])}</p>'
-    else:
-        log_note = f'<p class="small text-muted mb-3"><i class="bi bi-file-text me-1"></i>{html_escape(str(log["log_lines"]))} Zeilen · {html_escape(data["log_path"])}</p>'
+    try:
+        stand_time = datetime.strptime(data["generated_at"], "%Y-%m-%d %H:%M:%S").strftime("%H:%M")
+    except ValueError:
+        stand_time = html_escape(str(data.get("generated_at", ""))[-5:])
 
     return f"""
 <div class="hero-section mb-4">
   <div class="row align-items-center g-3">
     <div class="col-lg-8">
-      <h1 class="display-6 fw-bold mb-2">
+      <h1 class="display-6 fw-bold mb-0">
         <i class="bi bi-broadcast text-success me-2"></i>Hessenbot
       </h1>
-      <p class="intro-text mb-0">
-        Live-Statistik aus Log und laufendem Bot · Stand {html_escape(data["generated_at"])}
-      </p>
     </div>
     <div class="col-lg-4 text-lg-end">
-      <a href="{html_escape(admin_url)}" class="btn btn-success">
-        <i class="bi bi-shield-lock me-2"></i>Admin-Bereich
+      <a href="/" class="btn btn-success">
+        <i class="bi bi-arrow-clockwise me-2"></i>Aktualisieren
       </a>
+      <p class="small text-muted mt-2 mb-0">Stand {html_escape(stand_time)}</p>
     </div>
   </div>
 </div>
@@ -702,23 +715,19 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
 <div class="section-card mb-4">
   <h2 class="section-title h5"><i class="bi bi-diagram-3 me-2 text-success"></i>NodeDB</h2>
   {nodedb_html}
-  <p class="small text-muted mt-2 mb-0">
-    IF1: {html_escape(str(log.get("node1_name", "—")))} · FW {html_escape(str(log.get("firmware1_version", "—")))}
-    · IF2: {html_escape(str(log.get("node2_name", "—")))} · FW {html_escape(str(log.get("firmware2_version", "—")))}
-  </p>
 </div>
 
 <div class="row g-3 mb-4">
   <div class="col-lg-6">
     <div class="section-card">
       <h2 class="section-title h5"><i class="bi bi-bar-chart text-success me-2"></i>Top-Befehle</h2>
-      <canvas id="cmdChart" height="140"></canvas>
+      {cmd_chart_body}
     </div>
   </div>
   <div class="col-lg-6">
     <div class="section-card">
       <h2 class="section-title h5"><i class="bi bi-pie-chart text-success me-2"></i>Nachrichtentypen</h2>
-      <canvas id="msgChart" height="140"></canvas>
+      {msg_chart_body}
     </div>
   </div>
 </div>
@@ -741,38 +750,48 @@ def render_dashboard_page(data: Dict[str, Any], admin_url: str) -> str:
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {{
+  if (typeof Chart === 'undefined') return;
   const gridColor = 'rgba(128,128,128,0.15)';
   const tickColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6c757d';
-  const opts = {{
+  const legendColor = {{ labels: {{ color: tickColor }} }} }};
+  const barOpts = {{
     responsive: true,
-    plugins: {{ legend: {{ labels: {{ color: tickColor }} }} }},
+    maintainAspectRatio: false,
+    plugins: {{ legend: legendColor }},
     scales: {{
       x: {{ ticks: {{ color: tickColor }}, grid: {{ color: gridColor }} }} }},
       y: {{ ticks: {{ color: tickColor }}, grid: {{ color: gridColor }} }}, beginAtZero: true }}
     }}
   }};
+  const pieOpts = {{
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {{ legend: legendColor }}
+  }};
   const cmdLabels = {cmd_chart_labels};
-  if (cmdLabels.length && document.getElementById('cmdChart')) {{
-    new Chart(document.getElementById('cmdChart'), {{
+  const cmdEl = document.getElementById('cmdChart');
+  if (cmdEl && cmdLabels.length) {{
+    new Chart(cmdEl, {{
       type: 'bar',
       data: {{
         labels: cmdLabels,
         datasets: [{{ label: 'Befehle', data: {cmd_chart_values},
           backgroundColor: 'rgba(46, 125, 94, 0.65)' }}]
       }},
-      options: opts
+      options: barOpts
     }});
   }}
   const msgLabels = {msg_labels};
-  if (msgLabels.length && document.getElementById('msgChart')) {{
-    new Chart(document.getElementById('msgChart'), {{
+  const msgEl = document.getElementById('msgChart');
+  if (msgEl && msgLabels.length) {{
+    new Chart(msgEl, {{
       type: 'doughnut',
       data: {{
         labels: msgLabels,
         datasets: [{{ data: {msg_values},
-          backgroundColor: ['#2e7d5e','#20c997','#198754','#6c757d'] }}]
+          backgroundColor: ['#2e7d5e','#20c997','#198754','#6c757d','#0d6efd','#ffc107'] }}]
       }},
-      options: {{ responsive: true, plugins: {{ legend: {{ labels: {{ color: tickColor }} }} }} }} }}
+      options: pieOpts
     }});
   }}
 }});

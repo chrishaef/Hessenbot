@@ -648,6 +648,18 @@ body.page-login {
 
 .chart-panel canvas { max-height: 200px; }
 
+.chart-canvas-wrap {
+  position: relative;
+  height: 200px;
+  width: 100%;
+}
+
+.chart-canvas-wrap canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .motd-box {
   background: var(--card-bg-muted);
   border-radius: 8px;
