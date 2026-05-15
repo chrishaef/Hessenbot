@@ -317,11 +317,14 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     message_types: Counter = Counter()
     command_timestamps: List[tuple] = []
     message_timestamps: List[tuple] = []
+    recent_messages: List[Dict[str, Any]] = []
+    nodes = _NodeDirectory()
     warnings: List[str] = []
     errors: List[str] = []
     timestamp = None
 
     for line in lines:
+        plain = _strip_ansi(line)
         timestamp_match = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+", line)
         if timestamp_match:
             timestamp = datetime.strptime(timestamp_match.group(1), "%Y-%m-%d %H:%M:%S")
