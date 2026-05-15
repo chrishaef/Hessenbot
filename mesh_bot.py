@@ -1986,7 +1986,12 @@ def onReceive(packet, interface):
     if bbs_enabled and decoded:
         msg = bbs_check_dm(message_from_id)
         if msg:
-            logger.info(f"System: BBS DM Delivery: {msg[1]} For: {get_name_from_number(message_from_id, 'long', rxNode)}")
+            logger.info(
+                f"System: BBS DM Delivery: from={msg[2]} to={message_from_id}"
+            )
+            logger.debug(
+                f"System: BBS DM Delivery body for {get_name_from_number(message_from_id, 'long', rxNode)}: {msg[1]}"
+            )
             message = "Mail: " + msg[1] + "  From: " + get_name_from_number(msg[2], 'long', rxNode)
             bbs_delete_dm(msg[0], msg[1])
             send_message(message, channel_number, message_from_id, rxNode)

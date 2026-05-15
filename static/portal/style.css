@@ -172,10 +172,6 @@ body,
   min-height: 1.15em;
 }
 
-[data-dash-panel="stats"] > .row.g-2 > [class*="col-"] {
-  display: flex;
-}
-
 /* Smaller dual metrics */
 .metric-card-sm {
   background: var(--card-bg);
@@ -620,9 +616,26 @@ body.page-login {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
-  gap: 0.85rem;
+  gap: 0.5rem;
   margin-bottom: 1.25rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 768px) {
+  .stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.stat-grid .metric-card {
+  width: 100%;
+  min-width: 0;
 }
 
 .section-card h2,
@@ -663,6 +676,15 @@ body.page-login {
 .dash-list li:last-child { border-bottom: none; }
 
 .dash-scroll { max-height: 220px; overflow-y: auto; }
+
+/* BBS / NodeDB panels: taller lists, less in-card scrolling */
+[data-dash-panel="bbs"] .dash-scroll {
+  max-height: min(42vh, 420px);
+}
+
+[data-dash-panel="nodedb"] .dash-nodedb-scroll {
+  max-height: min(62vh, 680px);
+}
 
 .chart-panel canvas { max-height: 200px; }
 
@@ -708,15 +730,38 @@ body.page-login {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+  padding: 0.55rem 0;
 }
 
-.dash-dm-text {
+.dash-dm-meta {
   flex: 1;
   min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.82rem;
+}
+
+.dash-dm-row {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.dash-dm-k {
+  color: #6c757d;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dash-dm-v {
+  word-break: break-word;
 }
 
 .dash-dm-badge {
   flex-shrink: 0;
+  align-self: flex-start;
   font-size: 0.7rem;
   font-weight: 600;
 }
