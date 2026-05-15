@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import html
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+from modules.paths import path_in_repo
 
 
 def _system_mod():
@@ -137,6 +140,96 @@ def save_scheduler_to_config(
     st.schedulerValue = sec["value"]
     st.schedulerInterval = sec["interval"]
     st.schedulerTime = sec["time"]
+
+
+def ban_list_file_path() -> str:
+    return path_in_repo("data/bbs_ban_list.txt")
+
+
+def normalize_ban_node_id(raw: str) -> Optional[str]:
+    """Accept decimal node ID or !xxxxxxxx hex."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if text.startswith("!"):
+        try:
+            return str(int(text[1:], 16))
+        except ValueError:
+            return None
+    if text.isdigit():
+        return text
+    return None
+
+
+def read_ban_list_file() -> List[str]:
+    path = ban_list_file_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return [line.strip() for line in fh if line.strip()]
+    except OSError:
+        return []
+
+
+def ban_node_label(node_id: str) -> str:
+    try:
+        nid = int(node_id)
+        from modules.system import get_name_from_number
+
+        name = get_name_from_number(nid, "short", 1)
+        hex_id = f"!{nid:08x}"
+        if name and str(name).strip() and str(name) != str(nid):
+            return f"{name} · {hex_id}"
+        return hex_id
+    except (TypeError, ValueError):
+        return str(node_id)
+
+
+def reload_ban_list_runtime() -> List[str]:
+    """Reload in-memory list from disk (replaces runtime list with file contents)."""
+    import modules.settings as st
+    from modules.system import load_bbsBanList
+
+    file_ids = read_ban_list_file()
+    st.bbs_ban_list = list(file_ids)
+    if not file_ids:
+        load_bbsBanList()
+        return list(st.bbs_ban_list)
+    return file_ids
+
+
+def save_ban_list(node_ids: List[str]) -> List[str]:
+    """Persist ban list to data/bbs_ban_list.txt, config.ini, and runtime settings."""
+    import modules.settings as st
+    from modules.system import save_bbsBanList
+
+    cleaned: List[str] = []
+    seen: set[str] = set()
+    for raw in node_ids:
+        nid = normalize_ban_node_id(str(raw))
+        if not nid or nid in seen:
+            continue
+        seen.add(nid)
+        cleaned.append(nid)
+
+    st.bbs_ban_list = cleaned
+    path = ban_list_file_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for nid in cleaned:
+            fh.write(f"{nid}\n")
+
+    if "bbs" not in st.config:
+        st.config["bbs"] = {}
+    st.config["bbs"]["bbs_ban_list"] = ",".join(cleaned)
+    with open(st.config_file, "w", encoding="utf-8") as fh:
+        st.config.write(fh)
+
+    save_bbsBanList()
+    return cleaned
 
 
 def rebuild_scheduler_jobs() -> None:
