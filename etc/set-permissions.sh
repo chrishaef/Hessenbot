@@ -38,14 +38,34 @@ echo "Owner:      $TARGET_USER:$TARGET_USER"
 
 mkdir -p "$REPO_ROOT/logs" "$REPO_ROOT/data"
 
-# Runtime files the bot / web admin must be able to create or update
-RUNTIME_FILES=(
-  "$REPO_ROOT/data/bbs_ban_list.txt"
+mapfile -t RUNTIME_FILES < <(
+  PYTHONPATH="$REPO_ROOT" python3 -c "
+from modules.paths import runtime_writable_paths_from_config
+for p in runtime_writable_paths_from_config('${REPO_ROOT}/config.ini'):
+    print(p)
+" 2>/dev/null || true
 )
+
+if [ "${#RUNTIME_FILES[@]}" -eq 0 ]; then
+  RUNTIME_FILES=(
+    "$REPO_ROOT/data/bbs_ban_list.txt"
+    "$REPO_ROOT/data/alert.txt"
+    "$REPO_ROOT/data/news.txt"
+    "$REPO_ROOT/alert.txt"
+  )
+fi
+
 for f in "${RUNTIME_FILES[@]}"; do
+  [ -z "$f" ] && continue
+  parent="$(dirname "$f")"
+  if [ -n "$parent" ] && [ "$parent" != "." ]; then
+    mkdir -p "$parent"
+  fi
   if [ ! -f "$f" ]; then
     touch "$f"
   fi
+  chown "$TARGET_USER:$TARGET_USER" "$f"
+  chmod 664 "$f"
 done
 
 for dir in "$REPO_ROOT/logs" "$REPO_ROOT/data"; do
@@ -61,4 +81,4 @@ if [ -f "$REPO_ROOT/config.ini" ]; then
   chmod 664 "$REPO_ROOT/config.ini"
 fi
 
-echo "Permissions set for $TARGET_USER on data/, logs/, config.ini (if present)."
+echo "Permissions set for $TARGET_USER on data/, logs/, config.ini, and runtime text files."

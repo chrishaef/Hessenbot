@@ -330,6 +330,15 @@ def save_scheduler_to_config(
     st.schedulerTime = sec["time"]
 
 
+def runtime_file_permission_hint(path: str, *, bot_user: str = "meshbot") -> str:
+    repo = path_in_repo("")
+    return (
+        f"Keine Schreibrechte für {path}. "
+        f"Auf dem Server ausführen: "
+        f"sudo bash etc/set-permissions.sh {bot_user} {repo}"
+    )
+
+
 def ban_list_file_path() -> str:
     from modules.system import bbs_ban_list_file_path
 
