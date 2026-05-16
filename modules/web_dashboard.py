@@ -826,17 +826,21 @@ def _leaderboard_web_rows(lb: Dict[str, Any]) -> List[str]:
 def _render_mesh_leaderboard_html(lb: Dict[str, Any]) -> str:
     lines = _leaderboard_web_rows(lb)
     if not lines:
-        return '<p class="text-muted small mb-0">Noch keine Leaderboard-Daten.</p>'
+        return (
+            '<div class="dash-card-body">'
+            '<p class="small text-muted mb-2">Mesh-Rekorde seit letztem Reset</p>'
+            '<p class="text-muted small mb-0">Noch keine Leaderboard-Daten.</p></div>'
+        )
     return (
-        '<ul class="dash-list dash-scroll mb-0">'
+        '<div class="dash-card-body">'
+        '<p class="small text-muted mb-2">Mesh-Rekorde seit letztem Reset</p>'
+        '<ul class="dash-list dash-scroll dash-equal-scroll mb-0">'
         + "".join(f"<li>{html_escape(line)}</li>" for line in lines)
-        + "</ul>"
+        + "</ul></div>"
     )
 
 
-def _mesh_node_counts_for_dash(
-    lb: Dict[str, Any], log: Dict[str, Any]
-) -> tuple[Dict[Any, Any], str]:
+def _mesh_node_counts_for_dash(lb: Dict[str, Any], log: Dict[str, Any]) -> Dict[Any, Any]:
     """Prefer leaderboard nodeMessageCounts (TEXT_MESSAGE tallies); else use log-derived rx."""
     mc = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
 
@@ -854,21 +858,18 @@ def _mesh_node_counts_for_dash(
         return t
 
     if _pos_total(mc) > 0:
-        return mc, ""
+        return mc
     rx = log.get("node_rx_counts_by_id") if isinstance(log.get("node_rx_counts_by_id"), dict) else {}
     if _pos_total(rx) > 0:
-        return rx, (
-            "Nach meshbot.log / messages.log — "
-            "Zähler aus leaderboard.pkl (TEXT_MESSAGE) sind leer oder fehlen."
-        )
-    return mc, ""
+        return rx
+    return mc
 
 
 def _render_toplist_html(
     cmd: Counter, lb: Dict[str, Any], log: Optional[Dict[str, Any]] = None
 ) -> str:
     cmd_rows = cmd.most_common(10)
-    msg_counts, count_note = _mesh_node_counts_for_dash(lb, log or {})
+    msg_counts = _mesh_node_counts_for_dash(lb, log or {})
 
     def _count_val(x: object) -> int:
         try:
@@ -889,9 +890,6 @@ def _render_toplist_html(
         if cmd_rows
         else '<li class="text-muted">Keine Befehle im Log</li>'
     )
-    node_note_html = (
-        f'<p class="small text-muted mb-2">{html_escape(count_note)}</p>' if count_note else ""
-    )
     node_items = (
         "".join(
             f"<li>{html_escape(_resolve_node_label(nid))} · {cnt}</li>"
@@ -901,16 +899,17 @@ def _render_toplist_html(
         else '<li class="text-muted">Noch keine Mesh-Zähler</li>'
     )
     return f"""
-<div class="row g-3">
+<div class="dash-card-body">
+<div class="row g-3 dash-toplist-grid">
   <div class="col-md-6">
     <h3 class="h6 text-muted mb-2">Top-Befehle (Log)</h3>
-    <ul class="dash-list dash-scroll mb-0">{cmd_items}</ul>
+    <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{cmd_items}</ul>
   </div>
   <div class="col-md-6">
     <h3 class="h6 text-muted mb-2">Aktivste Knoten (Mesh)</h3>
-    {node_note_html}
-    <ul class="dash-list dash-scroll mb-0">{node_items}</ul>
+    <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{node_items}</ul>
   </div>
+</div>
 </div>
 """
 
@@ -1309,17 +1308,16 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
   </div>
 </div>
 
-<div class="row g-3 mb-4">
-  <div class="col-lg-6">
-    <div class="section-card">
+<div class="row g-3 mb-4 dash-equal-cards">
+  <div class="col-lg-6 d-flex">
+    <div class="section-card flex-fill d-flex flex-column w-100">
       <h2 class="section-title h5"><i class="bi bi-trophy me-2 text-success"></i>Topliste</h2>
       {toplist_html}
     </div>
   </div>
-  <div class="col-lg-6">
-    <div class="section-card">
+  <div class="col-lg-6 d-flex">
+    <div class="section-card flex-fill d-flex flex-column w-100">
       <h2 class="section-title h5"><i class="bi bi-award me-2 text-success"></i>Leaderboard</h2>
-      <p class="small text-muted mb-2">Mesh-Rekorde seit letztem Reset</p>
       {leaderboard_html}
     </div>
   </div>
