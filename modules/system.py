@@ -262,8 +262,12 @@ for i in range(1, 10):
         if globals().get(f'interface{i}_enabled'):
             globals()[f'interface{i}'] = open_mesh_interface(i)
     except Exception as e:
-        logger.critical(f"System: abort. Initializing Interface{i} {e}")
-        exit()
+        globals()[f'interface{i}'] = None
+        mark_interface_for_retry(i, f"startup failed: {e}")
+        logger.critical(
+            f"System: Interface{i} not available at startup ({e}). "
+            "Bot continues (web UI, watchdog); start meshtasticd or fix hostname/port."
+        )
 
 # Get my node numbers for global use       
 my_node_ids = [globals().get(f'myNodeNum{i}') for i in range(1, 10)]
@@ -2804,6 +2808,14 @@ async def retry_interface(nodeID):
 
     try:
         globals()[f"interface{nodeID}"] = open_mesh_interface(nodeID)
+        try:
+            globals()[f"myNodeNum{nodeID}"] = globals()[f"interface{nodeID}"].getMyNodeInfo()["num"]
+        except Exception as e:
+            logger.warning(f"System: myNodeNum{nodeID} after reconnect: {e}")
+        try:
+            refresh_channel_cache()
+        except Exception:
+            pass
         globals()[f"max_retry_count{nodeID}"] = interface_retry_count
         globals()[f"retry_int{nodeID}"] = False
         host_hint = ""
