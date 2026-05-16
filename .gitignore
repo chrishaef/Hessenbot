@@ -3,6 +3,7 @@ config.ini
 config_new.ini
 ini_merge_log.txt
 install_notes.txt
+alert.txt
 
 # logs
 logs/*.log
