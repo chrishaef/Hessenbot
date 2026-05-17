@@ -101,7 +101,7 @@ Einfache Abstimmungen für das Mesh:
 - **Anzeigen** — Stimmen, Prozent, welche Knoten abgestimmt haben (Auszug)
 - **Schließen/Aktivieren**, **Stimmen zurücksetzen**, **Löschen**
 
-Daten: `data/polls.pkl`. Im Funk: `!umfrage`, `!umfrage liste`, `!umfrage <Nr>`, `!umfrage <Nr> <Option>`.
+Daten: `data/polls.pkl`. Im Funk: `!poll`, `!poll liste`, `!poll <Nr>`, `!poll <Nr> <Option>`.
 
 Konfiguration: `[polls] enabled`, `max_options`, `allow_revote` in `config.ini`.
 

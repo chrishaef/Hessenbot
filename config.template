@@ -199,7 +199,7 @@ bbslink_whitelist =
 bbsAPI_enabled = True
 
 [polls]
-# Einfache Umfragen: !umfrage im Mesh, Verwaltung im Admin-Backend
+# Einfache Umfragen: !poll im Mesh, Verwaltung im Admin-Backend (/umfragen)
 enabled = True
 max_options = 8
 # Abstimmung ändern (neue Option ersetzt alte Stimme desselben Knotens)

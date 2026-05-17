@@ -248,26 +248,26 @@ def _sections() -> List[CommandSection]:
             "Abstimmungen im Mesh. Anlegen und Auswertung im Admin-Backend unter „Umfragen“.",
             (
                 CommandEntry(
-                    f"{p}umfrage",
+                    f"{p}poll",
                     "Aktive Umfragen anzeigen.",
-                    f"{p}umfrage",
+                    f"{p}poll",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
                 CommandEntry(
-                    f"{p}umfrage liste",
+                    f"{p}poll liste",
                     "Alle Umfragen (auch geschlossene).",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
                 CommandEntry(
-                    f"{p}umfrage <Nr>",
+                    f"{p}poll <Nr>",
                     "Frage, Optionen und aktuelle Stimmenzahlen.",
-                    f"{p}umfrage 1",
+                    f"{p}poll 1",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
                 CommandEntry(
-                    f"{p}umfrage <Nr> <Option>",
+                    f"{p}poll <Nr> <Option>",
                     "Abstimmen (Option 1, 2, …). Eine Stimme pro Knoten.",
-                    f"{p}umfrage 1 2",
+                    f"{p}poll 1 2",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
             ),

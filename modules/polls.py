@@ -11,7 +11,7 @@ from typing import Any
 from modules.log import logger
 from modules.paths import ensure_parent_dir, path_in_repo
 
-trap_list_polls = ("umfrage",)
+trap_list_polls = ("poll",)
 
 POLL_DB_PATH = path_in_repo("data/polls.pkl")
 MAX_OPTIONS_DEFAULT = 8
@@ -168,7 +168,7 @@ def cast_vote(poll_id: int, option_1based: int, node_id: int) -> str:
     options = poll.get("options") or []
     idx = int(option_1based) - 1
     if idx < 0 or idx >= len(options):
-        return f"Option 1–{len(options)} wählen. Beispiel: umfrage {poll_id} 1"
+        return f"Option 1–{len(options)} wählen. Beispiel: poll {poll_id} 1"
 
     nid = str(int(node_id))
     votes: dict[str, list] = poll.setdefault("votes", {})
@@ -225,7 +225,7 @@ def format_poll_detail(poll_id: int, *, node_id: int | None = None) -> str:
         mark = " ←du" if my_vote == i else ""
         lines.append(f"{i + 1}) {opt} ({count}{pct}){mark}")
 
-    lines.append(f"Abstimmen: umfrage {poll_id} <1-{len(options)}>")
+    lines.append(f"Abstimmen: poll {poll_id} <1-{len(options)}>")
     return "\n".join(lines)
 
 
@@ -242,18 +242,31 @@ def format_poll_list(*, active_only: bool = False) -> str:
         if len(str(p.get("question", ""))) > 50:
             q += "…"
         lines.append(f"#{p['id']} [{state}] {q} ({total} Stimmen)")
-    lines.append("Details: umfrage <Nr>")
+    lines.append("Details: poll <Nr>")
     return "\n".join(lines)
 
 
 def polls_help_text() -> str:
     return (
-        "📊 Umfrage-Hilfe:\n"
-        "umfrage — aktive Umfragen\n"
-        "umfrage liste — alle Umfragen\n"
-        "umfrage <Nr> — Frage & Ergebnis\n"
-        "umfrage <Nr> <Option> — abstimmen (1, 2, …)"
+        "📊 Poll-Hilfe:\n"
+        "poll — aktive Umfragen\n"
+        "poll liste — alle Umfragen\n"
+        "poll <Nr> — Frage & Ergebnis\n"
+        "poll <Nr> <Option> — abstimmen (1, 2, …)"
     )
+
+
+def _poll_message_args(message: str) -> list[str]:
+    """Nach dem Befehl poll (ohne !) — z. B. !poll 1 2 → ['1', '2']."""
+    parts = (message or "").strip().split()
+    if not parts:
+        return []
+    first = parts[0].lower().lstrip("!")
+    if first == "poll":
+        return parts[1:]
+    if first.startswith("poll") and len(first) > len("poll"):
+        return [first[len("poll") :]] + parts[1:]
+    return parts
 
 
 def handle_poll_command(message: str, node_id: int, is_dm: bool = False) -> str:
@@ -262,13 +275,10 @@ def handle_poll_command(message: str, node_id: int, is_dm: bool = False) -> str:
 
     raw = message.strip()
     lower = raw.lower()
-    if "?" in raw and (is_dm or lower.endswith("?")):
+    if "?" in raw and (is_dm or lower.rstrip("!").endswith("?")):
         return polls_help_text()
 
-    # strip command word
-    parts = raw.split()
-    if parts and parts[0].lower().startswith("umfrage"):
-        parts = parts[1:]
+    parts = _poll_message_args(raw)
     if not parts:
         return format_poll_list(active_only=True)
 
@@ -287,7 +297,7 @@ def handle_poll_command(message: str, node_id: int, is_dm: bool = False) -> str:
     try:
         option = int(parts[1])
     except ValueError:
-        return f"Option als Zahl 1–N. Beispiel: umfrage {poll_id} 1"
+        return f"Option als Zahl 1–N. Beispiel: poll {poll_id} 1"
 
     return cast_vote(poll_id, option, node_id)
 
