@@ -438,11 +438,13 @@ enableHopLogs = True
 noisyNodeLogging = False
 noisyTelemetryLimit = 5
 logMetaStats = True
+# Debug: log SIMULATOR_APP envelopes that could not be unwrapped (inner packet failed)
+logSimulatorPackets = False
 # Enable detailed packet logging all packets
 DEBUGpacket = False
 # metaPacket detailed logging, the filter negates the port ID
 debugMetadata = False
-metadataFilter = TELEMETRY_APP,POSITION_APP
+metadataFilter = TELEMETRY_APP,POSITION_APP,SIMULATOR_APP
 # Enable or disable automatic banning of nodes
 autoBanEnabled = False
 # Number of offenses before auto-ban

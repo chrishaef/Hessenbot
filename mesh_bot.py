@@ -919,6 +919,11 @@ def onReceive(packet, interface):
     if not isinstance(decoded, dict):
         decoded = {}
 
+    from modules.mesh_sim_tunnel import unwrap_sim_tunnel_packet
+
+    unwrap_sim_tunnel_packet(packet)
+    decoded = packet.get('decoded') or {}
+
     # extract interface details from inbound packet
     rxType = type(interface).__name__
 

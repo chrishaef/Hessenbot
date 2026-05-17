@@ -102,7 +102,7 @@ def portal_navbar(
         if active == "commands":
             nav_primary = f"""
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
-        {_dash_nav_link("Statistik", "bar-chart-line", "/#stats")}
+        {_dash_nav_link("Statistik", "bar-chart-line", "/")}
         {_dash_nav_link("Befehle", "terminal", chref, active=True)}
         {_dash_nav_link("BBS", "inboxes", "/#bbs")}
         {_dash_nav_link("NodeDB", "diagram-3", "/#nodedb")}

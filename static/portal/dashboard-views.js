@@ -38,7 +38,18 @@
     } catch (e) {
       /* ignore */
     }
+    if (window.location.pathname === "/" || window.location.pathname === "") {
+      var nextHash = target === "stats" ? "" : "#" + target;
+      if (window.location.hash !== nextHash) {
+        history.replaceState(null, "", window.location.pathname + nextHash);
+      }
+    }
     window.setTimeout(resizeCharts, 50);
+  }
+
+  function viewFromHash() {
+    var hash = (window.location.hash || "").replace("#", "");
+    return VALID_VIEWS.indexOf(hash) >= 0 ? hash : "stats";
   }
 
   function init() {
@@ -48,16 +59,10 @@
         setView(btn.getAttribute("data-dash-view"));
       });
     });
-    var saved = "stats";
-    try {
-      var v = localStorage.getItem(STORAGE_KEY);
-      if (VALID_VIEWS.indexOf(v) >= 0) saved = v;
-    } catch (e) {
-      /* ignore */
-    }
-    var hash = (window.location.hash || "").replace("#", "");
-    if (VALID_VIEWS.indexOf(hash) >= 0) saved = hash;
-    setView(saved);
+    window.addEventListener("hashchange", function () {
+      setView(viewFromHash());
+    });
+    setView(viewFromHash());
   }
 
   if (document.readyState === "loading") {

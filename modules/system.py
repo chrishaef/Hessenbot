@@ -2009,6 +2009,14 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
     uptime = battery = temp = iaq = nodeID = 0
     deviceMetrics, envMetrics, localStats = {}, {}, {}
 
+    from modules.mesh_sim_tunnel import unwrap_sim_tunnel_packet
+
+    unwrapped, inner_port = unwrap_sim_tunnel_packet(packet)
+    if unwrapped:
+        meshLeaderboard["simTunnelUnwrapCount"] = (
+            meshLeaderboard.get("simTunnelUnwrapCount", 0) + 1
+        )
+
     # update telemetry data for the device
     try:
         packet_type = ''
@@ -2415,19 +2423,17 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
         except Exception as e:
             logger.debug(f"System: AUDIO_APP decode error: Device: {rxNode} Channel: {channel} {e} packet {packet}")
 
-    # SIMULATOR_APP - Track simulator packets 🤖
+    # SIMULATOR_APP still present = tunnel envelope could not be unwrapped
     if packet_type == 'SIMULATOR_APP':
         try:
             if debugMetadata and 'SIMULATOR_APP' not in metadataFilter:
                 print(f"DEBUG SIMULATOR_APP: {packet}\n\n")
-            packet_info = {'nodeID': nodeID, 'timestamp': time.time(), 'device': rxNode, 'channel': channel}
-            # if not a bot ID track it
-            if nodeID != globals().get(f'myNodeNum{rxNode}') and nodeID != 0:
-                meshLeaderboard['simulatorPackets'].append(packet_info)
-            if len(meshLeaderboard['simulatorPackets']) > 10:
-                meshLeaderboard['simulatorPackets'].pop(0)
-            if logMetaStats:
-                logger.info(f"System: 🤖 Simulator packet detected from Device: {rxNode} Channel: {channel} NodeID:{nodeID} ShortName:{get_name_from_number(nodeID, 'short', rxNode)}")
+            if logSimulatorPackets:
+                logger.debug(
+                    f"System: Sim/MQTT tunnel not unwrapped ({inner_port}) "
+                    f"Device:{rxNode} Ch:{channel} NodeID:{nodeID} "
+                    f"Short:{get_name_from_number(nodeID, 'short', rxNode)}"
+                )
         except Exception as e:
             logger.debug(f"System: SIMULATOR_APP decode error: Device: {rxNode} Channel: {channel} {e} packet {packet}")
 
@@ -2631,8 +2637,9 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
     if len(meshLeaderboard['audioPackets']) > 0:
         result += f"☎️ Audio packets: {len(meshLeaderboard['audioPackets'])}\n"
     
-    if len(meshLeaderboard['simulatorPackets']) > 0:
-        result += f"🤖 Simulator packets: {len(meshLeaderboard['simulatorPackets'])}\n"
+    unwrap_n = meshLeaderboard.get("simTunnelUnwrapCount", 0)
+    if unwrap_n > 0:
+        result += f"📡 MQTT/Sim-Tunnel aufgeklappt: {unwrap_n}\n"
 
     result = result.strip()
     
