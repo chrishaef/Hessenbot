@@ -104,9 +104,8 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "whoami": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
     "whois": lambda: handle_whois(message, deviceID, channel_number, message_from_id),
     "wiki": lambda: handle_wiki(message, isDM),
-    "wx": lambda: handle_wxc(message_from_id, deviceID, 'wx'),
+    "wx": lambda: handle_wxc(message_from_id, deviceID),
     "x:": lambda: handleShellCmd(message, message_from_id, channel_number, isDM, deviceID),
-    "wxc": lambda: handle_wxc(message_from_id, deviceID, 'wxc'),
     "📍": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
     "🔔": lambda: handle_alertBell(message_from_id, deviceID, message),
     "🐝": lambda: read_file("bee.txt", True),
@@ -386,10 +385,10 @@ def handle_dealert(message_from_id, deviceID):
         return get_nina_alerts()
     return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
 
-def handle_wxc(message_from_id, deviceID, cmd, days=None, vox=False):
+def handle_wxc(message_from_id, deviceID, days=None, vox=False):
     location = get_node_location(message_from_id, deviceID)
-    metric = "wxc" in cmd or my_settings.use_metric
-    return get_wx_meteo(str(location[0]), str(location[1]), 1 if metric else 0)
+    unit = 1 if my_settings.use_metric else 0
+    return get_wx_meteo(str(location[0]), str(location[1]), unit)
 
 def handle_warning(message_from_id, deviceID, channel_number, isDM):
     if not my_settings.enableDEalerts:

@@ -101,8 +101,6 @@ if location_enabled:
     
     # Open-Meteo Configuration for worldwide weather
     if use_meteo_wxApi:
-        trap_list = trap_list + ("wxc",)
-        help_message = help_message + ", wxc"
         from modules.wx_meteo import * # from the spudgunman/meshing-around repo
     if repeater_lookup != False:
         help_message = help_message + ", rlist"
