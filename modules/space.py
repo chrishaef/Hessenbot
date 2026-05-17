@@ -281,7 +281,7 @@ def getNextSatellitePass(satellite, lat=0, lon=0):
     # API URL
     if n2yoAPIKey == '':
         logger.error("System: Missing API key free at https://www.n2yo.com/login/")
-        return "not configured, bug your sysop"
+        return "Satelliten-API nicht konfiguriert — Sysop fragen."
     url = visualPassAPI + str(satellite) + "/" + str(lat) + "/" + str(lon) + "/0/2/300/" + "&apiKey=" + n2yoAPIKey
     # get the next pass data
     try:
@@ -308,7 +308,7 @@ def getNextSatellitePass(satellite, lat=0, lon=0):
             pass_data = ERROR_FETCHING_DATA
     except Exception as e:
         logger.warning(f"System: User supplied value {satellite} unknown or invalid")
-        pass_data = "Provide NORAD# example use: 🛰️satpass 25544,33591"
+        pass_data = "NORAD-Nummer angeben, z. B. satpass 25544"
     return pass_data
 
 def measureHeight(lat=0, lon=0, shadow=0):
@@ -325,16 +325,16 @@ def measureHeight(lat=0, lon=0, shadow=0):
     sun.compute(obs)
     sun_altitude = sun.alt * 180 / ephem.pi
     if sun_altitude <= 0:
-        return "☀️Sun is below horizon, I dont belive your shadow measurement"
+        return "☀️ Sonne unter dem Horizont — Schattenmessung nicht möglich."
     try:
         if use_metric:
             height = float(shadow) * math.tan(sun.alt)
-            return f"📏Object Height: {height:.2f} m (Shadow: {shadow} m, 📐Sun Alt: {sun_altitude:.2f}°)"
+            return f"📏 Höhe: {height:.2f} m (Schatten: {shadow} m, 📐 Sonne: {sun_altitude:.2f}°)"
         else:
             # Assume shadow is in feet if imperial, otherwise convert from meters to feet
             shadow_ft = float(shadow)
             height_ft = shadow_ft * math.tan(sun.alt)
-            return f"📏Object Height: {height_ft:.2f} ft (Shadow: {shadow_ft} ft, 📐Sun Alt: {sun_altitude:.2f}°)"
+            return f"📏 Höhe: {height_ft:.2f} ft (Schatten: {shadow_ft} ft, 📐 Sonne: {sun_altitude:.2f}°)"
     except Exception as e:
         logger.error(f"Space: Error calculating height: {e}")
         return NO_ALERTS

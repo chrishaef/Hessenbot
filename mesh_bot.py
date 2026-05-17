@@ -154,17 +154,19 @@ def handle_cmd(message, message_from_id, deviceID):
     # why CMD? its just a command list. a terminal would normally use "Help"
     # I didnt want to invoke the word "help" in Meshtastic due to its possible emergency use
     if " " in message and message.split(" ")[1] in trap_list:
-        return "🤖 just use the commands directly in chat"
+        return "🤖 Befehle einfach direkt im Chat senden (ohne cmd davor)."
     return help_message
 
 def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, channel_number):
     global multiPing
     myNodeNum = globals().get(f'myNodeNum{deviceID}', 777)
     if  "?" in message and isDM:
-        pingHelp = "🤖Ping Command Help:\n" \
-        "🏓 Send 'ping' or 'ack' or 'test' to get a response.\n" \
-        "🏓 Send 'ping <number>' to get multiple pings in DM"
-        "🏓 ping @USERID to send a Joke from the bot"
+        pingHelp = (
+            "🤖 Hessenbot · Ping-Hilfe:\n"
+            "🏓 ping, ack oder test — Antwort mit SNR/RSSI.\n"
+            "🏓 ping <Zahl> — mehrere Pings per DM.\n"
+            "🏓 ping @Knoten — Ping als BBS-DM."
+        )
         return pingHelp
     
     msg = ""
@@ -186,7 +188,7 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
         myname = get_name_from_number(myNodeNum, 'short', deviceID)
         msg = f"QSP QSL OM DE  {myname}   K\n"
     else:
-        msg = "🔊 Can you hear me now?"
+        msg = "🔊 Hörst du mich?"
 
     # append SNR/RSSI or hop info
     if hop.startswith("Gateway") or hop.startswith("MQTT"):
@@ -217,7 +219,7 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
                 if my_settings.bbs_enabled:
                     msg_result = None
                     logger.debug(f"System: Sending ping as BBS DM to @{toNode} from {get_name_from_number(message_from_id, 'short', deviceID)}")
-                    msg_result = bbs_post_dm(toNode, "Ping from MeshBot!", message_from_id)
+                    msg_result = bbs_post_dm(toNode, "Ping von Hessenbot (Meshhessen)!", message_from_id)
                     # exit the function
                     return msg_result if msg_result else logger.warning(f"System: ping @nodeID detected but no BBS to send with, enable BBS in settings.ini")
 
@@ -232,11 +234,11 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
             for i in range(0, len(multiPingList)):
                 if multiPingList[i].get('message_from_id') == message_from_id:
                     multiPingList.pop(i)
-                    msg = "🛑 auto-ping"
+                    msg = "🛑 Auto-Ping gestoppt"
 
         # if 3 or more entries (2 or more active), throttle the multi-ping for congestion
         if len(multiPingList) > 2:
-            msg = "🚫⛔️ auto-ping, service busy. ⏳Try again soon."
+            msg = "🚫⛔️ Auto-Ping: Hessenbot ausgelastet. ⏳ Bitte später."
             pingCount = -1
         else:
             # set inital pingCount
@@ -252,7 +254,7 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
                     pingCount = 50
                 if pingCount > 800:
                     ban_hammer(message_from_id, deviceID, reason="Excessive auto-ping request")
-                    return "🚫⛔️auto-ping request denied."
+                    return "🚫⛔️ Auto-Ping abgelehnt."
             except ValueError:
                 pingCount = -1
     
@@ -260,9 +262,9 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
             multiPingList.append({'message_from_id': message_from_id, 'count': pingCount + 1, 'type': type, 'deviceID': deviceID, 'channel_number': channel_number, 'startCount': pingCount})
             logger.info(f"System: Starting auto-ping of type {type} for {pingCount} pings to {get_name_from_number(message_from_id, 'short', deviceID)}")
             if type == "🎙TEST":
-                msg = f"🛜Initalizing BufferTest, using chunks of about {int(maxBuffer // pingCount)}, max length {maxBuffer} in {pingCount} messages"
+                msg = f"🛜 Puffertest: ~{int(maxBuffer // pingCount)} Zeichen/Teil, max {maxBuffer} in {pingCount} Nachrichten"
             else:
-                msg = f"🚦Initalizing {pingCount} auto-ping"
+                msg = f"🚦 Starte {pingCount} Auto-Pings"
 
     # if not a DM add the username to the beginning of msg
     if not my_settings.useDMForResponse and not isDM:
@@ -288,8 +290,12 @@ def handle_emergency(message_from_id, deviceID, message):
         # if default location is returned set to Unknown
         if nodeLocation[0] == my_settings.latitudeValue and nodeLocation[1] == my_settings.longitudeValue:
             nodeLocation = ["?", "?"]
-        nodeInfo = f"{get_name_from_number(message_from_id, 'short', deviceID)} detected by {get_name_from_number(myNodeNum, 'short', deviceID)} lastGPS {nodeLocation[0]}, {nodeLocation[1]}"
-        msg = f"🔔🚨Intercepted Possible Emergency Assistance needed for: {nodeInfo}"
+        nodeInfo = (
+            f"{get_name_from_number(message_from_id, 'short', deviceID)} "
+            f"via {get_name_from_number(myNodeNum, 'short', deviceID)} "
+            f"GPS {nodeLocation[0]}, {nodeLocation[1]}"
+        )
+        msg = f"🔔🚨 Möglicher Notruf (Hessenbot/Meshhessen): {nodeInfo}"
         # alert the emergency_responder_alert_channel
         send_message(msg, my_settings.emergency_responder_alert_channel, 0, my_settings.emergency_responder_alert_interface)
         logger.warning(f"System: {message_from_id} Emergency Assistance Requested in {message}")
@@ -303,12 +309,12 @@ def handle_motd(message, message_from_id, isDM):
     msg = my_settings.MOTD
     isAdmin = isNodeAdmin(message_from_id)
     if  "?" in message:
-        msg = "Message of the day, set with 'motd $ HelloWorld!'"
+        msg = "Tagesnachricht (MOTD). Admin: motd $ Dein Text"
     elif "$" in message and isAdmin:
         my_settings.MOTD = message.split("$")[1]
         my_settings.MOTD = my_settings.MOTD.rstrip()
         logger.debug(f"System: {message_from_id} temporarly changed my_settings.MOTD: {my_settings.MOTD}")
-        msg = "my_settings.MOTD changed to: " + my_settings.MOTD
+        msg = "MOTD geändert: " + my_settings.MOTD
     return msg
 
 def handle_echo(message, message_from_id, deviceID, isDM, channel_number):
@@ -342,7 +348,7 @@ def handle_echo(message, message_from_id, deviceID, isDM, channel_number):
         time.sleep(splitDelay) # throttle for 2x send
         send_message(msg_to_echo, target_channel, 0, target_device)
         time.sleep(splitDelay) # throttle for 2x send
-        return f"🐬echoed to channel {target_channel} device {target_device}"
+        return f"🐬 Echo an Kanal {target_channel}, Gerät {target_device}"
 
     # dev echoBinary off
     echoBinary = False
@@ -363,10 +369,10 @@ def handle_echo(message, message_from_id, deviceID, isDM, channel_number):
         isAdmin = isNodeAdmin(message_from_id)
         if isAdmin:
             return (
-                "Admin usage: echo <message> c=<channel> d=<device>\n"
-                "Example: echo Hello world c=1 d=2"
+                "Admin: echo <Text> c=<Kanal> d=<Gerät>\n"
+                "Beispiel: echo Hallo Welt c=1 d=2"
             )
-        return "command returns your message back to you. Example: echo Hello World"
+        return "Gibt deinen Text zurück. Beispiel: echo Hallo Welt"
 
     # process normal echo back to user
     elif message.strip().lower().startswith("echo "):
@@ -377,7 +383,7 @@ def handle_echo(message, message_from_id, deviceID, isDM, channel_number):
                 echo_msg = "@" + get_name_from_number(message_from_id, 'short', deviceID) + " " + echo_msg
             return echo_msg
         else:
-            return "Please provide a message to echo back to you. Example: echo Hello World"
+            return "Bitte Text angeben. Beispiel: echo Hallo Welt"
     return "🐬echo.."
 
 def handle_dealert(message_from_id, deviceID):
@@ -427,7 +433,7 @@ def handle_bbspost(message, message_from_id, deviceID):
             logger.info(f"System: BBS Post: {subject} Body: {body}")
             return bbs_post_message(subject, body, message_from_id)
         elif not "example:" in message:
-            return "example: bbspost $subject #✉️message"
+            return "Beispiel: bbspost $Betreff #✉️Nachricht"
     elif "@" in message and not "example:" in message:
         toNode = message.split("@")[1].split("#")[0]
         toNode = toNode.rstrip()
@@ -443,33 +449,33 @@ def handle_bbspost(message, message_from_id, deviceID):
 
         if "#" in message:
             if toNode == 0:
-                return "Node not found " + message.split("@")[1].split("#")[0]
+                return "Knoten nicht gefunden: " + message.split("@")[1].split("#")[0]
             body = message.split("#", 1)[1]
             body = body.rstrip()
             logger.info(f"System: BBS Post DM to: {toNode} Body: {body}")
             return bbs_post_dm(toNode, body, message_from_id)
         else:
-            return "example: bbspost @nodeNumber/ShortName/!hex #✉️message"
+            return "Beispiel: bbspost @Kurzname/!hex #✉️Nachricht"
     elif not "example:" in message:
-        return "example: bbspost $subject #✉️message, or bbspost @node #✉️message"
+        return "Beispiel: bbspost $Betreff #✉️Text oder bbspost @Knoten #✉️Text"
 
 def handle_bbsread(message):
     if "#" in message and not "example:" in message:
         messageID = int(message.split("#")[1])
         return bbs_read_message(messageID)
     elif not "example:" in message:
-        return "Please add a ✉️message number example: bbsread #14"
+        return "Bitte Nummer: bbsread #14"
 
 def handle_bbsdelete(message, message_from_id):
     if "#" in message and not "example:" in message:
         messageID = int(message.split("#")[1])
         return bbs_delete_message(messageID, message_from_id)
     elif not "example:" in message:
-        return "Please add a ✉️message number example: bbsdelete #14"
+        return "Bitte Nummer: bbsdelete #14"
 
 def handle_messages(message, deviceID, channel_number, msg_history, publicChannel, isDM):
     if  "?" in message and isDM:
-        return message.split("?")[0].title() + " command returns the last " + str(storeFlimit) + " messages sent on a channel."
+        return f"{message.split('?')[0]} — letzte {storeFlimit} Nachrichten auf dem Kanal."
     else:
         # Filter messages for this device/channel
         filtered_msgs = [
@@ -485,7 +491,7 @@ def handle_messages(message, deviceID, channel_number, msg_history, publicChanne
             filtered_msgs = filtered_msgs[::-1]
 
         response = ""
-        header = f"📨Msgs:\n"
+        header = f"📨 Nachrichten:\n"
         for msgH in filtered_msgs:
             new_line = f"\n{msgH[0]}: {msgH[1]}"
             test_response = response + new_line
@@ -510,7 +516,7 @@ def handle_messages(message, deviceID, channel_number, msg_history, publicChanne
         if len(response) > 0:
             return header + response
         else:
-            return "No 📭messages in history"
+            return "Keine 📭 Nachrichten im Verlauf"
 
 def handle_sun(message_from_id, deviceID, channel_number, vox=False):
     if vox:
@@ -521,7 +527,7 @@ def handle_sun(message_from_id, deviceID, channel_number, vox=False):
 
 def sysinfo(message, message_from_id, deviceID, isDM):
     if "?" in message:
-        return "sysinfo command returns system information."
+        return "sysinfo — System- und Telemetrie-Infos von Hessenbot."
     else:
         if enable_runShellCmd and file_monitor_enabled:
             # get the system information from the shell script
@@ -530,7 +536,7 @@ def sysinfo(message, message_from_id, deviceID, isDM):
             # check if the script returned data
             if shellData == "" or shellData == None:
                 # no data returned from the script
-                shellData = "shell script data missing"
+                shellData = "Shell-Skript lieferte keine Daten"
             # if not an admin remove any line in the shellData that had 'IP:' in it
             if (str(message_from_id) not in bbs_admin_list) or (not isDM):
                 shell_lines = shellData.splitlines()
@@ -542,22 +548,22 @@ def sysinfo(message, message_from_id, deviceID, isDM):
 
 def handle_lheard(message, nodeid, deviceID, isDM):
     if  "?" in message and isDM:
-        return message.split("?")[0].title() + " command returns a list of the nodes that have been heard recently"
+        return f"{message.split('?')[0]} — zuletzt gehörte Knoten im Mesh."
 
     # display last heard nodes add to response
-    bot_response = "Last Heard\n"
+    bot_response = "Zuletzt gehört\n"
     bot_response += str(get_node_list(1))
 
     # show last users of the bot with the cmdHistory list
     history = handle_history(message, nodeid, deviceID, isDM, lheard=True)
     if history:
-        bot_response += f'LastSeen\n{history}'
+        bot_response += f'Zuletzt aktiv\n{history}'
     else:
         # trim the last \n
         bot_response = bot_response[:-1]
 
     # get count of nodes heard
-    bot_response += f"\n👀In Mesh: {len(seenNodes)}"
+    bot_response += f"\n👀 Im Mesh: {len(seenNodes)}"
 
     # bot_response += getNodeTelemetry(deviceID)
     return bot_response
@@ -568,7 +574,7 @@ def handle_history(message, nodeid, deviceID, isDM, lheard=False):
     buffer = []
 
     if  "?" in message and isDM:
-        return message.split("?")[0].title() + " command returns a list of commands received."
+        return f"{message.split('?')[0]} — letzte Befehle an Hessenbot."
 
     # show the last commands from the user to the bot
     if not lheard:
@@ -588,7 +594,7 @@ def handle_history(message, nodeid, deviceID, isDM, lheard=False):
             buffer = buffer[-4:]
         # create the message from the buffer list
         for i in range(0, len(buffer)):
-            msg += f"{buffer[i][0]}: {buffer[i][1]} :{buffer[i][2]} ago"
+            msg += f"{buffer[i][0]}: {buffer[i][1]} :{buffer[i][2]} her"
             if i < len(buffer) - 1:
                 msg += "\n" # add a new line if not the last line
     else:
@@ -611,7 +617,7 @@ def handle_history(message, nodeid, deviceID, isDM, lheard=False):
         # create the message from the buffer list
         buffer.reverse() # reverse the list to show the latest first
         for i in range(0, len(buffer)):
-            msg += f"{buffer[i][0]}, {buffer[i][1]} ago"
+            msg += f"{buffer[i][0]}, {buffer[i][1]} her"
             if i < len(buffer) - 1:
                 msg += "\n" # add a new line if not the last line
             if i > 3:
@@ -688,7 +694,7 @@ def handle_repeaterQuery(message_from_id, deviceID, channel_number):
     elif repeater_lookup == "artsci":
         return getArtSciRepeaters(str(location[0]), str(location[1]))
     else:
-        return "Repeater lookup not enabled"
+        return "Repeater-Suche ist nicht aktiviert."
 
 def handle_moon(message_from_id, deviceID, channel_number, vox=False):
     if vox:
@@ -699,31 +705,36 @@ def handle_moon(message_from_id, deviceID, channel_number, vox=False):
 def handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus):
     try:
         loc = []
-        msg = "You are " + str(message_from_id) + " AKA " +\
-                str(get_name_from_number(message_from_id, 'long', deviceID) + " AKA, " +\
-                str(get_name_from_number(message_from_id, 'short', deviceID)) + " AKA, " +\
-                str(decimal_to_hex(message_from_id)) + f"\n")
-        msg += f"I see the signal strength is {rssi} and the SNR is {snr} with hop count of {hop}"
+        msg = (
+            f"Du bist {message_from_id} — "
+            f"{get_name_from_number(message_from_id, 'long', deviceID)}, "
+            f"{get_name_from_number(message_from_id, 'short', deviceID)}, "
+            f"{decimal_to_hex(message_from_id)}\n"
+        )
+        msg += f"Signal RSSI {rssi}, SNR {snr}, Route: {hop}"
         if pkiStatus[1] != 'ABC':
-            msg += f"\nYour PKI bit is {pkiStatus[0]} pubKey: {pkiStatus[1]}"
+            msg += f"\nPKI {pkiStatus[0]} pubKey: {pkiStatus[1]}"
 
         loc = get_node_location(message_from_id, deviceID)
         if loc != [my_settings.latitudeValue, my_settings.longitudeValue]:
-            msg += f"\nYou are at: lat:{loc[0]} lon:{loc[1]}"
+            msg += f"\nPosition: {loc[0]}, {loc[1]}"
 
-            # check the positionMetadata for nodeID and get metadata
             if positionMetadata and message_from_id in positionMetadata:
                 metadata = positionMetadata[message_from_id]
-                msg += f" alt:{metadata.get('altitude')}, speed:{metadata.get('groundSpeed')} bit:{metadata.get('precisionBits')}"
+                msg += (
+                    f" Höhe:{metadata.get('altitude')} "
+                    f"Geschw:{metadata.get('groundSpeed')} "
+                    f"Präz:{metadata.get('precisionBits')}"
+                )
     except Exception as e:
         logger.error(f"System: Error in whoami: {e}")
-        msg = "Error in whoami"
+        msg = "Fehler bei whoami"
     return msg
 
 def handle_whois(message, deviceID, channel_number, message_from_id):
     #return data on a node name or number
     if  "?" in message:
-        return message.split("?")[0].title() + " command returns information on a node."
+        return f"{message.split('?')[0]} — Infos zu einem Mesh-Knoten."
     else:
         # get the nodeID from the message
         msg = ''
@@ -744,12 +755,12 @@ def handle_whois(message, deviceID, channel_number, message_from_id):
         # get details on the node
         for i in range(len(seenNodes)):
             if seenNodes[i]['nodeID'] == int(node):
-                msg = f"Node: {seenNodes[i]['nodeID']} is {get_name_from_number(seenNodes[i]['nodeID'], 'long', deviceID)}\n"
-                msg += f"Last 👀: {time.ctime(seenNodes[i]['lastSeen'])} "
+                msg = f"Knoten {seenNodes[i]['nodeID']}: {get_name_from_number(seenNodes[i]['nodeID'], 'long', deviceID)}\n"
+                msg += f"Zuletzt 👀: {time.ctime(seenNodes[i]['lastSeen'])} "
                 break
 
         if msg == '':
-            msg = "Provide a valid node number or short name"
+            msg = "Gültige Knoten-ID, !hex oder Kurzname angeben"
         else:
             # if the user is an admin show the channel and interface and location
             if str(message_from_id) in bbs_admin_list:
@@ -1269,7 +1280,7 @@ def onReceive(packet, interface):
                                 hello(message_from_id, name)
                                 # send a hello message as a DM
                                 if not my_settings.train_qrz:
-                                    send_message(f"Hello {name} {qrz_hello_string}", channel_number, message_from_id, rxNode, reply_id=packet_id)
+                                    send_message(f"Hallo {name} {qrz_hello_string}", channel_number, message_from_id, rxNode, reply_id=packet_id)
 
                     # add message to tts queue
                     if my_settings.meshagesTTS and channel_number == my_settings.ttsChannels:

@@ -4,12 +4,17 @@ import configparser
 import os
 
 # messages
-NO_DATA_NOGPS = "No location data: does your device have GPS?"
-ERROR_FETCHING_DATA = "error fetching data"
-WELCOME_MSG = 'MeshBot, here for you like a friend who is not. Try sending: ping @foo  or, CMD? for more'
-EMERGENCY_RESPONSE = "MeshBot detected a possible request for Emergency Assistance and alerted a wider audience."
-MOTD = 'Thanks for using MeshBOT! Have a good day!'
-NO_ALERTS = "No alerts found."
+NO_DATA_NOGPS = "Keine Positionsdaten — hat dein Gerät GPS?"
+ERROR_FETCHING_DATA = "Daten konnten nicht abgerufen werden"
+WELCOME_MSG = (
+    "Hessenbot (Meshhessen) — dein Mesh-Assistent. "
+    "Probiere: ping oder cmd? für mehr Befehle."
+)
+EMERGENCY_RESPONSE = (
+    "Hessenbot hat einen möglichen Notruf erkannt und das Mesh-Team informiert."
+)
+MOTD = "Hessenbot (Meshhessen) — viel Spaß im Funknetz!"
+NO_ALERTS = "Keine Warnungen gefunden."
 
 # setup the global variables
 SITREP_NODE_COUNT = 3 # number of nodes to report in the sitrep
@@ -399,7 +404,7 @@ try:
     # qrz hello
     qrz_hello_enabled = config['qrz'].getboolean('enabled', False)
     qrz_db = config['qrz'].get('qrz_db', 'data/qrz.db')
-    qrz_hello_string = config['qrz'].get('qrz_hello_string', 'MeshBot says Hello! DM for more info.')
+    qrz_hello_string = config['qrz'].get('qrz_hello_string', 'Hessenbot (Meshhessen) — DM für mehr Infos.')
     train_qrz = config['qrz'].getboolean('training', True)
     
     # inventory and POS
