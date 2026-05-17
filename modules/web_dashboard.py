@@ -534,40 +534,62 @@ def _load_bbs_public_messages() -> List[List[Any]]:
     return messages
 
 
-def _format_bbs_node_id(from_node: Any) -> str:
+def _format_bbs_public_timestamp(when_raw: str) -> str:
+    if not when_raw:
+        return "—"
     try:
-        return f"!{int(from_node):08x}"
-    except (TypeError, ValueError):
-        return str(from_node) if from_node else "?"
-
-
-def _format_bbs_public_line(entry: List[Any]) -> str:
-    mid = entry[0] if entry else "?"
-    subject = str(entry[1]).strip()[:120] if len(entry) > 1 else "—"
-    body = (str(entry[2]).strip().replace("\n", " ") if len(entry) > 2 else "")[:100]
-    if len(entry) > 2 and len(str(entry[2])) > 100:
-        body += "…"
-    from_node = _format_bbs_node_id(entry[3] if len(entry) > 3 else 0)
-    when_raw = str(entry[4]) if len(entry) > 4 else ""
-    try:
-        when = datetime.strptime(when_raw[:19], "%Y-%m-%d %H:%M:%S").strftime("%d.%m %H:%M")
+        return datetime.strptime(when_raw[:19], "%Y-%m-%d %H:%M:%S").strftime(
+            "%d.%m.%Y %H:%M"
+        )
     except ValueError:
-        when = when_raw[-8:] if when_raw else ""
-    line = f"{when} · #{mid} · {subject} · {from_node}"
-    if body:
-        line += f" — {body}"
-    return line
+        return when_raw[:16] if len(when_raw) >= 16 else when_raw
 
+
+def _render_bbs_public_item_html(entry: List[Any]) -> str:
+    mid = entry[0] if entry else "?"
+    subject = str(entry[1]).strip() if len(entry) > 1 else "—"
+    body = str(entry[2]).strip() if len(entry) > 2 else ""
+    from_id = entry[3] if len(entry) > 3 else 0
+    when_raw = str(entry[4]) if len(entry) > 4 else ""
+
+    sender = html_escape(_bbs_dm_party_label(from_id))
+    when_disp = html_escape(_format_bbs_public_timestamp(when_raw))
+    subj_esc = html_escape(subject)
+    body_esc = html_escape(body)
+    mid_esc = html_escape(str(mid))
+
+    body_block = (
+        f'<p class="dash-bbs-body">{body_esc}</p>'
+        if body_esc
+        else '<p class="dash-bbs-body text-muted">—</p>'
+    )
+
+    return (
+        '<li class="dash-bbs-item">'
+        '<motion class="dash-bbs-meta">'
+        '<motion class="dash-bbs-from">'
+        '<span class="dash-bbs-from-k">Absender</span>'
+        f'<span class="dash-bbs-from-v">{sender}</span>'
+        "</motion>"
+        '<motion class="dash-bbs-time">'
+        '<span class="dash-bbs-time-k">Eingereicht</span>'
+        f'<span class="dash-bbs-time-v">{when_disp}</span>'
+        "</motion>"
+        "</motion>"
+        f'<h3 class="dash-bbs-subject"><span class="dash-bbs-id">#{mid_esc}</span> {subj_esc}</h3>'
+        f"{body_block}"
+        "</li>"
+    ).replace("<motion", "<div").replace("</motion>", "</div>")
 
 def _render_bbs_public_html(messages: List[List[Any]], *, enabled: bool) -> str:
     if not enabled:
         return '<p class="text-muted small mb-0">Mesh-BBS ist deaktiviert.</p>'
     if not messages:
         return '<p class="text-muted small mb-0">Keine öffentlichen Nachrichten.</p>'
-    lines = [_format_bbs_public_line(m) for m in reversed(messages[-25:])]
+    items = [_render_bbs_public_item_html(m) for m in reversed(messages[-25:])]
     return (
-        '<ul class="dash-list dash-scroll mb-0">'
-        + "".join(f"<li>{html_escape(line)}</li>" for line in lines)
+        '<ul class="dash-list dash-list--bbs dash-scroll mb-0">'
+        + "".join(items)
         + "</ul>"
     )
 
@@ -1401,7 +1423,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     <i class="bi bi-inboxes me-2 text-success"></i>BBS öffentlich
     <span class="badge text-bg-secondary ms-2 fw-normal">{bbs_count}</span>
   </h2>
-  <p class="small text-muted mb-2">Betreff, Absender und Vorschau · neueste zuerst</p>
+  <p class="small text-muted mb-2">Absender, Zeit, Betreff und Text · neueste zuerst</p>
   {bbs_public_html}
 </div>
 
