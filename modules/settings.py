@@ -527,6 +527,7 @@ try:
     DEBUGpacket = config['messagingSettings'].getboolean('DEBUGpacket', False) # default False
     noisyNodeLogging = config['messagingSettings'].getboolean('noisyNodeLogging', False) # default False
     logMetaStats = config['messagingSettings'].getboolean('logMetaStats', True) # default True
+    logSimulatorPackets = config['messagingSettings'].getboolean('logSimulatorPackets', False) # default False (noisy on MQTT/sim meshes)
     noisyTelemetryLimit = config['messagingSettings'].getint('noisyTelemetryLimit', 5) # default 5 packets
     autoBanEnabled = config['messagingSettings'].getboolean('autoBanEnabled', False) # default False
     autoBanThreshold = config['messagingSettings'].getint('autoBanThreshold', 5) # default 5 offenses
