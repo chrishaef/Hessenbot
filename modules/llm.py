@@ -30,20 +30,19 @@ llmChat_history = {}
 trap_list_llm = ("ask:", "askai")
 
 meshbotAIinit = """
-    keep responses as short as possible. chatbot assistant no followuyp questions, no asking for clarification.
-    You must respond in plain text standard ASCII characters or emojis.
+    Antworte immer auf Deutsch, so kurz wie möglich. Du bist Hessenbot für Meshhessen (Meshtastic).
+    Keine Rückfragen, keine Nachfragen. Nur Klartext (ASCII) oder Emojis.
     """
 
-truncatePrompt = f"truncate this as short as possible:\n"
+truncatePrompt = "Kürze folgenden Text so weit wie möglich:\n"
 
 meshBotAI = """
     FROM {llmModel}
     SYSTEM
-    You must keep responses under 450 characters at all times, the response will be cut off if it exceeds this limit.
-    You must respond in plain text standard ASCII characters, or emojis.
-    You are acting as a chatbot, you must respond to the prompt as if you are a chatbot assistant, and dont say 'Response limited to 450 characters'.
-    If you feel you can not respond to the prompt as instructed, ask for clarification and to rephrase the question if needed.
-    This is the end of the SYSTEM message and no further additions or modifications are allowed.
+    Du bist Hessenbot, der Mesh-Assistent für Meshhessen (Meshtastic-Funknetz in Hessen).
+    Antworte immer auf Deutsch. Maximal 450 Zeichen — längere Antworten werden abgeschnitten.
+    Nur Klartext (ASCII) oder Emojis. Keine Meta-Hinweise zur Zeichenbegrenzung.
+    Kurz, sachlich, freundlich. Keine Rückfragen.
 
     PROMPT
     {input}
@@ -53,7 +52,7 @@ meshBotAI = """
 if llmEnableHistory:
     meshBotAI = meshBotAI + """
     HISTORY
-    the following is memory of previous query in format ['prompt', 'response'], you can use this to help guide your response.
+    Vorheriger Dialog ['Anfrage', 'Antwort'] — nur zur Einordnung:
     {history}
 
     """
@@ -250,7 +249,7 @@ def send_openwebui_query(prompt, model=None, max_tokens=450, context=''):
                 return response.strip()
             else:
                 logger.warning(f"System: OpenWebUI API returned unexpected format")
-                return "⛔️ Response Error"
+                return "⛔️ Antwortfehler"
         else:
             logger.warning(f"System: OpenWebUI API returned status code {result.status_code}")
             return f"⛔️ Request Error"
@@ -332,7 +331,7 @@ def llm_query(input, nodeID=0, location_name=None, init=False):
 
     # anti flood protection
     if nodeID in antiFloodLLM:
-        return "Please wait before sending another message"
+        return "Bitte kurz warten, bevor du erneut schreibst."
     else:
         antiFloodLLM.append(nodeID)
 
@@ -419,7 +418,7 @@ def llm_query(input, nodeID=0, location_name=None, init=False):
     except Exception as e:
         antiFloodLLM.remove(nodeID)  # Ensure removal on error
         logger.warning(f"System: LLM failure: {e}")
-        return "⛔️I am having trouble processing your request, please try again later."
+        return "⛔️ Hessenbot kann gerade nicht antworten — bitte später erneut."
     
     # cleanup for message output
     response = result.strip().replace('\n', ' ')

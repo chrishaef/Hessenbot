@@ -211,7 +211,7 @@ def _split_mesh_chunks(text: str, max_len: int = None) -> list[str]:
 
 def _warning_location_line(lat, lon, from_gps: bool) -> str:
     if from_gps:
-        return "Location: ✓"
+        return "Standort: ✓"
     return f"Location: ✗ Fallback {_short_coord(lat, lon)}"
 
 

@@ -42,8 +42,8 @@ explicitCmd = True
 favoriteNodeList = 
 
 # motd is reset to this value on boot
-motd = Thanks for using MeshBOT! Have a good day!
-welcome_message = MeshBot, here for you like a friend who is not. Try sending: ping @foo or, cmd
+motd = Hessenbot (Meshhessen) — viel Spaß im Funknetz!
+welcome_message = Hessenbot (Meshhessen) — dein Mesh-Assistent. Probiere: ping oder cmd?
 
 # whoami
 whoami = True
@@ -262,7 +262,7 @@ disable_penny = False
 # QRZ Hello to new nodes with message
 enabled = True
 qrz_db = data/qrz.db
-qrz_hello_string = "Der Hessenbot sagt Hallo! DM for more info."
+qrz_hello_string = "Hessenbot (Meshhessen) — DM für mehr Infos."
 # Training mode will not send the hello message to new nodes
 training = False
 
@@ -282,7 +282,7 @@ enabled = False
 interface = 1
 # channel to send the message to
 channel = 2
-message = "MeshBot says Hello! DM for more info."
+message = "Hessenbot (Meshhessen) grüßt! DM für mehr Infos."
 # enable overides the above and uses the motd as the message
 schedulerMotd = False
 # value = Zeitplantyp (siehe Web-Admin Scheduler oder modules/scheduler.py). z.B. day, hour, min, mon…sun,

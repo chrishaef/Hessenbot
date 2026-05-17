@@ -25,7 +25,9 @@ def _mesh_leaderboard_pkl_path() -> str:
 
 # Global Variables
 trap_list = ("cmd","cmd?","bannode",) # base commands
-help_message = "Bot CMD?:"
+from modules.locale_de import HELP_PREFIX
+
+help_message = HELP_PREFIX
 asyncLoop = asyncio.new_event_loop()
 games_enabled = False
 multiPingList = [{'message_from_id': 0, 'count': 0, 'type': '', 'deviceID': 0, 'channel_number': 0, 'startCount': 0}]
@@ -1116,7 +1118,7 @@ def api_throttle(node_id, rxInterface=None, channel=None, apiName=""):
                 logger.warning(f"System: Node {node_id_str} throttled on API {apiName} count: {node_entry['api_throttle_count']}")
                 if autoBanEnabled:
                     ban_hammer(node_id_str, reason="API Throttle Exceeded")
-                return "🚦 System busy, try again later."
+                return "🚦 Hessenbot ausgelastet — bitte später erneut."
     else:
         # node not found, create a new entry
         entry = {
@@ -2497,11 +2499,11 @@ def loadLeaderboard():
 def get_mesh_leaderboard(msg, fromID, deviceID):
     """Get formatted leaderboard of extreme mesh metrics"""
     global meshLeaderboard
-    result = "📊Leaderboard📊\n"
+    result = "📊 Bestenliste 📊\n"
 
     if "reset" in msg.lower() and str(fromID) in bbs_admin_list:
         initializeMeshLeaderboard()
-        return "✅ Leaderboard has been reset."
+        return "✅ Bestenliste wurde zurückgesetzt."
 
     sync_leaderboard_from_nodedb()
 
@@ -2509,13 +2511,13 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
     if meshLeaderboard['lowestBattery']['nodeID']:
         nodeID = meshLeaderboard['lowestBattery']['nodeID']
         value = round(meshLeaderboard['lowestBattery']['value'], 1)
-        result += f"🪫 Low Battery: {value}% {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"🪫 Niedrigster Akku: {value}% {get_name_from_number(nodeID, 'short', 1)}\n"
     
     # Longest uptime
     if meshLeaderboard['longestUptime']['nodeID']:
         nodeID = meshLeaderboard['longestUptime']['nodeID']
         value = meshLeaderboard['longestUptime']['value']
-        result += f"🕰️ Uptime: {getPrettyTime(value)} {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"🕰️ Längste Laufzeit: {getPrettyTime(value)} {get_name_from_number(nodeID, 'short', 1)}\n"
     
     # Fastest speed
     if meshLeaderboard['fastestSpeed']['nodeID']:
@@ -2523,9 +2525,9 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
         value_kmh = round(meshLeaderboard['fastestSpeed']['value'], 1)
         value_mph = round(value_kmh / 1.60934, 1)
         if use_metric:
-            result += f"🚓 Speed: {value_kmh} km/h {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🚓 Höchstgeschw.: {value_kmh} km/h {get_name_from_number(nodeID, 'short', 1)}\n"
         else:
-            result += f"🚓 Speed: {value_mph} mph {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🚓 Höchstgeschw.: {value_mph} mph {get_name_from_number(nodeID, 'short', 1)}\n"
 
     # Tallest node
     if meshLeaderboard['tallestNode']['nodeID']:
@@ -2533,9 +2535,9 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
         value_m = meshLeaderboard['tallestNode']['value']
         value_ft = round(value_m * 3.28084, 0)
         if use_metric:
-            result += f"🪜 Tallest: {int(round(value_m, 0))}m {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🪜 Höchster Knoten: {int(round(value_m, 0))}m {get_name_from_number(nodeID, 'short', 1)}\n"
         else:
-            result += f"🪜 Tallest: {int(value_ft)}ft {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🪜 Höchster Knoten: {int(value_ft)}ft {get_name_from_number(nodeID, 'short', 1)}\n"
     
     # Highest altitude
     if meshLeaderboard['highestAltitude']['nodeID']:
@@ -2543,9 +2545,9 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
         value_m = meshLeaderboard['highestAltitude']['value']
         value_ft = round(value_m * 3.28084, 0)
         if use_metric:
-            result += f"🚀 Altitude: {int(round(value_m, 0))}m {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🚀 Höchste Flughöhe: {int(round(value_m, 0))}m {get_name_from_number(nodeID, 'short', 1)}\n"
         else:
-            result += f"🚀 Altitude: {int(value_ft)}ft {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🚀 Höchste Flughöhe: {int(value_ft)}ft {get_name_from_number(nodeID, 'short', 1)}\n"
 
     # Fastest airspeed
     if meshLeaderboard['fastestAirSpeed']['nodeID']:
@@ -2553,9 +2555,9 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
         value_kmh = round(meshLeaderboard['fastestAirSpeed']['value'], 1)
         value_mph = round(value_kmh / 1.60934, 1)
         if use_metric:
-            result += f"✈️ Airspeed: {value_kmh} km/h {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"✈️ Höchste Fluggeschw.: {value_kmh} km/h {get_name_from_number(nodeID, 'short', 1)}\n"
         else:
-            result += f"✈️ Airspeed: {value_mph} mph {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"✈️ Höchste Fluggeschw.: {value_mph} mph {get_name_from_number(nodeID, 'short', 1)}\n"
     
     # Coldest temperature
     if meshLeaderboard['coldestTemp']['nodeID']:
@@ -2563,9 +2565,9 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
         value_c = round(meshLeaderboard['coldestTemp']['value'], 1)
         value_f = round((value_c * 9/5) + 32, 1)
         if use_metric:
-            result += f"🥶 Coldest: {value_c}°C {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🥶 Kälteste: {value_c}°C {get_name_from_number(nodeID, 'short', 1)}\n"
         else:
-            result += f"🥶 Coldest: {value_f}°F {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🥶 Kälteste: {value_f}°F {get_name_from_number(nodeID, 'short', 1)}\n"
     
     # Hottest temperature
     if meshLeaderboard['hottestTemp']['nodeID']:
@@ -2573,45 +2575,45 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
         value_c = round(meshLeaderboard['hottestTemp']['value'], 1)
         value_f = round((value_c * 9/5) + 32, 1)
         if use_metric:
-            result += f"🥵 Hottest: {value_c}°C {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🥵 Wärmste: {value_c}°C {get_name_from_number(nodeID, 'short', 1)}\n"
         else:
-            result += f"🥵 Hottest: {value_f}°F {get_name_from_number(nodeID, 'short', 1)}\n"
+            result += f"🥵 Wärmste: {value_f}°F {get_name_from_number(nodeID, 'short', 1)}\n"
     
     # Worst air quality
     if meshLeaderboard['worstAirQuality']['nodeID']:
         nodeID = meshLeaderboard['worstAirQuality']['nodeID']
         value = round(meshLeaderboard['worstAirQuality']['value'], 1)
-        result += f"💨 Worst IAQ: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"💨 Schlechteste Luft: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
 
     # Weakest RF
     if meshLeaderboard['weakestDBm']['nodeID'] is not None:
         nodeID = meshLeaderboard['weakestDBm']['nodeID']
         value = meshLeaderboard['weakestDBm']['value']
-        result += f"📶 Weakest RF: {value} dBm {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"📶 Schwächstes RF: {value} dBm {get_name_from_number(nodeID, 'short', 1)}\n"
 
     # Best RF
     if meshLeaderboard['highestDBm']['nodeID'] is not None:
         nodeID = meshLeaderboard['highestDBm']['nodeID']
         value = meshLeaderboard['highestDBm']['value']
-        result += f"📶 Best RF: {value} dBm {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"📶 Bestes RF: {value} dBm {get_name_from_number(nodeID, 'short', 1)}\n"
 
     # Most Telemetry Messages
     if 'nodeTMessageCounts' in meshLeaderboard and meshLeaderboard['mostTMessages']['nodeID'] is not None:
         nodeID = meshLeaderboard['mostTMessages']['nodeID']
         value = meshLeaderboard['mostTMessages']['value']
-        result += f"📊 Most Telemetry: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"📊 Meiste Telemetrie: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
 
     # Most Emojis
     if meshLeaderboard.get('mostEmojis', {}).get('nodeID') is not None:
         nodeID = meshLeaderboard['mostEmojis']['nodeID']
         value = meshLeaderboard['mostEmojis']['value']
-        result += f"🤪 Most Emojis: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"🤪 Meiste Emojis: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
     
     # Most Messages
     if 'nodeMessageCounts' in meshLeaderboard and meshLeaderboard['mostMessages']['nodeID'] is not None:
         nodeID = meshLeaderboard['mostMessages']['nodeID']
         value = meshLeaderboard['mostMessages']['value']
-        result += f"💬 Most Messages: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
+        result += f"💬 Meiste Nachrichten: {value} {get_name_from_number(nodeID, 'short', 1)}\n"
 
     # Most WiFi devices seen
     if meshLeaderboard.get('mostPaxWiFi', {}).get('nodeID'):
@@ -2627,13 +2629,13 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
     
     # Special packet detections
     if len(meshLeaderboard['adminPackets']) > 0:
-        result += f"🚨 Admin packets: {len(meshLeaderboard['adminPackets'])}\n"
+        result += f"🚨 Admin-Pakete: {len(meshLeaderboard['adminPackets'])}\n"
     
     if len(meshLeaderboard['tunnelPackets']) > 0:
-        result += f"🚨 Tunnel packets: {len(meshLeaderboard['tunnelPackets'])}\n"
+        result += f"🚨 Tunnel-Pakete: {len(meshLeaderboard['tunnelPackets'])}\n"
     
     if len(meshLeaderboard['audioPackets']) > 0:
-        result += f"☎️ Audio packets: {len(meshLeaderboard['audioPackets'])}\n"
+        result += f"☎️ Audio-Pakete: {len(meshLeaderboard['audioPackets'])}\n"
     
     unwrap_n = meshLeaderboard.get("simTunnelUnwrapCount", 0)
     if unwrap_n > 0:
@@ -2641,8 +2643,11 @@ def get_mesh_leaderboard(msg, fromID, deviceID):
 
     result = result.strip()
     
-    if result == "📊Leaderboard📊\n":
-        result += "No records yet! Keep meshing! 📡 \n firmware 2.7+ `Broadcast Device Metrics` in Telemetry Config, needs enabled for full use. Ideally not on AQ=="
+    if result == "📊 Bestenliste 📊\n":
+        result += (
+            "Noch keine Rekorde — weiter funken! 📡\n"
+            "Firmware 2.7+: „Broadcast Device Metrics“ in der Telemetrie aktivieren."
+        )
     
     return result
 
@@ -2651,7 +2656,7 @@ def get_sysinfo(nodeID=0, deviceID=1):
     sysinfo = ''
     stats = str(displayNodeTelemetry(nodeID, deviceID, userRequested=True)) + " 🤖👀" + str(len(seenNodes))
     if "numPacketsTx:0" in stats or stats == -1:
-        return "Gathering Telemetry try again later⏳"
+        return "Telemetrie wird gesammelt — bitte gleich erneut versuchen ⏳"
     # replace Telemetry with Int in string
     stats = stats.replace("Telemetry", "Int")
     sysinfo += f"📊{stats}"

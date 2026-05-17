@@ -36,7 +36,7 @@ def load_bbsdb():
     except FileNotFoundError:
         # create a new bbsdb.pkl with a welcome message
         # template ([messageID, subject, message, fromNode, now, thread, replyto])
-        bbs_messages = [[1, "Welcome to meshBBS", "Welcome to the BBS, please post a message!",0,time.strftime('%Y-%m-%d %H:%M:%S'),0,0]]
+        bbs_messages = [[1, "Willkommen bei Meshhessen-BBS", "Hessenbot-BBS — schreib eine Nachricht mit bbspost!",0,time.strftime('%Y-%m-%d %H:%M:%S'),0,0]]
         logger.debug("System: bbsdb.pkl not found, creating new one")
         try:
             with open('data/bbsdb.pkl', 'wb') as f:
@@ -61,7 +61,15 @@ def save_bbsdb():
 
 def bbs_help():
     # help message
-    return "BBS Commands:\n'bbslist'\n'bbspost $subject #message'\n'bbspost @node #message' (DM)\n'bbsread #'\n'bbsdelete #'\n'cmd'"
+    return (
+        "BBS-Befehle:\n"
+        "bbslist — Liste\n"
+        "bbspost $Betreff #Text\n"
+        "bbspost @Knoten #Text (DM)\n"
+        "bbsread # — lesen\n"
+        "bbsdelete # — löschen\n"
+        "cmd? — Hilfe"
+    )
 
 def bbs_list_messages():
     #print (f"System: raw bbs_messages: {bbs_messages}")
@@ -78,7 +86,7 @@ def bbs_list_messages():
 def bbs_delete_message(messageID = 0, fromNode = 0):
     #if messageID out of range ignore
     if (messageID - 1) >= len(bbs_messages):
-        return "Message not found."
+        return "Nachricht nicht gefunden."
     
     # delete a message from the bbsdb
     if messageID > 0:
@@ -92,12 +100,12 @@ def bbs_delete_message(messageID = 0, fromNode = 0):
             # save the bbsdb
             save_bbsdb()
             
-            return "Msg #" + str(messageID) + " deleted."
+            return "Nachricht #" + str(messageID) + " gelöscht."
         else:
             logger.warning(f"System: node {fromNode}, tried to delete a message: {bbs_messages[messageID - 1]} and was dropped.")
-            return "You are not authorized to delete this message."
+            return "Du darfst diese Nachricht nicht löschen."
     else:
-        return "Please specify a message number to delete."
+        return "Bitte Nachrichtennummer angeben (bbsdelete #)."
 
 
 def bbs_delete_message_system(message_id: int):
@@ -107,7 +115,7 @@ def bbs_delete_message_system(message_id: int):
     """
     global bbs_messages
     if message_id < 1 or message_id > len(bbs_messages):
-        return False, "Message not found."
+        return False, "Nachricht nicht gefunden."
     bbs_messages.pop(message_id - 1)
     for i in range(len(bbs_messages)):
         bbs_messages[i][0] = i + 1
@@ -127,15 +135,15 @@ def bbs_post_message(subject, message, fromNode, threadID=0, replytoID=0):
     # Check the BAN list for naughty nodes and silently drop the message
     if str(fromNode) in bbs_ban_list:
         logger.warning(f"System: Naughty node {fromNode}, tried to post a message: {subject}, {message} and was dropped.")
-        return "Message posted. ID is: " + str(messageID)
+        return "Nachricht gespeichert. ID: " + str(messageID)
     # validate message length isnt three times the MESSAGE_CHUNK_SIZE
     if len(message) > (3 * MESSAGE_CHUNK_SIZE):
-        return "Message too long, max length is " + str(3 * MESSAGE_CHUNK_SIZE) + " characters."
+        return "Nachricht zu lang, max. " + str(3 * MESSAGE_CHUNK_SIZE) + " Zeichen."
     # validate not a duplicate message
     for msg in bbs_messages:
         if msg[1].strip().lower() == subject.strip().lower() and msg[2].strip().lower() == message.strip().lower():
             messageID = msg[0]
-            return "Message posted. ID is: " + str(messageID)
+            return "Nachricht gespeichert. ID: " + str(messageID)
     # validate its not overlength by keeping in chunker limit
     # append the message to the list
     bbs_messages.append([messageID, subject, message, fromNode, now, thread, replyto])
@@ -144,19 +152,19 @@ def bbs_post_message(subject, message, fromNode, threadID=0, replytoID=0):
     # save the bbsdb
     save_bbsdb()
 
-    return "Message posted. ID is: " + str(messageID)
+    return "Nachricht gespeichert. ID: " + str(messageID)
 
 def bbs_read_message(messageID = 0):
     #if messageID out of range ignore
     if (messageID - 1) >= len(bbs_messages):
-        return "Message not found."
+        return "Nachricht nicht gefunden."
     if messageID > 0:
         fromNode = bbs_messages[messageID - 1][3]
         fromNodeHex = hex(fromNode)[-4:]
         message = bbs_messages[messageID - 1]
-        return f"Msg #{message[0]}\nFrom:{fromNodeHex}\n{message[2]}"
+        return f"#{message[0]}\nVon:{fromNodeHex}\n{message[2]}"
     else:
-        return "Please specify a message number to read."
+        return "Bitte Nachrichtennummer angeben (bbsread #)."
    
 def save_bbsdm():
     global bbs_dm
@@ -186,15 +194,15 @@ def bbs_post_dm(toNode, message, fromNode):
     # Check the BAN list for naughty nodes and silently drop the message
     if str(fromNode) in bbs_ban_list:
         logger.warning(f"System: Naughty node {fromNode}, tried to post a message: {message} and was dropped.")
-        return "DM Posted for node " + str(toNode)
+        return "DM für Knoten " + str(toNode) + " gespeichert."
     
     # validate message length isnt three times the MESSAGE_CHUNK_SIZE
     if len(message) > (3 * MESSAGE_CHUNK_SIZE):
-        return "Message too long, max length is " + str(3 * MESSAGE_CHUNK_SIZE) + " characters."
+        return "Nachricht zu lang, max. " + str(3 * MESSAGE_CHUNK_SIZE) + " Zeichen."
     # validate not a duplicate message
     for msg in bbs_dm:
         if msg[0] == int(toNode) and msg[1].strip().lower() == message.strip().lower():
-            return "DM Posted for node " + str(toNode)
+            return "DM für Knoten " + str(toNode) + " gespeichert."
 
     # append the message to the list
     bbs_dm.append([int(toNode), message, int(fromNode)])
@@ -202,12 +210,12 @@ def bbs_post_dm(toNode, message, fromNode):
     # save the bbsdb
     save_bbsdm()
     logger.info(f"System: BBS DM Queued: from={int(fromNode)} to={int(toNode)}")
-    return "BBS DM Posted for node " + str(toNode)
+    return "BBS-DM für Knoten " + str(toNode) + " gespeichert."
 
 def get_bbs_stats():
     global bbs_messages, bbs_dm
     # Return some stats on the bbs pending messages and total posted messages
-    return f"📡BBSdb has {len(bbs_messages)} messages.\nDirect ✉️ Messages waiting: {(len(bbs_dm) - 1)}"
+    return f"📡 BBS: {len(bbs_messages)} Nachrichten.\n✉️ Wartende DMs: {(len(bbs_dm) - 1)}"
 
 def bbs_check_dm(toNode):
     global bbs_dm

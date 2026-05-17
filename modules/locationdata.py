@@ -34,7 +34,12 @@ def where_am_i(lat=0, lon=0, short=False, zip=False):
             location = geolocator.reverse(lat + ", " + lon)
             address = location.raw['address']
             address_components = ['city', 'state', 'county', 'country']
-            whereIam = f"City: {address.get('city', '')}. State: {address.get('state', '')}. County: {address.get('county', '')}. Country: {address.get('country', '')}."
+            whereIam = (
+                f"Ort: {address.get('city', address.get('town', ''))}. "
+                f"Bundesland: {address.get('state', '')}. "
+                f"Kreis: {address.get('county', '')}. "
+                f"Land: {address.get('country', '')}."
+            )
             return whereIam
         
         if zip:
@@ -48,27 +53,27 @@ def where_am_i(lat=0, lon=0, short=False, zip=False):
             location = geolocator.reverse(str(lat) + ", " + str(lon))
             address = location.raw['address']
             address_components = {
-                'city': 'City',
-                'state': 'State',
-                'postcode': 'Zip',
-                'county': 'County',
-                'country': 'Country'
+                'city': 'Ort',
+                'state': 'Bundesland',
+                'postcode': 'PLZ',
+                'county': 'Kreis',
+                'country': 'Land'
             }
             whereIam += ', '.join([f"{label}: {address.get(component, '')}" for component, label in address_components.items() if component in address])
         else:
             location = geolocator.reverse(lat + ", " + lon)
             address = location.raw['address']
             address_components = {
-                'house_number': 'Number',
-                'road': 'Road',
-                'city': 'City',
-                'state': 'State',
-                'postcode': 'Zip',
-                'county': 'County',
-                'country': 'Country'
+                'house_number': 'Nr',
+                'road': 'Straße',
+                'city': 'Ort',
+                'state': 'Bundesland',
+                'postcode': 'PLZ',
+                'county': 'Kreis',
+                'country': 'Land'
             }
             whereIam += ', '.join([f"{label}: {address.get(component, '')}" for component, label in address_components.items() if component in address])
-            whereIam += f", Grid: " + grid
+            whereIam += f", Maidenhead: " + grid
         return whereIam
     except Exception as e:
         logger.debug("Location:Error fetching location data with whereami, likely network error")
@@ -192,7 +197,7 @@ def distance(lat=0,lon=0,nodeID=0, reset=False):
     if lat == 0 and lon == 0:
         return my_settings.NO_DATA_NOGPS
     if nodeID == 0:
-        return "No NodeID provided"
+        return "Keine Knoten-ID angegeben"
     
     if reset:
         if nodeID in howfarDB:
@@ -202,9 +207,9 @@ def distance(lat=0,lon=0,nodeID=0, reset=False):
         #register first point NodeID, lat, lon, time, point
         howfarDB[nodeID] = [{'lat': lat, 'lon': lon, 'time': datetime.now()}]
         if reset:
-            return "Tracking reset, new starting point registered🗺️"
+            return "Streckenzähler zurückgesetzt, neuer Startpunkt🗺️"
         else:
-            return "Starting point registered🗺️"
+            return "Startpunkt gespeichert🗺️"
     else:
         #de-dupe points if same as last point
         if howfarDB[nodeID][-1]['lat'] == lat and howfarDB[nodeID][-1]['lon'] == lon:
@@ -822,7 +827,7 @@ def list_locations_from_db(userID=None):
         conn.close()
         
         if not results:
-            return "No saved locations found"
+            return "Keine gespeicherten Orte"
         
         locations_list = f"Saved Locations ({len(results)} total):\n"
         # Return ALL results, not limited
@@ -1037,9 +1042,9 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
         parts = save_cmd.split(" ", 1)
         if len(parts) < 1 or not parts[0]:
             if is_public:
-                return "🚫Usage: map save public <name> [description]"
+                return "🚫 Nutzung: map save public <Name> [Beschreibung]"
             else:
-                return "🚫Usage: map save <name> [description]"
+                return "🚫 Nutzung: map save <Name> [Beschreibung]"
         
         location_name = parts[0]
         description = parts[1] if len(parts) > 1 else ""
@@ -1058,7 +1063,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
                 description = f"Meta:{hop}"
         
         if not location or len(location) != 2 or lat == 0 or lon == 0:
-            return "🚫Location data is missing or invalid."
+            return "🚫 Standortdaten fehlen oder ungültig."
         
         # Get altitude for the node
         altitude = get_node_altitude(userID, deviceID)
@@ -1078,7 +1083,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
     if command.lower().startswith("delete "):
         location_name = command[7:].strip()  # Remove "delete " prefix
         if not location_name:
-            return "🚫Usage: map delete <name>"
+            return "🚫 Nutzung: map delete <Name>"
         
         success, msg = delete_location_from_db(location_name, str(userID))
         if success:
@@ -1090,7 +1095,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
     if command.lower().startswith("public "):
         location_name = command[7:].strip()  # Remove "public " prefix
         if not location_name:
-            return "🚫Usage: map public <name>"
+            return "🚫 Nutzung: map public <Name>"
         
         saved_location = get_public_location_from_db(location_name)
         
@@ -1186,13 +1191,13 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
 
         # location should be a tuple: (lat, lon)
         if not location or len(location) != 2:
-            return "🚫Location data is missing or invalid."
+            return "🚫 Standortdaten fehlen oder ungültig."
 
         success = log_locationData_toMap(userID, location, description)
         if success:
             return f"📍Location logged (CSV)"
         else:
-            return "🚫Failed to log location. Please try again."
+            return "🚫 Ort konnte nicht gespeichert werden. Bitte erneut versuchen."
     
     # Handle location name lookup (get heading)
     if command.strip():
@@ -1273,7 +1278,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
             return f"🚫Location '{location_name}' not found. Use 'map list' to see available locations."
     
     # Empty command - show help
-    return "🗺️Use 'map help' for help"
+    return "🗺️ Hilfe: map help"
 
 # Initialize the locations database when module is imported
 initialize_locations_database()

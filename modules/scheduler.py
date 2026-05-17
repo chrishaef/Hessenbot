@@ -138,7 +138,7 @@ def setup_scheduler(
             logger.debug(f"System: Starting the basic scheduler to send '{scheduler_message}' on schedule '{schedulerValue}' every {effective_interval} interval at time '{schedulerTime}' on Device:{schedulerInterface} Channel:{schedulerChannel}")
         elif 'link' in schedulerValue:
             schedule.every(schedulerIntervalInt).hours.do(
-                lambda: send_message("bbslink MeshBot looking for peers", schedulerChannel, 0, schedulerInterface)
+                lambda: send_message("bbslink Hessenbot sucht Meshhessen-Peers", schedulerChannel, 0, schedulerInterface)
             )
             logger.debug(f"System: Starting the link scheduler to send link messages every {schedulerIntervalInt} hours on Device:{schedulerInterface} Channel:{schedulerChannel}")
         elif 'weather' in schedulerValue:
