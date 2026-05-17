@@ -125,14 +125,9 @@ def _sections() -> List[CommandSection]:
             (
                 CommandEntry(
                     f"{p}wx",
-                    "Wettervorhersage für deinen Standort.",
+                    "Wettervorhersage für deinen Standort (Open-Meteo).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True),
-                ),
-                CommandEntry(
-                    f"{p}wxc",
-                    "Wetter in metrischen Einheiten.",
-                    enabled=lambda: getattr(st, "use_meteo_wxApi", True),
                 ),
                 CommandEntry(
                     f"{p}warning",

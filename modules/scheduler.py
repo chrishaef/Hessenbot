@@ -143,7 +143,7 @@ def setup_scheduler(
             logger.debug(f"System: Starting the link scheduler to send link messages every {schedulerIntervalInt} hours on Device:{schedulerInterface} Channel:{schedulerChannel}")
         elif 'weather' in schedulerValue:
             schedule.every().day.at(schedulerTime).do(
-                lambda: send_message(handle_wxc(0, schedulerInterface, 'wx', days=1), schedulerChannel, 0, schedulerInterface)
+                lambda: send_message(handle_wxc(0, schedulerInterface, days=1), schedulerChannel, 0, schedulerInterface)
             )
             logger.debug(f"System: Starting the weather scheduler to send weather updates every {schedulerIntervalInt} hours on Device:{schedulerInterface} Channel:{schedulerChannel}")
         elif 'news' in schedulerValue:
