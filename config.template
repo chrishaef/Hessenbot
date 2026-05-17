@@ -198,6 +198,13 @@ bbslink_whitelist =
 # enable API script access (increases disk i/o)
 bbsAPI_enabled = True
 
+[polls]
+# Einfache Umfragen: !umfrage im Mesh, Verwaltung im Admin-Backend
+enabled = True
+max_options = 8
+# Abstimmung ändern (neue Option ersetzt alte Stimme desselben Knotens)
+allow_revote = True
+
 # location module
 [location]
 enabled = True
