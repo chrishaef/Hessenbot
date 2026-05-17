@@ -1616,6 +1616,22 @@ PKI_ROUTING_ERROR_HINTS = {
     'PKI_FAILED': 'PKI was explicitly requested but send prerequisites were not met. Verify PKI-capable firmware/config, key material, and direct-send destination.',
 }
 
+# Protobuf enum „no error“ — ROUTING_APP-Acks, kein Bot-/Mesh-Fehler
+_BENIGN_ROUTING_REASONS = frozenset({
+    '', '0', 'NONE', 'NO_ERROR', 'ROUTING_ERROR_NONE', 'ROUTING_ERROR_NO_ERROR',
+})
+
+
+def _significant_routing_error(reason) -> bool:
+    if reason is None:
+        return False
+    label = str(reason).strip().upper()
+    if label in _BENIGN_ROUTING_REASONS:
+        return False
+    if label.endswith('_NONE') or label.endswith('.NONE'):
+        return False
+    return True
+
 # Plausible range for EnvironmentMetrics.temperature (°C); filters wrong units / corrupt values.
 _LEADERBOARD_TEMP_MIN_C = -90.0
 _LEADERBOARD_TEMP_MAX_C = 70.0
@@ -2347,7 +2363,7 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
 
             # Meshtastic Python/client can surface this field as errorReason or error_reason.
             error_reason = routing_data.get('errorReason', routing_data.get('error_reason', ''))
-            if error_reason:
+            if _significant_routing_error(error_reason):
                 requester_node = packet.get('from', nodeID)
                 requester_id = packet.get('fromId', '')
                 target_node = packet.get('to', 0)
