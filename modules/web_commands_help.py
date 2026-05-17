@@ -243,6 +243,37 @@ def _sections() -> List[CommandSection]:
             section_enabled=lambda: getattr(st, "bbs_enabled", False),
         ),
         CommandSection(
+            "Umfragen",
+            "bi-bar-chart-steps",
+            "Abstimmungen im Mesh. Anlegen und Auswertung im Admin-Backend unter „Umfragen“.",
+            (
+                CommandEntry(
+                    f"{p}umfrage",
+                    "Aktive Umfragen anzeigen.",
+                    f"{p}umfrage",
+                    enabled=lambda: getattr(st, "polls_enabled", False),
+                ),
+                CommandEntry(
+                    f"{p}umfrage liste",
+                    "Alle Umfragen (auch geschlossene).",
+                    enabled=lambda: getattr(st, "polls_enabled", False),
+                ),
+                CommandEntry(
+                    f"{p}umfrage <Nr>",
+                    "Frage, Optionen und aktuelle Stimmenzahlen.",
+                    f"{p}umfrage 1",
+                    enabled=lambda: getattr(st, "polls_enabled", False),
+                ),
+                CommandEntry(
+                    f"{p}umfrage <Nr> <Option>",
+                    "Abstimmen (Option 1, 2, …). Eine Stimme pro Knoten.",
+                    f"{p}umfrage 1 2",
+                    enabled=lambda: getattr(st, "polls_enabled", False),
+                ),
+            ),
+            section_enabled=lambda: getattr(st, "polls_enabled", False),
+        ),
+        CommandSection(
             "Nachrichten & Feeds",
             "bi-newspaper",
             "",

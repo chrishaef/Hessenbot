@@ -119,6 +119,11 @@ else:
     bbs_help = False
     bbs_list_messages = False
 
+if polls_enabled:
+    from modules.polls import *  # umfrage
+    trap_list = trap_list + trap_list_polls
+    help_message = help_message + ", umfrage"
+
 if dxspotter_enabled:
     from modules.dxspot import handledxcluster
     trap_list = trap_list + ("dx",)
@@ -3024,6 +3029,10 @@ def saveAllData():
             save_bbsdb()
             save_bbsdm()
             logger.debug("Persistence: BBS data saved")
+
+        if polls_enabled:
+            save_polls()
+            logger.debug("Persistence: Polls data saved")
 
         # Save leaderboard data if enabled
         if logMetaStats:

@@ -79,6 +79,10 @@ if 'bbs' not in config:
     config['bbs'] = {'enabled': 'False', 'bbsdb': 'data/bbsdb.pkl', 'bbs_ban_list': '', 'bbs_admin_list': ''}
     config.write(open(config_file, 'w'))
 
+if 'polls' not in config:
+    config['polls'] = {'enabled': 'True', 'max_options': '8', 'allow_revote': 'True'}
+    config.write(open(config_file, 'w'))
+
 if 'repeater' not in config:
     config['repeater'] = {'enabled': 'False', 'repeater_channels': ''}
     config.write(open(config_file, 'w'))
@@ -394,6 +398,11 @@ try:
     bbs_link_enabled = config['bbs'].getboolean('bbslink_enabled', False)
     bbs_link_whitelist = config['bbs'].get('bbslink_whitelist', '').split(',')
     bbsAPI_enabled = config['bbs'].getboolean('bbsAPI_enabled', False)
+
+    # Umfragen
+    polls_enabled = config['polls'].getboolean('enabled', True)
+    polls_max_options = config['polls'].getint('max_options', 8)
+    polls_allow_revote = config['polls'].getboolean('allow_revote', True)
     
     # checklist
     checklist_enabled = config['checklist'].getboolean('enabled', False)

@@ -179,6 +179,11 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "rescue": lambda: handle_emergency(message_from_id, deviceID, message),
     }
 
+    if getattr(my_settings, "polls_enabled", False):
+        default_commands["umfrage"] = lambda: handle_poll_command(
+            message, message_from_id, isDM
+        )
+
     # set the command handler
     command_handler = default_commands
     cmds = [] # list to hold the commands found in the message

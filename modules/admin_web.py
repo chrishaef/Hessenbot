@@ -1563,6 +1563,200 @@ def create_app(
         flash(txt, "success" if ok else "error")
         return redirect(url_for("bbs_dm_index"))
 
+    @app.route("/umfragen")
+    @login_required
+    def polls_index():
+        import modules.polls as polls
+        import modules.settings as st
+
+        hint = ""
+        if not st.polls_enabled:
+            hint = (
+                '<p class="alert alert-info">Umfragen sind unter <code>[polls] enabled = False</code> '
+                "deaktiviert. Verwaltung wirkt trotzdem auf <code>data/polls.pkl</code>.</p>"
+            )
+
+        rows = []
+        for poll in polls.list_polls():
+            pid = poll.get("id")
+            active = poll.get("active", True)
+            badge = (
+                '<span class="badge text-bg-success">aktiv</span>'
+                if active
+                else '<span class="badge text-bg-secondary">geschlossen</span>'
+            )
+            total = sum(polls._vote_totals(poll))
+            rows.append(
+                "<tr>"
+                f"<td><code>{pid}</code></td>"
+                f"<td>{html_escape(str(poll.get('title', '')))}</td>"
+                f"<td>{html_escape(str(poll.get('question', ''))[:80])}</td>"
+                f"<td>{badge}</td>"
+                f"<td>{total}</td>"
+                f"<td>{html_escape(str(poll.get('created', '')))}</td>"
+                f'<td><a class="btn btn-sm btn-outline-info" href="{url_for("polls_view", poll_id=pid)}">'
+                "Anzeigen</a></td>"
+                "</tr>"
+            )
+        table = "".join(rows) if rows else '<tr><td colspan="7">Keine Umfragen.</td></tr>'
+
+        body = (
+            hint
+            + f'<p><a class="btn btn-success mb-3" href="{url_for("polls_new")}">Neue Umfrage</a></p>'
+            + '<div class="table-scroll"><table class="nodes-table table-dark table-bordered">'
+            + "<thead><tr><th>#</th><th>Titel</th><th>Frage</th><th>Status</th>"
+            + "<th>Stimmen</th><th>Erstellt</th><th></th></tr></thead>"
+            + f"<tbody>{table}</tbody></table></div>"
+            + '<p class="small text-muted">Mesh: <code>!umfrage</code>, <code>!umfrage liste</code>, '
+            "<code>!umfrage &lt;Nr&gt;</code>, <code>!umfrage &lt;Nr&gt; &lt;Option&gt;</code></p>"
+        )
+
+        return _render_admin_template(
+            "{{ body|safe }}",
+            title="Umfragen",
+            active_tab="polls",
+            body=Markup(body),
+        )
+
+    @app.route("/umfragen/new", methods=["GET", "POST"])
+    @login_required
+    def polls_new():
+        import modules.polls as polls
+        import modules.settings as st
+
+        max_opt = int(getattr(st, "polls_max_options", 8))
+        if request.method == "POST":
+            title = (request.form.get("title") or "").strip()
+            question = (request.form.get("question") or "").strip()
+            raw_opts = (request.form.get("options") or "").strip()
+            options = [ln.strip() for ln in raw_opts.splitlines() if ln.strip()]
+            active = request.form.get("active") == "on"
+            ok, txt, _pid = polls.create_poll(title, question, options, active=active)
+            flash(txt, "success" if ok else "error")
+            if ok:
+                return redirect(url_for("polls_view", poll_id=_pid))
+            return redirect(url_for("polls_new"))
+
+        return _render_admin_template(
+            f"""
+  <p class="small text-muted">Pro Zeile eine Antwortoption (mind. 2, max. {max_opt}).</p>
+  <form method="post">
+    <label class="form-label">Titel (optional)</label>
+    <input type="text" name="title" class="form-control mb-3" maxlength="80">
+    <label class="form-label">Frage</label>
+    <input type="text" name="question" class="form-control mb-3" required maxlength="200">
+    <label class="form-label">Optionen</label>
+    <textarea name="options" rows="6" class="form-control font-monospace mb-3" required
+              placeholder="Ja&#10;Nein&#10;Enthaltung"></textarea>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="active" id="pollActive" checked>
+      <label class="form-check-label" for="pollActive">Sofort aktiv (Abstimmung im Mesh)</label>
+    </div>
+    <button type="submit" class="btn btn-success">Anlegen</button>
+    <a href="{url_for("polls_index")}" class="btn btn-outline-secondary ms-2">Abbrechen</a>
+  </form>
+""",
+            title="Neue Umfrage",
+            active_tab="polls",
+        )
+
+    @app.route("/umfragen/<int:poll_id>")
+    @login_required
+    def polls_view(poll_id):
+        import modules.polls as polls
+        from modules.bbstools import bbs_party_display_label
+
+        poll = polls.get_poll(poll_id)
+        if not poll:
+            flash("Umfrage nicht gefunden.", "error")
+            return redirect(url_for("polls_index"))
+
+        options = poll.get("options") or []
+        votes = poll.get("votes") or {}
+        totals = polls._vote_totals(poll)
+        total = sum(totals)
+        rows = []
+        for i, opt in enumerate(options):
+            voters = votes.get(str(i), [])
+            voter_labels = ", ".join(
+                html_escape(bbs_party_display_label(v)[:40]) for v in voters[:12]
+            )
+            if len(voters) > 12:
+                voter_labels += f" … +{len(voters) - 12}"
+            pct = f"{round(100 * totals[i] / total)}%" if total else "0%"
+            rows.append(
+                "<tr>"
+                f"<td>{i + 1}</td>"
+                f"<td>{html_escape(opt)}</td>"
+                f"<td><strong>{totals[i]}</strong></td>"
+                f"<td>{pct}</td>"
+                f'<td class="small">{voter_labels or "—"}</td>'
+                "</tr>"
+            )
+        table = "".join(rows)
+        state = "aktiv" if poll.get("active", True) else "geschlossen"
+        mesh_preview = html_escape(polls.format_poll_detail(poll_id))
+
+        body = f"""
+  <h2 class="h5">{html_escape(str(poll.get('title', '')))} <span class="badge text-bg-secondary">#{poll_id}</span></h2>
+  <p><strong>Frage:</strong> {html_escape(str(poll.get('question', '')))}</p>
+  <p class="text-muted small">Status: {state} · Erstellt: {html_escape(str(poll.get('created', '')))} · Gesamt: {total} Stimmen</p>
+  <div class="table-scroll mb-3">
+    <table class="nodes-table table-dark table-bordered table-sm">
+      <thead><tr><th>#</th><th>Option</th><th>Stimmen</th><th>%</th><th>Knoten (Auszug)</th></tr></thead>
+      <tbody>{table}</tbody>
+    </table>
+  </div>
+  <h3 class="h6">Vorschau Mesh-Antwort</h3>
+  <pre class="admin-pre">{mesh_preview}</pre>
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <form method="post" action="{url_for('polls_toggle', poll_id=poll_id)}">
+      <input type="hidden" name="active" value="{'0' if poll.get('active', True) else '1'}">
+      <button type="submit" class="btn btn-sm btn-outline-warning">{'Schließen' if poll.get('active', True) else 'Aktivieren'}</button>
+    </form>
+    <form method="post" action="{url_for('polls_reset', poll_id=poll_id)}" onsubmit="return confirm('Alle Stimmen löschen?');">
+      <button type="submit" class="btn btn-sm btn-outline-secondary">Stimmen zurücksetzen</button>
+    </form>
+    <form method="post" action="{url_for('polls_delete', poll_id=poll_id)}" onsubmit="return confirm('Umfrage endgültig löschen?');">
+      <button type="submit" class="btn btn-sm btn-danger">Löschen</button>
+    </form>
+    <a href="{url_for('polls_index')}" class="btn btn-sm btn-outline-secondary">Zurück</a>
+  </div>
+"""
+        return _render_admin_template(
+            body,
+            title=f"Umfrage #{poll_id}",
+            active_tab="polls",
+        )
+
+    @app.route("/umfragen/<int:poll_id>/toggle", methods=["POST"])
+    @login_required
+    def polls_toggle(poll_id):
+        import modules.polls as polls
+
+        active = request.form.get("active") == "1"
+        ok, txt = polls.set_poll_active(poll_id, active)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("polls_view", poll_id=poll_id))
+
+    @app.route("/umfragen/<int:poll_id>/reset", methods=["POST"])
+    @login_required
+    def polls_reset(poll_id):
+        import modules.polls as polls
+
+        ok, txt = polls.reset_poll_votes(poll_id)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("polls_view", poll_id=poll_id))
+
+    @app.route("/umfragen/<int:poll_id>/delete", methods=["POST"])
+    @login_required
+    def polls_delete(poll_id):
+        import modules.polls as polls
+
+        ok, txt = polls.delete_poll(poll_id)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("polls_index"))
+
     @app.route("/logout")
     @login_required
     def logout():
