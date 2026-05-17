@@ -895,12 +895,31 @@ def _peer_short_name(entry: Dict[str, Any]) -> str:
     return "?"
 
 
+def _peer_long_name(entry: Dict[str, Any]) -> str:
+    long_name = (entry.get("long") or "").strip()
+    if long_name:
+        return long_name
+    node_id = entry.get("id")
+    if node_id:
+        try:
+            from modules.system import get_name_from_number
+
+            device = entry.get("device") or 1
+            name = get_name_from_number(int(node_id), "long", int(device))
+            if name and str(name).strip():
+                return str(name).strip()
+        except Exception:
+            pass
+    return "—"
+
+
 def _hhmm_from_event(entry: Dict[str, Any]) -> str:
     ts = entry.get("time") or ""
     try:
-        return datetime.fromisoformat(ts).strftime("%H:%M")
+        return datetime.fromisoformat(ts).strftime("%H.%M")
     except ValueError:
-        return (entry.get("time_short") or "")[:5]
+        raw = (entry.get("time_short") or "")[:5]
+        return raw.replace(":", ".") if raw else ""
 
 
 def _channel_recent_messages(
@@ -917,30 +936,35 @@ def _channel_recent_messages(
     return list(reversed(filtered[-limit:]))
 
 
-def _format_toplist_channel_line(entry: Dict[str, Any]) -> str:
-    t = _hhmm_from_event(entry)
-    short = _peer_short_name(entry)
-    text = (entry.get("text") or "").strip().replace("\r", " ")
-    if len(text) > 140:
-        text = text[:137] + "…"
+def _render_toplist_message_item(entry: Dict[str, Any]) -> str:
+    """HH.MM Short | Long, then message body on the next line."""
+    meta = (
+        f"{html_escape(_hhmm_from_event(entry))} "
+        f"{html_escape(_peer_short_name(entry))} | "
+        f"{html_escape(_peer_long_name(entry))}"
+    )
+    text = (entry.get("text") or "").strip().replace("\r\n", "\n").replace("\r", "\n")
     if text:
-        return f"{t}  {short}  {text}"
-    return f"{t}  {short}"
+        body = html_escape(text)
+        return (
+            f'<li class="dash-toplist-msg">'
+            f'<div class="dash-toplist-msg__meta">{meta}</div>'
+            f'<div class="dash-toplist-msg__text">{body}</div>'
+            f"</li>"
+        )
+    return f'<li class="dash-toplist-msg"><div class="dash-toplist-msg__meta">{meta}</div></li>'
 
 
 def _render_toplist_html(log: Dict[str, Any], *, channel: int = 1) -> str:
     entries = _channel_recent_messages(log, channel=channel, limit=10)
     if entries:
-        items = "".join(
-            f'<li>{html_escape(_format_toplist_channel_line(e))}</li>' for e in entries
-        )
+        items = "".join(_render_toplist_message_item(e) for e in entries)
     else:
         items = (
             f'<li class="text-muted">Noch keine Nachrichten auf Kanal {channel} im Log.</li>'
         )
     return f"""
 <div class="dash-card-body">
-  <p class="small text-muted mb-2">Letzte 10 Nachrichten · Kanal {channel}</p>
   <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{items}</ul>
 </div>
 """
@@ -1343,7 +1367,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
 <div class="row g-3 mb-4 dash-equal-cards">
   <div class="col-lg-6 d-flex">
     <div class="section-card flex-fill d-flex flex-column w-100">
-      <h2 class="section-title h5"><i class="bi bi-trophy me-2 text-success"></i>Topliste</h2>
+      <h2 class="section-title h5"><i class="bi bi-chat-left-text me-2 text-success"></i>Messages</h2>
       {toplist_html}
     </div>
   </div>

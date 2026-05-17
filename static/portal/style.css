@@ -675,6 +675,25 @@ body.page-login {
 
 .dash-list li:last-child { border-bottom: none; }
 
+.dash-toplist-msg {
+  display: block;
+  padding: 0.55rem 0;
+}
+
+.dash-toplist-msg__meta {
+  font-size: 0.82rem;
+  color: var(--text-muted, #6c757d);
+  line-height: 1.35;
+  margin-bottom: 0.2rem;
+}
+
+.dash-toplist-msg__text {
+  font-size: 0.9rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .dash-scroll { max-height: 220px; overflow-y: auto; }
 
 /* Dashboard: Topliste + Leaderboard gleiche Kartenhöhe */
