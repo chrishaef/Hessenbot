@@ -136,7 +136,15 @@ def _extract_message_event(
             kind = "dm"
         else:
             kind = "channel"
-        return {**base, "dir": "in", "kind": kind, **peer}
+        text = ""
+        if kind == "channel":
+            if "ReceivedChannel:" in plain:
+                msg_m = re.search(r"ReceivedChannel:\s*(.+?)\s+From:\s*", plain)
+            else:
+                msg_m = re.search(r"Ignoring Message:\s*(.+?)\s+From:\s*", plain)
+            if msg_m:
+                text = msg_m.group(1).strip()
+        return {**base, "dir": "in", "kind": kind, "text": text, **peer}
 
     return None
 
@@ -261,6 +269,7 @@ def _parse_messages_log_tail(
                 "dir": "in",
                 "kind": "dm" if is_dm else "channel",
                 "channel": int(ch),
+                "text": _text.strip().replace("\n", " "),
                 **peer,
             }
         )
@@ -865,51 +874,74 @@ def _mesh_node_counts_for_dash(lb: Dict[str, Any], log: Dict[str, Any]) -> Dict[
     return mc
 
 
-def _render_toplist_html(
-    cmd: Counter, lb: Dict[str, Any], log: Optional[Dict[str, Any]] = None
-) -> str:
-    cmd_rows = cmd.most_common(10)
-    msg_counts = _mesh_node_counts_for_dash(lb, log or {})
-
-    def _count_val(x: object) -> int:
+def _peer_short_name(entry: Dict[str, Any]) -> str:
+    short = (entry.get("short") or "").strip()
+    if short:
+        return short
+    node_id = entry.get("id")
+    if node_id:
         try:
-            return int(x)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return 0
+            from modules.system import get_name_from_number
 
-    top_nodes = sorted(
-        ((k, v) for k, v in msg_counts.items() if _count_val(v) > 0),
-        key=lambda x: _count_val(x[1]),
-        reverse=True,
-    )[:10]
+            device = entry.get("device") or 1
+            name = get_name_from_number(int(node_id), "short", int(device))
+            if name and str(name).strip() and not str(name).startswith("!"):
+                return str(name).strip()
+        except Exception:
+            pass
+    long_name = (entry.get("long") or "").strip()
+    if long_name:
+        return long_name[:4]
+    return "?"
 
-    cmd_items = (
-        "".join(
-            f"<li>{html_escape(name)} · {cnt}</li>" for name, cnt in cmd_rows
+
+def _hhmm_from_event(entry: Dict[str, Any]) -> str:
+    ts = entry.get("time") or ""
+    try:
+        return datetime.fromisoformat(ts).strftime("%H:%M")
+    except ValueError:
+        return (entry.get("time_short") or "")[:5]
+
+
+def _channel_recent_messages(
+    log: Dict[str, Any], *, channel: int = 1, limit: int = 10
+) -> List[Dict[str, Any]]:
+    events = log.get("recent_messages") or []
+    filtered = [
+        e
+        for e in events
+        if e.get("kind") == "channel"
+        and e.get("dir") == "in"
+        and e.get("channel") == channel
+    ]
+    return list(reversed(filtered[-limit:]))
+
+
+def _format_toplist_channel_line(entry: Dict[str, Any]) -> str:
+    t = _hhmm_from_event(entry)
+    short = _peer_short_name(entry)
+    text = (entry.get("text") or "").strip().replace("\r", " ")
+    if len(text) > 140:
+        text = text[:137] + "…"
+    if text:
+        return f"{t}  {short}  {text}"
+    return f"{t}  {short}"
+
+
+def _render_toplist_html(log: Dict[str, Any], *, channel: int = 1) -> str:
+    entries = _channel_recent_messages(log, channel=channel, limit=10)
+    if entries:
+        items = "".join(
+            f'<li>{html_escape(_format_toplist_channel_line(e))}</li>' for e in entries
         )
-        if cmd_rows
-        else '<li class="text-muted">Keine Befehle im Log</li>'
-    )
-    node_items = (
-        "".join(
-            f"<li>{html_escape(_resolve_node_label(nid))} · {cnt}</li>"
-            for nid, cnt in top_nodes
+    else:
+        items = (
+            f'<li class="text-muted">Noch keine Nachrichten auf Kanal {channel} im Log.</li>'
         )
-        if top_nodes
-        else '<li class="text-muted">Noch keine Mesh-Zähler</li>'
-    )
     return f"""
 <div class="dash-card-body">
-<div class="row g-3 dash-toplist-grid">
-  <div class="col-md-6">
-    <h3 class="h6 text-muted mb-2">Top-Befehle (Log)</h3>
-    <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{cmd_items}</ul>
-  </div>
-  <div class="col-md-6">
-    <h3 class="h6 text-muted mb-2">Aktivste Knoten (Mesh)</h3>
-    <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{node_items}</ul>
-  </div>
-</div>
+  <p class="small text-muted mb-2">Letzte 10 Nachrichten · Kanal {channel}</p>
+  <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{items}</ul>
 </div>
 """
 
@@ -1250,7 +1282,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
         log.get("bbs_dm_queued") or [],
         enabled=bool(rt.get("bbs_enabled")),
     )
-    toplist_html = _render_toplist_html(cmd, lb, log)
+    toplist_html = _render_toplist_html(log)
     leaderboard_html = _render_mesh_leaderboard_html(lb)
     log_note = ""
     if log.get("log_error"):
