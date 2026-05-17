@@ -1299,10 +1299,7 @@ def create_app(
             preview = html_escape(raw_body[:120] + ("…" if len(raw_body) > 120 else ""))
             fn = m[3] if len(m) > 3 else 0
             when = html_escape(str(m[4])) if len(m) > 4 else ""
-            try:
-                fn_h = html_escape(hex(int(fn)))
-            except (TypeError, ValueError):
-                fn_h = html_escape(str(fn))
+            fn_h = html_escape(bbs.bbs_party_display_label(fn))
             del_form = (
                 f'<form method="post" action="{url_for("bbs_delete", mid=mid)}" style="display:inline" '
                 f'onsubmit="return confirm(\'Nachricht #{mid} wirklich löschen?\');">'
@@ -1352,15 +1349,12 @@ def create_app(
         raw_body = m[2] if len(m) > 2 else ""
         body_esc = html_escape(raw_body)
         fn = m[3] if len(m) > 3 else 0
-        try:
-            fn_h = html_escape(hex(int(fn)))
-        except (TypeError, ValueError):
-            fn_h = html_escape(str(fn))
+        fn_h = html_escape(bbs.bbs_party_display_label(fn))
         when = html_escape(str(m[4])) if len(m) > 4 else ""
         return _render_admin_template(
             f"""
   <p><strong>Betreff:</strong> {subj}</p>
-  <p><strong>Von:</strong> <code>{fn_h}</code> &nbsp; <strong>Zeit:</strong> {when}</p>
+  <p><strong>Von:</strong> {fn_h} &nbsp; <strong>Zeit:</strong> {when}</p>
   <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
     <a href="{{ url_for('bbs_index') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>
@@ -1438,14 +1432,8 @@ def create_app(
             to_n = row[0] if len(row) > 0 else 0
             text = row[1] if len(row) > 1 else ""
             from_n = row[2] if len(row) > 2 else 0
-            try:
-                to_h = html_escape(hex(int(to_n)))
-            except (TypeError, ValueError):
-                to_h = html_escape(str(to_n))
-            try:
-                from_h = html_escape(hex(int(from_n)))
-            except (TypeError, ValueError):
-                from_h = html_escape(str(from_n))
+            to_h = html_escape(bbs.bbs_party_display_label(to_n))
+            from_h = html_escape(bbs.bbs_party_display_label(from_n))
             preview = html_escape(text[:100] + ("…" if len(text) > 100 else ""))
             if idx == 0:
                 actions = '<span class="text-muted">(Platzhalter)</span>'
@@ -1492,18 +1480,12 @@ def create_app(
             return redirect(url_for("bbs_dm_index"))
         row = bbs.bbs_dm[idx]
         to_n, text, from_n = row[0], row[1] if len(row) > 1 else "", row[2] if len(row) > 2 else 0
-        try:
-            to_h = html_escape(hex(int(to_n)))
-        except (TypeError, ValueError):
-            to_h = html_escape(str(to_n))
-        try:
-            from_h = html_escape(hex(int(from_n)))
-        except (TypeError, ValueError):
-            from_h = html_escape(str(from_n))
+        to_h = html_escape(bbs.bbs_party_display_label(to_n))
+        from_h = html_escape(bbs.bbs_party_display_label(from_n))
         body_esc = html_escape(text)
         return _render_admin_template(
             f"""
-  <p><strong>An:</strong> <code>{to_h}</code> &nbsp; <strong>Von:</strong> <code>{from_h}</code></p>
+  <p><strong>An:</strong> {to_h} &nbsp; <strong>Von:</strong> {from_h}</p>
   <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
     <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>

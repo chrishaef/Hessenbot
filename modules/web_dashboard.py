@@ -628,28 +628,9 @@ def _format_dm_timestamp(iso_time: str) -> str:
 
 
 def _bbs_dm_party_label(node_id: Any) -> str:
-    """Decimal node ID, short name, long name, and hex for dashboard display."""
-    try:
-        nid = int(node_id)
-    except (TypeError, ValueError):
-        return str(node_id) if node_id not in (None, "") else "—"
-    short = ""
-    long_name = ""
-    try:
-        from modules.system import get_name_from_number
+    from modules.bbstools import bbs_party_display_label
 
-        short = str(get_name_from_number(nid, "short", 1) or "").strip()
-        long_name = str(get_name_from_number(nid, "long", 1) or "").strip()
-    except Exception:
-        pass
-    hex_id = f"!{nid:08x}"
-    parts = [str(nid)]
-    if short and short != str(nid):
-        parts.append(short)
-    if long_name and long_name not in parts:
-        parts.append(long_name)
-    parts.append(hex_id)
-    return " · ".join(parts)
+    return bbs_party_display_label(node_id, 1)
 
 
 def _lookup_dm_sent_time(
