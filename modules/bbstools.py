@@ -19,6 +19,48 @@ trap_list_bbs = ("bbslist", "bbspost", "bbsread", "bbsdelete", "bbshelp", "bbsin
 bbs_messages = []
 bbs_dm = []
 
+BBS_WEB_ADMIN_NODE_ID = 0
+
+
+def bbs_party_display_label(node_id, node_int: int = 1) -> str:
+    """Anzeigename für BBS-Absender (Dashboard/Admin). Node 0 = Web-Admin."""
+    try:
+        nid = int(node_id)
+    except (TypeError, ValueError):
+        return str(node_id) if node_id not in (None, "") else "—"
+    if nid == BBS_WEB_ADMIN_NODE_ID:
+        from modules.locale_de import BBS_WEB_ADMIN_SENDER
+
+        return BBS_WEB_ADMIN_SENDER
+
+    hex_id = f"!{nid:08x}"
+    short = ""
+    long_name = ""
+    try:
+        from modules.system import get_name_from_number
+
+        short = str(get_name_from_number(nid, "short", node_int) or "").strip()
+        long_name = str(get_name_from_number(nid, "long", node_int) or "").strip()
+    except Exception:
+        pass
+
+    def _skip_name(name: str) -> bool:
+        if not name:
+            return True
+        if name in (str(nid), hex_id):
+            return True
+        if name.startswith("!") and name.lower() == hex_id.lower():
+            return True
+        return False
+
+    parts: list[str] = []
+    if not _skip_name(short):
+        parts.append(short)
+    if not _skip_name(long_name) and long_name not in parts:
+        parts.append(long_name)
+    parts.append(hex_id)
+    return " · ".join(parts)
+
 
 def load_bbsdb():
     global bbs_messages

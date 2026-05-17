@@ -2,6 +2,7 @@
 
 BOT_NAME = "Hessenbot"
 MESH_ORG = "Meshhessen"
+BBS_WEB_ADMIN_SENDER = f"{BOT_NAME} ({MESH_ORG} Web-Admin)"
 HELP_PREFIX = f"{BOT_NAME} ({MESH_ORG}) · !cmd?: "
 
 WMO_WEATHER_DE = {
