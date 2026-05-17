@@ -120,9 +120,9 @@ else:
     bbs_list_messages = False
 
 if polls_enabled:
-    from modules.polls import *  # umfrage
+    from modules.polls import *  # poll
     trap_list = trap_list + trap_list_polls
-    help_message = help_message + ", umfrage"
+    help_message = help_message + ", poll"
 
 if dxspotter_enabled:
     from modules.dxspot import handledxcluster

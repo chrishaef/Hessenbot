@@ -1607,8 +1607,8 @@ def create_app(
             + "<thead><tr><th>#</th><th>Titel</th><th>Frage</th><th>Status</th>"
             + "<th>Stimmen</th><th>Erstellt</th><th></th></tr></thead>"
             + f"<tbody>{table}</tbody></table></div>"
-            + '<p class="small text-muted">Mesh: <code>!umfrage</code>, <code>!umfrage liste</code>, '
-            "<code>!umfrage &lt;Nr&gt;</code>, <code>!umfrage &lt;Nr&gt; &lt;Option&gt;</code></p>"
+            + '<p class="small text-muted">Mesh: <code>!poll</code>, <code>!poll liste</code>, '
+            "<code>!poll &lt;Nr&gt;</code>, <code>!poll &lt;Nr&gt; &lt;Option&gt;</code></p>"
         )
 
         return _render_admin_template(
