@@ -2,6 +2,7 @@
 # K7MHI Kelly Keeton 2024
 
 import json # pip install json
+import time
 from geopy.geocoders import Nominatim # pip install geopy
 import maidenhead as mh # pip install maidenhead
 import requests # pip install requests
@@ -15,6 +16,42 @@ import os
 import sqlite3
 
 trap_list_location = ("whereami", "wx", "rlist", "howfar", "map", "loc",)
+
+_place_name_cache: dict[tuple[float, float], tuple[float, str]] = {}
+
+
+def get_place_name(lat=0, lon=0, max_age: float = 86400) -> str:
+    """Ortsname (Stadt/Ort) per Reverse-Geocoding; gecacht um API-Last zu begrenzen."""
+    try:
+        lat_f, lon_f = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return "?"
+    if int(lat_f) == 0 and int(lon_f) == 0:
+        return "?"
+    key = (round(lat_f, 3), round(lon_f, 3))
+    now = time.time()
+    cached = _place_name_cache.get(key)
+    if cached and (now - cached[0]) < max_age:
+        return cached[1]
+    geolocator = Nominatim(user_agent="hessenbot-meshhessen")
+    try:
+        loc = geolocator.reverse(f"{lat_f}, {lon_f}", language="de", timeout=8)
+        addr = loc.raw.get("address", {}) if loc else {}
+        name = (
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("village")
+            or addr.get("municipality")
+            or addr.get("hamlet")
+            or addr.get("county")
+            or "?"
+        )
+        _place_name_cache[key] = (now, name)
+        return name
+    except Exception as e:
+        logger.debug(f"Location: get_place_name failed: {e}")
+        return "?"
+
 
 def where_am_i(lat=0, lon=0, short=False, zip=False):
     whereIam = ""

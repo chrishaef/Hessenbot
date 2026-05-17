@@ -8,6 +8,7 @@ except ImportError:
     exit(1)
 
 import asyncio
+import re
 import time # for sleep, get some when you can :)
 import random
 from datetime import datetime
@@ -18,6 +19,64 @@ from modules.system import *
 # list of commands to remove from the default list for DM only
 restrictedCommands = []
 restrictedResponse = ""
+
+
+def _parse_hop_info(hop: str) -> tuple[int | None, str]:
+    """Hop-Anzahl und Verbindungstyp (LoRa / MQTT) aus der Paket-Hop-Zeichenkette."""
+    hop_s = (hop or "").strip()
+    m = re.search(r"(\d+)\s*Hop", hop_s, re.I)
+    hop_n = int(m.group(1)) if m else None
+    upper = hop_s.upper()
+    if "MQTT" in upper:
+        return (hop_n if hop_n is not None else 0), "MQTT"
+    if "GATEWAY" in upper or hop_s.startswith("Gateway"):
+        return (hop_n if hop_n is not None else 0), "MQTT"
+    if hop_s == "Direct" or hop_s.startswith("Direct"):
+        return 0, "LoRa"
+    if hop_n is not None:
+        return hop_n, "LoRa"
+    return None, "LoRa"
+
+
+def _bot_place_name() -> str:
+    if getattr(my_settings, "location_enabled", False):
+        try:
+            from modules.locationdata import get_place_name
+
+            return get_place_name(
+                my_settings.latitudeValue, my_settings.longitudeValue
+            )
+        except Exception:
+            pass
+    return "Meshhessen"
+
+
+def _format_ping_qsl(
+    message_from_id,
+    deviceID,
+    hop: str,
+    snr,
+    rssi,
+    keyword: str,
+) -> str:
+    short = get_name_from_number(message_from_id, "short", deviceID)
+    node_hex = decimal_to_hex(message_from_id)
+    place = _bot_place_name()
+    hop_n, link = _parse_hop_info(hop)
+    if hop_n is None:
+        hop_part = "? Hops"
+    elif hop_n == 1:
+        hop_part = "1 Hop"
+    else:
+        hop_part = f"{hop_n} Hops"
+    msg = f"{short} [{node_hex}] {keyword} @ {place} | {hop_part} {link}"
+    try:
+        if float(snr) != 0 or float(rssi) != 0:
+            msg += f" SNR:{snr} RSSI:{rssi}"
+    except (TypeError, ValueError):
+        pass
+    return msg
+
 
 def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):
     global cmdHistory
@@ -163,48 +222,51 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
     if  "?" in message and isDM:
         pingHelp = (
             "🤖 Hessenbot · Ping-Hilfe:\n"
-            "🏓 ping, ack oder test — Antwort mit SNR/RSSI.\n"
+            "🏓 ping / test — QSL mit Ort, Hops, LoRa/MQTT, SNR.\n"
             "🏓 ping <Zahl> — mehrere Pings per DM.\n"
             "🏓 ping @Knoten — Ping als BBS-DM."
         )
         return pingHelp
-    
-    msg = ""
-    type = ''
 
-    if "ping" in message.lower():
-        msg = "🏓PONG"
-        type = "🏓PING"
-    elif "test" in message.lower() or "testing" in message.lower():
-        msg = random.choice(["🎙Testing 1,2,3", "🎙Testing",\
-                             "🎙Testing, testing",\
-                             "🎙Ah-wun, ah-two...", "🎙Is this thing on?",\
-                             "🎙Roger that!",])
+    msg_lower = message.lower()
+    msg = ""
+    type = ""
+    rich_ping = False
+
+    if "test" in msg_lower or "testing" in msg_lower:
+        msg = _format_ping_qsl(message_from_id, deviceID, hop, snr, rssi, "QSL")
         type = "🎙TEST"
-    elif "ack" in message.lower():
-        msg = random.choice(["✋ACK-ACK!\n", "✋Ack to you!\n"])
+        rich_ping = True
+    elif "ping" in msg_lower:
+        msg = _format_ping_qsl(message_from_id, deviceID, hop, snr, rssi, "PONG")
+        type = "🏓PING"
+        rich_ping = True
+    elif "ack" in msg_lower:
+        msg = _format_ping_qsl(message_from_id, deviceID, hop, snr, rssi, "ACK")
         type = "✋ACK"
-    elif "cqcq" in message.lower() or "cq" in message.lower() or "cqcqcq" in message.lower():
-        myname = get_name_from_number(myNodeNum, 'short', deviceID)
-        msg = f"QSP QSL OM DE  {myname}   K\n"
+        rich_ping = True
+    elif "cqcq" in msg_lower or "cq" in msg_lower or "cqcqcq" in msg_lower:
+        myname = get_name_from_number(myNodeNum, "short", deviceID)
+        hop_n, link = _parse_hop_info(hop)
+        hops = f"{hop_n} Hops" if hop_n not in (None, 1) else ("1 Hop" if hop_n == 1 else "? Hops")
+        msg = f"{myname} QSL @ {_bot_place_name()} | {hops} {link} DE K"
+        type = "CQ"
+        rich_ping = True
     else:
         msg = "🔊 Hörst du mich?"
 
-    # append SNR/RSSI or hop info
-    if hop.startswith("Gateway") or hop.startswith("MQTT"):
-        msg += " [GW]"
-    elif hop.startswith("Direct"):
-        msg += " [RF]"
-    else:
-        #flood
-        msg += " [F]"
-    
-    if (float(snr) != 0 or float(rssi) != 0) and "Hop" not in hop:
-        msg += f"\nSNR:{snr} RSSI:{rssi}"
-    elif "Hop" in hop:
-        # janky, remove the words Gateway or MQTT if present
-        hop = hop.replace("Gateway", "").replace("Direct", "").replace("MQTT", "").strip()
-        msg += f"\n{hop} "
+    if not rich_ping:
+        if hop.startswith("Gateway") or hop.startswith("MQTT"):
+            msg += " [GW]"
+        elif hop.startswith("Direct"):
+            msg += " [RF]"
+        else:
+            msg += " [F]"
+        if (float(snr) != 0 or float(rssi) != 0) and "Hop" not in hop:
+            msg += f"\nSNR:{snr} RSSI:{rssi}"
+        elif "Hop" in hop:
+            hop_clean = hop.replace("Gateway", "").replace("Direct", "").replace("MQTT", "").strip()
+            msg += f"\n{hop_clean} "
 
     if "@" in message:
         msg = msg + " @" + message.split("@")[1]
@@ -266,10 +328,10 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
             else:
                 msg = f"🚦 Starte {pingCount} Auto-Pings"
 
-    # if not a DM add the username to the beginning of msg
-    if not my_settings.useDMForResponse and not isDM:
-        msg = "@" + get_name_from_number(message_from_id, 'short', deviceID) + " " + msg
-            
+    # Kanal: @ nur wenn Name noch nicht in der Antwort steht (altes Kurzformat)
+    if not my_settings.useDMForResponse and not isDM and not rich_ping:
+        msg = "@" + get_name_from_number(message_from_id, "short", deviceID) + " " + msg
+
     return msg
 
 def handle_alertBell(message_from_id, deviceID, message):
@@ -1126,22 +1188,28 @@ def onReceive(packet, interface):
             else:
                 hop_count = hop_away
 
-            if hop_count > 0:
-                # set hop string from calculated hop count
-                hop = f"{hop_count} Hop" if hop_count == 1 else f"{hop_count} Hops"
-
-            if hop_start == hop_limit and "lora" in str(transport_mechanism).lower() and (snr != 0 or rssi != 0) and hop_count == 0:
-                # 2.7+ firmware direct hop over LoRa
-                hop = "Direct"
-
+            transport_label = None
             if via_mqtt or "mqtt" in str(transport_mechanism).lower():
-                hop = "MQTT"
+                transport_label = "MQTT"
                 via_mqtt = True
             elif "udp" in str(transport_mechanism).lower():
-                hop = "Gateway"
-            
-            if hop in ("MQTT", "Gateway") and hop_count > 0:
-                hop = f" {hop_count} Hops"
+                transport_label = "Gateway"
+
+            if (
+                hop_start == hop_limit
+                and "lora" in str(transport_mechanism).lower()
+                and (snr != 0 or rssi != 0)
+                and hop_count == 0
+            ):
+                hop = "Direct"
+            elif transport_label == "MQTT":
+                hop = "MQTT" if hop_count == 0 else f"{hop_count} Hops MQTT"
+            elif transport_label == "Gateway":
+                hop = "Gateway" if hop_count == 0 else f"{hop_count} Hops Gateway"
+            elif hop_count > 0:
+                hop = f"{hop_count} Hop" if hop_count == 1 else f"{hop_count} Hops"
+            else:
+                hop = ""
 
             # Add relay node info if present
             if packet.get('relayNode') is not None:
