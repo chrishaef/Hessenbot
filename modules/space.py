@@ -7,7 +7,8 @@ import xml.dom.minidom
 from datetime import datetime
 import ephem # pip install pyephem
 from datetime import timezone
-from modules.log import logger, getPrettyTime
+from modules.log import logger
+from modules.locale_de import compass_label_de, duration_seconds_de, format_mesh_local_time
 from modules.settings import (latitudeValue, longitudeValue, zuluTime,
                               n2yoAPIKey, urlTimeoutSeconds, use_metric,
                               ERROR_FETCHING_DATA, NO_DATA_NOGPS, NO_ALERTS)
@@ -295,14 +296,19 @@ def getNextSatellitePass(satellite, lat=0, lon=0):
                 pass_time = pass_json['passes'][0]['startUTC']
                 pass_duration = pass_json['passes'][0]['duration']
                 pass_maxEl = pass_json['passes'][0]['maxEl']
-                pass_rise_time = datetime.fromtimestamp(pass_time).strftime('%a %d %I:%M%p')
-                pass_startAzCompass = pass_json['passes'][0]['startAzCompass']
-                pass_set_time = datetime.fromtimestamp(pass_time + pass_duration).strftime('%a %d %I:%M%p')
-                pass__endAzCompass = pass_json['passes'][0]['endAzCompass']
-                pass_data = f"{satname} @{pass_rise_time} Az: {pass_startAzCompass} for{getPrettyTime(pass_duration)}, MaxEl: {pass_maxEl}° Set @{pass_set_time} Az: {pass__endAzCompass}"
+                pass_rise_time = format_mesh_local_time(pass_time)
+                pass_start_az = compass_label_de(pass_json['passes'][0]['startAzCompass'])
+                pass_set_time = format_mesh_local_time(pass_time + pass_duration)
+                pass_end_az = compass_label_de(pass_json['passes'][0]['endAzCompass'])
+                pass_dur = duration_seconds_de(pass_duration)
+                pass_data = (
+                    f"{satname}: Start {pass_rise_time} Az {pass_start_az}, "
+                    f"{pass_dur}, max. {pass_maxEl}°, "
+                    f"Ende {pass_set_time} Az {pass_end_az}"
+                )
             elif pass_json['info']['passescount'] == 0:
                 satname = pass_json['info']['satname']
-                pass_data = f"{satname} has no upcoming passes"
+                pass_data = f"{satname}: keine sichtbaren Überflüge in den nächsten 2 Tagen"
         else:
             logger.error(f"System: Error fetching satellite pass data {satellite}")
             pass_data = ERROR_FETCHING_DATA

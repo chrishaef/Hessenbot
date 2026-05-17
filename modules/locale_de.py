@@ -64,3 +64,53 @@ def wind_direction_de(degrees: float) -> str:
     if degrees < 337.5:
         return "NW"
     return "N"
+
+
+WEEKDAY_DE_SHORT = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+# N2YO liefert englische Himmelsrichtungen (16-Punkt)
+COMPASS_EN_TO_DE = {
+    "N": "N",
+    "NNE": "NNO",
+    "NE": "NO",
+    "ENE": "ONO",
+    "E": "O",
+    "ESE": "OSO",
+    "SE": "SO",
+    "SSE": "SSO",
+    "S": "S",
+    "SSW": "SSW",
+    "SW": "SW",
+    "WSW": "WSW",
+    "W": "W",
+    "WNW": "WNW",
+    "NW": "NW",
+    "NNW": "NNW",
+}
+
+
+def compass_label_de(label: str) -> str:
+    if not label:
+        return "?"
+    return COMPASS_EN_TO_DE.get(label.strip().upper(), label.strip().upper())
+
+
+def format_mesh_local_time(ts_unix: float) -> str:
+    from datetime import datetime
+
+    dt = datetime.fromtimestamp(ts_unix)
+    wd = WEEKDAY_DE_SHORT[dt.weekday()]
+    return f"{wd} {dt.day:02d}.{dt.month:02d}. {dt.hour:02d}:{dt.minute:02d}"
+
+
+def duration_seconds_de(seconds: float) -> str:
+    sec = int(round(seconds))
+    if sec < 60:
+        return f"{sec} Sek."
+    minutes = sec // 60
+    if minutes < 60:
+        return f"{minutes} Min."
+    hours, rem = divmod(minutes, 60)
+    if rem:
+        return f"{hours} Std. {rem} Min."
+    return f"{hours} Std."

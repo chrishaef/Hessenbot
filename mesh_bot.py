@@ -592,6 +592,24 @@ def handle_sun(message_from_id, deviceID, channel_number, vox=False):
     location = get_node_location(message_from_id, deviceID, channel_number)
     return get_sun(str(location[0]), str(location[1]))
 
+def handle_satpass(message_from_id, deviceID, message):
+    if "?" in message:
+        return (
+            "satpass [NORAD] — nächster sichtbarer Überflug (n2yo). "
+            "Ohne Nummer: erster Eintrag aus satList in config.ini. "
+            "Beispiel ISS: satpass 25544"
+        )
+    norad = None
+    for part in message.replace("!", " ").split():
+        if part.isdigit():
+            norad = part
+            break
+    if norad is None:
+        sat_list = getattr(my_settings, "satListConfig", ["25544"])
+        norad = (sat_list[0] if sat_list else "25544").strip()
+    location = get_node_location(message_from_id, deviceID)
+    return getNextSatellitePass(norad, location[0], location[1])
+
 def sysinfo(message, message_from_id, deviceID, isDM):
     if "?" in message:
         return "sysinfo — System- und Telemetrie-Infos von Hessenbot."
