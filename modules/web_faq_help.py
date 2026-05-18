@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""FAQ / Hilfe für das öffentliche Web-Portal."""
+"""FAQ / Hilfe für Mesh-Nutzer (öffentliches Web-Portal)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape as html_escape
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 
 @dataclass(frozen=True)
@@ -28,45 +28,35 @@ def _sections() -> List[FaqSection]:
             "Keine Antwort vom Bot",
             "bi-chat-dots",
             (
-                "Der Bot kann einen Befehl verarbeiten und im Log „Sending DM“ anzeigen — "
-                "trotzdem siehst du in der App nichts. Das ist meist kein Absturz, "
-                "sondern Zustellung oder Entschlüsselung auf deinem Gerät."
+                "Du hast einen Befehl gesendet, aber in der Meshtastic-App kommt nichts an? "
+                "Oft liegt es an Direktnachrichten (DM), Verschlüsselung oder am Rückweg im Mesh — "
+                "nicht daran, dass der Bot „offline“ wäre."
             ),
             (
                 FaqEntry(
-                    "DM kommt nicht an, obwohl der Bot antwortet (auch nur 1 Hop entfernt)",
+                    "Keine Antwort, obwohl andere den Bot erreichen",
                     (
-                        "Sehr häufig: <strong>veralteter Kontakt / fehlender DM-Schlüssel (PKI)</strong> "
-                        "ab Firmware 2.6+. Lösung: Bot in der Kontaktliste <strong>löschen</strong> und "
-                        "<strong>neu hinzufügen</strong> (NodeInfo und öffentlicher Schlüssel werden neu "
-                        "ausgetauscht). Alternativ: Bot als <strong>Favorit</strong> setzen, kurz warten, "
-                        "dann erneut eine DM senden. Auf dem Bot-Server: betroffene Dezimal-Node-ID in "
-                        "<code>favoriteNodeList</code> eintragen und <code>script/addFav.py</code> ausführen."
+                        "Sehr häufig ab Firmware 2.6+: <strong>veralteter Kontakt oder DM-Schlüssel (PKI)</strong>. "
+                        "Lösung auf <strong>deinem Gerät</strong>: Bot in der Kontaktliste "
+                        "<strong>löschen</strong> und <strong>neu hinzufügen</strong>, oder den Bot als "
+                        "<strong>Favorit</strong> setzen, kurz warten, dann erneut eine DM senden "
+                        "(z. B. <code>!ping</code>)."
                     ),
                 ),
                 FaqEntry(
-                    "Antwort nur im Kanal erwartet, aber nichts sichtbar",
+                    "Befehl im Kanal gesendet — im Kanal keine Antwort",
                     (
-                        "Viele Bots (auch Hessenbot) antworten standardmäßig per <strong>Direktnachricht (DM)</strong>, "
-                        "wenn der Befehl im <strong>Kanal</strong> gesendet wurde "
-                        "(<code>respond_by_dm_only = True</code>). "
-                        "Lösung: In der App das <strong>DM-Postfach</strong> zum Bot-Knoten öffnen, nicht nur den Kanal."
+                        "Viele Bots antworten auf Kanal-Befehle mit einer <strong>Direktnachricht (DM)</strong>. "
+                        "Öffne in der App das <strong>DM-Postfach</strong> zum Bot-Knoten, nicht nur den Kanal."
                     ),
                 ),
                 FaqEntry(
-                    "Nur entfernte Stationen betroffen, nah am Gateway geht es",
+                    "Weit entfernt vom Bot — nah dagegen klappt es",
                     (
-                        "Im Bot-Log beim Empfang prüfen: <strong>MQTT</strong> vs. <strong>Direct</strong> / Hop-Anzahl. "
-                        "Kommt der Befehl per MQTT an, muss der Rückweg zum Bot-Knoten für dich existieren. "
-                        "Ein PKI-Problem (siehe oben) kann unabhängig von der Entfernung auftreten."
-                    ),
-                ),
-                FaqEntry(
-                    "Im Log: „PKI Routing Error“ oder „PKI_UNKNOWN_PUBKEY“",
-                    (
-                        "Schlüsselaustausch in beide Richtungen anstoßen (Kontakt neu, Favorit, kurze DM). "
-                        "Firmware von Bot und Client möglichst aktuell halten. "
-                        "Details stehen in <code>meshbot.log</code> mit Hinweistext."
+                        "Dein Befehl muss den Bot erreichen <strong>und</strong> die Antwort muss zu dir zurück. "
+                        "Über ein Internet-Gateway (MQTT) kann der Hinweg klappen, der Rückweg über Funk aber nicht. "
+                        "Kurz testen, ob du den Bot per DM von einer näheren Position erreichst. "
+                        "Zusätzlich PKI-Kontakt erneuern (siehe oben)."
                     ),
                 ),
             ),
@@ -79,29 +69,29 @@ def _sections() -> List[FaqSection]:
                 FaqEntry(
                     "Bot reagiert gar nicht",
                     (
-                        "Befehl oft mit <strong>!</strong> beginnen (<code>!ping</code>, <code>!cmd</code>) — "
-                        "je nach <code>cmdBang</code>. Mit <code>explicitCmd</code> zählen nur Zeilen, "
-                        "die mit einem bekannten Befehl <strong>beginnen</strong>. "
-                        "Auf <a href=\"/befehle\">Befehle</a> prüfen, welche Module auf diesem Bot aktiv sind."
+                        "Befehle beginnen meist mit <strong>!</strong>, z. B. <code>!ping</code> oder <code>!cmd</code>. "
+                        "Nur die Zeile senden, die mit dem Befehl beginnt — kein Text davor. "
+                        "Welche Befehle dieser Bot unterstützt, steht unter "
+                        '<a href="/befehle">Befehle</a> und mit <code>!cmd</code> im Mesh.'
                     ),
                 ),
                 FaqEntry(
-                    "„Bitte etwas langsamer“ / Rate-Limit",
-                    "Zu viele Befehle in kurzer Zeit. Kurz warten und erneut senden.",
+                    "„Bitte etwas langsamer“",
+                    "Du hast zu viele Befehle in kurzer Zeit gesendet. Einige Sekunden warten und erneut versuchen.",
                 ),
                 FaqEntry(
-                    "Befehl im Standardkanal (z. B. LongFast) wird ignoriert",
+                    "Im öffentlichen Standardkanal (z. B. LongFast) keine Reaktion",
                     (
-                        "Der Bot kann den <strong>öffentlichen Standardkanal</strong> ignorieren "
-                        "(<code>ignoreDefaultChannel</code>). "
-                        "Lösung: Befehl im regionalen Kanal senden oder per <strong>DM</strong> an den Bot."
+                        "Dieser Bot hört möglicherweise <strong>nicht</strong> auf den öffentlichen Standardkanal. "
+                        "Befehl im <strong>regionalen Kanal</strong> eures Netzes senden oder als "
+                        "<strong>DM</strong> direkt an den Bot."
                     ),
                 ),
                 FaqEntry(
-                    "Nach Änderung an config.ini passiert nichts Neues",
+                    "Hilfe zu einem Befehl",
                     (
-                        "Viele Einstellungen erst nach <strong>Neustart des Bots</strong> aktiv "
-                        "(systemd/Docker). Bei Unsicherheit Bot neu starten."
+                        "Viele Befehle erklären sich mit <strong>?</strong> am Ende, "
+                        "z. B. <code>!metar?</code> oder <code>!cmd?</code>."
                     ),
                 ),
             ),
@@ -112,19 +102,18 @@ def _sections() -> List[FaqSection]:
             "",
             (
                 FaqEntry(
-                    "!wx, !metar, !whereami liefern „kein GPS“ o. Ä.",
+                    "!wx, !metar, !whereami: kein Standort / kein GPS",
                     (
-                        "Der Bot nutzt die <strong>letzte Position aus der NodeDB</strong> deiner Node — "
-                        "ohne GPS oder ohne empfangenes Positions-Paket keine Koordinaten. "
-                        "GPS aktivieren und kurz warten, bis Position im Mesh ankam."
+                        "Der Bot nutzt die <strong>letzte bekannte Position deiner Node</strong> im Mesh. "
+                        "GPS am Gerät aktivieren, Position freigeben und kurz warten, bis deine Node "
+                        "im Netz sichtbar ist — danach Befehl erneut senden."
                     ),
                 ),
                 FaqEntry(
-                    "Doppelte oder unerwartete Antworten",
+                    "!metar mit Flughafen-Kürzel",
                     (
-                        "Bei MQTT- und UDP-Gateway gleichzeitig kann dasselbe Paket doppelt ankommen — "
-                        "der Bot filtert Duplikate (<code>packetDedupEnabled</code>). "
-                        "Bot-Version aktuell halten."
+                        "Mit ICAO-Code, z. B. <code>!metar EDDF</code>. "
+                        "Ohne Argument: METAR des nächsten Flugplatzes zu deiner Position."
                     ),
                 ),
             ),
@@ -135,39 +124,41 @@ def _sections() -> List[FaqSection]:
             "",
             (
                 FaqEntry(
-                    "BBS-DM (bbspost @…) kommt nicht an",
+                    "Private BBS-Nachricht (bbspost @…) kommt nicht an",
                     (
-                        "BBS-DMs sind <strong>Store-and-Forward</strong>: Zustellung, wenn deine Node wieder "
-                        "im Mesh sendet. <code>!bbsinfo</code> prüfen. Gleiche PKI-Regeln wie bei DMs — "
-                        "Kontakt zum Bot ggf. neu anlegen."
+                        "BBS-Direktnachrichten werden <strong>zugestellt, wenn deine Node wieder im Mesh aktiv ist</strong> "
+                        "(Store-and-Forward). Mit <code>!bbsinfo</code> siehst du wartende Mails. "
+                        "Kommt nichts an: Bot-Kontakt auf deinem Gerät neu anlegen (wie bei normalen DMs)."
                     ),
                 ),
                 FaqEntry(
-                    "Öffentlicher BBS-Beitrag fehlt auf anderem Bot",
+                    "Öffentlicher BBS-Beitrag nur auf einem Bot sichtbar",
                     (
-                        "<code>bbslink</code> muss auf beiden Seiten erlaubt sein (Whitelist). "
-                        "Ohne Link-Sync nur lokale Beiträge sichtbar."
+                        "Öffentliche Beiträge liegen auf dem jeweiligen Bot. "
+                        "Andere Bots zeigen sie nur, wenn euer Netz einen <strong>BBS-Link</strong> zwischen den Bots nutzt — "
+                        "das richtet der Betreiber ein. Sonst nur lokal auf dem Bot, an den du geschickt hast."
                     ),
                 ),
             ),
         ),
         FaqSection(
-            "Web-Portal",
-            "bi-globe",
+            "Statistik auf dieser Webseite",
+            "bi-bar-chart-line",
             "",
             (
                 FaqEntry(
-                    "Statistik / NodeDB wirkt leer",
+                    "Meine Node erscheint nicht oder selten",
                     (
-                        "Das Dashboard zeigt Daten, die <strong>dieser Bot-Knoten</strong> gehört hat. "
-                        "Weit entfernte Nodes ohne Kontakt erscheinen ggf. nicht."
+                        "Die Statistik zeigt Knoten und Daten, die <strong>dieser Bot</strong> im Funknetz "
+                        "gehört oder empfangen hat. Weit weg oder selten aktiv — dann fehlst du vielleicht in der Liste. "
+                        "Das ist normal und kein Fehler deines Geräts."
                     ),
                 ),
                 FaqEntry(
-                    "Admin-Login funktioniert nicht",
+                    "Was bedeuten die Karten und Listen?",
                     (
-                        "Zugangsdaten in <code>config.ini</code> unter <code>[webAdmin]</code>. "
-                        "Nach Passwortänderung Web-Dienst neu starten."
+                        "Übersicht über empfangene Nachrichten, Aktivität und bekannte Knoten aus Sicht des Bots — "
+                        "kein Ersatz für die Meshtastic-App auf dem Handy oder Gerät."
                     ),
                 ),
             ),
@@ -185,23 +176,21 @@ def _render_entry(entry: FaqEntry) -> str:
 </div>"""
 
 
-def render_faq_page_body(pki_result: Optional[dict] = None) -> str:
+def render_faq_page_body() -> str:
     """HTML body (inside portal wrapper) for /faq."""
-    from modules.web_faq_pki_check import render_pki_checker_html
-
     intro = """
 <div class="cmd-help-intro portal-card p-4 mb-4">
   <h1 class="h3 section-title mb-3">
     <i class="bi bi-life-preserver text-success me-2"></i>FAQ / Hilfe
   </h1>
   <p class="text-muted mb-0">
-    Häufige Fragen im Umgang mit dem Hessenbot (Meshhessen).
-    Für alle Befehle siehe <a href="/befehle">Befehle</a>.
+    Tipps für Nutzer im Meshhessen-Netz — Befehle im Funknetz, DMs und typische Stolpersteine.
+    Alle Befehle: <a href="/befehle">Befehle</a>.
   </p>
 </div>"""
+
     parts: List[str] = [
         intro,
-        render_pki_checker_html(pki_result),
         '<div class="accordion cmd-help-accordion" id="faqHelpAccordion">',
     ]
     for sec_idx, section in enumerate(_sections()):
