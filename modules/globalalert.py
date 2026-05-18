@@ -25,6 +25,36 @@ NINA_API_BASE = "https://warnung.bund.de/api31"
 GEMEINDEN_JSON_URL = "https://warnung.bund.de/assets/json/converted_gemeinden.json"
 
 _gemeinden_points = None  # type: Optional[list]
+_warning_detail_cache: dict = {}  # warning_id -> areaDesc string
+
+
+def _fetch_warning_area(item: dict) -> str:
+    """Return areaDesc from NINA warning detail endpoint (cached per warning ID)."""
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    warning_id = str(payload.get("id") or item.get("id") or "").strip()
+    if not warning_id:
+        return ""
+    if warning_id in _warning_detail_cache:
+        return _warning_detail_cache[warning_id]
+    try:
+        url = f"{NINA_API_BASE}/warnings/{warning_id}.json"
+        resp = requests.get(url, timeout=urlTimeoutSeconds)
+        resp.raise_for_status()
+        detail = resp.json()
+        area_desc = ""
+        info = detail.get("info") or []
+        if isinstance(info, list) and info:
+            areas = info[0].get("area") or []
+            if isinstance(areas, list) and areas:
+                area_desc = areas[0].get("areaDesc", "")
+        if len(area_desc) > 60:
+            area_desc = area_desc[:59] + "…"
+        _warning_detail_cache[warning_id] = area_desc
+        return area_desc
+    except Exception as exc:
+        logger.debug(f"NINA detail fetch failed for {warning_id}: {exc}")
+        _warning_detail_cache[warning_id] = ""
+        return ""
 
 
 def normalize_nina_ars(regional_key: str) -> str:
@@ -245,7 +275,10 @@ def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5) -> lis
     for item in items[:max_alerts]:
         provider = _alert_provider(item)
         title = _short_alert_title(_alert_title(item))
+        area = _fetch_warning_area(item)
         line = f"🚨 {provider}: {title}"
+        if area:
+            line += f"\n📍 {area}"
         messages.extend(_split_mesh_chunks(line))
 
     if len(items) > max_alerts:
@@ -258,6 +291,7 @@ def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5) -> lis
 def get_nina_alerts():
     alerts = []
     seen_ars: set[str] = set()
+    seen_ids: set[str] = set()  # deduplicate across ARS regions by warning ID
     try:
         for regional_key in myRegionalKeysDE:
             raw = (regional_key or "").strip()
@@ -273,18 +307,27 @@ def get_nina_alerts():
                 response.raise_for_status()
                 data = response.json()
             except requests.RequestException as exc:
-                logger.warning(
-                    f"NINA DE alerts for {raw} (ARS {ars}): {exc}"
-                )
+                logger.warning(f"NINA DE alerts for {raw} (ARS {ars}): {exc}")
                 continue
             if not isinstance(data, list):
-                logger.warning(
-                    f"NINA DE alerts for {raw}: unexpected response type {type(data).__name__}"
-                )
+                logger.warning(f"NINA DE alerts for {raw}: unexpected response type {type(data).__name__}")
                 continue
-            block = format_nina_dashboard_alerts(data, max_alerts=10)
-            if block != NO_ALERTS:
-                alerts.append(block)
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+                warning_id = str(payload.get("id") or item.get("id") or "")
+                if warning_id and warning_id in seen_ids:
+                    continue
+                if warning_id:
+                    seen_ids.add(warning_id)
+                provider = _alert_provider(item)
+                title = _alert_title(item)
+                area = _fetch_warning_area(item)
+                line = f"🚨 {provider}: {title}"
+                if area:
+                    line += f"\n📍 {area}"
+                alerts.append(line)
         return "\n".join(alerts) if alerts else NO_ALERTS
     except Exception as e:
         logger.warning("Error getting NINA DE alerts: " + str(e))
