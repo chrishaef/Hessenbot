@@ -344,9 +344,19 @@ def onReceive(packet, interface):
             via_mqtt = packet['decoded'].get('viaMqtt', False)
             transport_mechanism = packet['decoded'].get('transport_mechanism', 'unknown')
 
-            # check if the packet is from us
-            if message_from_id in [myNodeNum1, myNodeNum2, myNodeNum3, myNodeNum4, myNodeNum5, myNodeNum6, myNodeNum7, myNodeNum8, myNodeNum9]:
-                logger.warning(f"System: Packet from self {message_from_id} loop or traffic replay detected")
+            # check if the packet is from us (ignore echo of our own replies)
+            _my_nodes = [
+                n for n in (
+                    myNodeNum1, myNodeNum2, myNodeNum3, myNodeNum4,
+                    myNodeNum5, myNodeNum6, myNodeNum7, myNodeNum8, myNodeNum9,
+                )
+                if n
+            ]
+            if message_from_id in _my_nodes:
+                logger.warning(
+                    f"System: Packet from self {message_from_id} loop or traffic replay detected"
+                )
+                return
 
             # get the signal strength and snr if available
             if packet.get('rxSnr') or packet.get('rxRssi'):
