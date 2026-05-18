@@ -467,7 +467,7 @@ def handle_warning(message_from_id, deviceID, channel_number, isDM):
     if not my_settings.enableDEalerts:
         return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
     lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-    parts = build_warning_messages(lat, lon, from_gps)
+    parts = build_warning_messages(lat, lon, from_gps, include_detail=isDM or my_settings.useDMForResponse)
     if not parts:
         return WARNING_NONE_MSG
     dest = message_from_id if my_settings.useDMForResponse or isDM else 0

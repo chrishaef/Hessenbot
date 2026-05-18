@@ -25,36 +25,61 @@ NINA_API_BASE = "https://warnung.bund.de/api31"
 GEMEINDEN_JSON_URL = "https://warnung.bund.de/assets/json/converted_gemeinden.json"
 
 _gemeinden_points = None  # type: Optional[list]
-_warning_detail_cache: dict = {}  # warning_id -> areaDesc string
+# warning_id -> {"area": str, "description": str}
+_warning_detail_cache: dict = {}
 
 
-def _fetch_warning_area(item: dict) -> str:
-    """Return areaDesc from NINA warning detail endpoint (cached per warning ID)."""
+def _warning_id_from_item(item: dict) -> str:
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-    warning_id = str(payload.get("id") or item.get("id") or "").strip()
-    if not warning_id:
-        return ""
+    return str(payload.get("id") or item.get("id") or "").strip()
+
+
+def _load_warning_detail(warning_id: str) -> dict:
+    """Fetch and cache NINA warning detail. Returns dict with 'area' and 'description'."""
     if warning_id in _warning_detail_cache:
         return _warning_detail_cache[warning_id]
+    result = {"area": "", "description": ""}
     try:
         url = f"{NINA_API_BASE}/warnings/{warning_id}.json"
         resp = requests.get(url, timeout=urlTimeoutSeconds)
         resp.raise_for_status()
         detail = resp.json()
-        area_desc = ""
         info = detail.get("info") or []
         if isinstance(info, list) and info:
-            areas = info[0].get("area") or []
+            info0 = info[0]
+            areas = info0.get("area") or []
             if isinstance(areas, list) and areas:
-                area_desc = areas[0].get("areaDesc", "")
-        if len(area_desc) > 60:
-            area_desc = area_desc[:59] + "…"
-        _warning_detail_cache[warning_id] = area_desc
-        return area_desc
+                result["area"] = areas[0].get("areaDesc", "")
+            desc = (info0.get("description") or "").strip()
+            instr = (info0.get("instruction") or "").strip()
+            # Combine description + instruction, separated if both present
+            if desc and instr:
+                result["description"] = f"{desc}\nℹ️ {instr}"
+            else:
+                result["description"] = desc or instr
     except Exception as exc:
         logger.debug(f"NINA detail fetch failed for {warning_id}: {exc}")
-        _warning_detail_cache[warning_id] = ""
+    _warning_detail_cache[warning_id] = result
+    return result
+
+
+def _fetch_warning_area(item: dict) -> str:
+    """Return short areaDesc (max 60 chars) for display in alert lines."""
+    warning_id = _warning_id_from_item(item)
+    if not warning_id:
         return ""
+    area = _load_warning_detail(warning_id).get("area", "")
+    if len(area) > 60:
+        area = area[:59] + "…"
+    return area
+
+
+def _fetch_warning_description(item: dict) -> str:
+    """Return full description text for DM detail responses."""
+    warning_id = _warning_id_from_item(item)
+    if not warning_id:
+        return ""
+    return _load_warning_detail(warning_id).get("description", "")
 
 
 def normalize_nina_ars(regional_key: str) -> str:
@@ -257,10 +282,10 @@ def _fetch_warning_items(lat, lon) -> list[dict]:
     return [item for item in data if isinstance(item, dict)]
 
 
-def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5) -> list[str]:
+def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5, include_detail: bool = False) -> list[str]:
     """
-    Mesh-sized reply parts for !warning: location line, then none-msg or alert lines.
-    Each part is at most MESSAGE_CHUNK_SIZE characters.
+    Mesh-sized reply parts for !warning.
+    include_detail=True adds the full description text (for DM responses).
     """
     header = _warning_location_line(lat, lon, from_gps)
     items = _fetch_warning_items(lat, lon)
@@ -280,6 +305,10 @@ def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5) -> lis
         if area:
             line += f"\n📍 {area}"
         messages.extend(_split_mesh_chunks(line))
+        if include_detail:
+            desc = _fetch_warning_description(item)
+            if desc:
+                messages.extend(_split_mesh_chunks(desc))
 
     if len(items) > max_alerts:
         more = f"+{len(items) - max_alerts} weitere"
