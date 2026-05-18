@@ -453,8 +453,10 @@ responseDelay = 2.2
 splitDelay = 2.5
 # message chunk size in charcters, chunkr allows exceeding by 3 characters
 MESSAGE_CHUNK_SIZE = 160
-# Request Acknowledgement of message OTA
+# Request Acknowledgement of message OTA (all channel chunks when True)
 wantAck = False
+# DM replies: request delivery ACK on first chunk only (PKI / routing errors in log)
+wantAckOnDm = True
 # Max limit buffer for radio testing in bytes
 maxBuffer = 200
 #Enable Extra logging of Hop count data

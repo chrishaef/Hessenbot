@@ -49,6 +49,15 @@ class TestBot(unittest.TestCase):
     def test_example(self):
         self.assertEqual(1 + 1, 2)
 
+    def test_dm_chunk_wants_delivery_ack(self):
+        from modules.system import dm_chunk_wants_delivery_ack
+
+        self.assertFalse(dm_chunk_wants_delivery_ack(0, 0, want_ack_all=False))
+        self.assertTrue(dm_chunk_wants_delivery_ack(0, 1, want_ack_all=True))
+        self.assertTrue(dm_chunk_wants_delivery_ack(12345, 0, want_ack_on_dm=True))
+        self.assertFalse(dm_chunk_wants_delivery_ack(12345, 1, want_ack_on_dm=True))
+        self.assertFalse(dm_chunk_wants_delivery_ack(12345, 0, want_ack_on_dm=False))
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 
@@ -83,6 +92,24 @@ class TestBot(unittest.TestCase):
             r = scan_pki_log_for_node("424242", td)
             self.assertTrue(r["ok"])
             self.assertEqual(r["summary"], "problems_found")
+
+    def test_faq_pki_log_scan_dm_delivery(self):
+        import os
+        import tempfile
+
+        from modules.web_faq_pki_check import scan_pki_log_for_node
+
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    "2025-01-01 | WARNING | System: DM delivery failed (PKI) Device:1 "
+                    "To:!0192a3b4 Node:424242 Reason:PKI_UNKNOWN_PUBKEY RequestId:99\n"
+                )
+            r = scan_pki_log_for_node("424242", td)
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["summary"], "problems_found")
+            self.assertTrue(any("DM delivery" in h["reason"] for h in r["hits"]))
 
     def test_load_bbsdb(self):
         from modules.bbstools import load_bbsdb
