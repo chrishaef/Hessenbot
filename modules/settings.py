@@ -250,6 +250,9 @@ if interface2_enabled or interface3_enabled or interface4_enabled or interface5_
 # variables from the config.ini file
 try:
     # general
+    packet_dedup_enabled = config['general'].getboolean('packetDedupEnabled', True)
+    packet_dedup_ttl_seconds = config['general'].getint('packetDedupTtlSeconds', 300)
+    packet_dedup_max_entries = config['general'].getint('packetDedupMaxEntries', 8192)
     useDMForResponse = config['general'].getboolean('respond_by_dm_only', True)
     publicChannel = config['general'].getint('defaultChannel', 0) # the meshtastic public channel
     ignoreChannels = config['general'].get('ignoreChannels', '').split(',') # ignore these channels

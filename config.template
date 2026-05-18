@@ -24,6 +24,12 @@ port = /dev/ttyUSB0
 # example, the third interface would be [interface3] up to 9
 
 [general]
+# Drop duplicate packets when the same mesh frame arrives twice (e.g. meshtasticd MQTT + UDP gateway)
+packetDedupEnabled = True
+# How long to remember packet IDs / payloads (seconds)
+packetDedupTtlSeconds = 300
+# Max entries in the dedup cache (oldest expire first)
+packetDedupMaxEntries = 8192
 # if False will respond on all channels but the default channel
 respond_by_dm_only = True
 # Allows auto-ping feature in a channel, False forces to 1 ping only

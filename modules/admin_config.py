@@ -63,6 +63,9 @@ FIELD_LABELS = {
     ("location", "alertDuration"): "Abfrage-Intervall (Minuten)",
     ("location", "metar_enabled"): "METAR !metar (nächster Flugplatz)",
     ("location", "UseMeteoWxAPI"): "Wetter !wx (Open-Meteo statt NOAA)",
+    ("general", "packetDedupEnabled"): "Doppelte Pakete verwerfen (MQTT+UDP)",
+    ("general", "packetDedupTtlSeconds"): "Dedup-Speicher (Sekunden)",
+    ("general", "packetDedupMaxEntries"): "Dedup-Cache Größe",
     ("general", "respond_by_dm_only"): "Antworten nur per DM",
     ("general", "spaceWeather"): "Weltraumwetter (sun, satpass, …)",
 }

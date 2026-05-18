@@ -226,6 +226,16 @@ def onReceive(packet, interface):
     # Priocess the incoming packet, handles the responses to the packet with auto_response()
     # Sends the packet to the correct handler for processing
 
+    if not isinstance(packet, dict):
+        return
+
+    from modules.mesh_sim_tunnel import unwrap_sim_tunnel_packet
+    from modules.packet_dedup import should_drop_duplicate_packet
+
+    unwrap_sim_tunnel_packet(packet)
+    if should_drop_duplicate_packet(packet):
+        return
+
     # extract interface details from inbound packet
     rxType = type(interface).__name__
 
