@@ -131,7 +131,8 @@ def _sections() -> List[CommandSection]:
                 ),
                 CommandEntry(
                     f"{p}metar",
-                    "METAR des nächsten Flugplatzes zu deinem Standort (aviationweather.gov).",
+                    "METAR: ohne Argument = nächster Flugplatz; mit ICAO z.B. !metar EDDF; !metar? erklärt den METAR-Aufbau.",
+                    f"{p}metar EDDF",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "metar_enabled", True),
                 ),

@@ -198,6 +198,31 @@ class TestBot(unittest.TestCase):
         self.assertIsInstance(result, str)
         self.assertIn("METAR", result)
 
+    def test_parse_metar_icao(self):
+        from modules.metar import parse_metar_icao_from_message, normalize_icao
+
+        self.assertEqual(normalize_icao("eddf"), "EDDF")
+        self.assertIsNone(normalize_icao("ED"))
+        self.assertEqual(parse_metar_icao_from_message("!metar EDDF"), "EDDF")
+        self.assertEqual(parse_metar_icao_from_message("metar ethf"), "ETHF")
+        self.assertIsNone(parse_metar_icao_from_message("!metar"))
+
+    def test_metar_decode_help(self):
+        from modules.metar import get_metar_decode_help
+
+        text = get_metar_decode_help()
+        self.assertIn("CAVOK", text)
+        self.assertIn("Q1016", text)
+        self.assertIn("!metar EDDF", text)
+
+    @_skip_unless_checkall()
+    def test_get_metar_by_icao(self):
+        from modules.metar import get_metar_by_icao
+        result = get_metar_by_icao("EDDF")
+        self.assertIsInstance(result, str)
+        self.assertIn("METAR", result)
+        self.assertIn("EDDF", result)
+
     @_skip_unless_checkall()
     def test_get_flood_openmeteo(self):
         from modules.wx_meteo import get_flood_openmeteo
