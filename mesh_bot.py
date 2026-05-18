@@ -164,6 +164,9 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "whois": lambda: handle_whois(message, deviceID, channel_number, message_from_id),
     "wiki": lambda: handle_wiki(message, isDM),
     "wx": lambda: handle_wxc(message_from_id, deviceID),
+    "uv": lambda: handle_wx_extra(message_from_id, deviceID, "uv"),
+    "regen": lambda: handle_wx_extra(message_from_id, deviceID, "regen"),
+    "blitz": lambda: handle_wx_extra(message_from_id, deviceID, "blitz"),
     "metar": lambda: handle_metar(message_from_id, deviceID, message),
     "x:": lambda: handleShellCmd(message, message_from_id, channel_number, isDM, deviceID),
     "📍": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
@@ -469,6 +472,26 @@ def handle_wxc(message_from_id, deviceID, days=None, vox=False):
         return report
     header = format_wx_info_header(location[0], location[1])
     return f"{header}\n{report}"
+
+
+def handle_wx_extra(message_from_id, deviceID, cmd: str):
+    if not my_settings.location_enabled:
+        return "Standortmodul aus ([location] enabled = False)."
+    if not getattr(my_settings, "use_meteo_wxApi", False):
+        return "Open-Meteo (!wx) ist in der Konfiguration deaktiviert."
+    if not getattr(my_settings, "wx_extra_commands", True):
+        return f"🤖 !{cmd} ist in der Konfiguration deaktiviert (wxExtraCommands)."
+    from modules.wx_extra import get_blitz, get_regen, get_uv
+
+    location = get_node_location(message_from_id, deviceID)
+    lat, lon = str(location[0]), str(location[1])
+    if cmd == "uv":
+        return get_uv(lat, lon)
+    if cmd == "regen":
+        return get_regen(lat, lon)
+    if cmd == "blitz":
+        return get_blitz(lat, lon)
+    return "Unbekannter Wetter-Befehl."
 
 
 def handle_metar(message_from_id, deviceID, message=""):

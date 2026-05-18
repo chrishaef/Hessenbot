@@ -241,6 +241,14 @@ satList = 25544,7530
 UseMeteoWxAPI = True
 # METAR of nearest airport for !metar (aviationweather.gov; needs GPS or config lat/lon)
 metar_enabled = True
+# Short Open-Meteo commands: !uv, !regen, !blitz (needs GPS or config lat/lon)
+wxExtraCommands = True
+# Live lightning for !blitz: DMI (EU, no key); optional Blitzortung.org account (better coverage)
+blitzLiveData = True
+blitzRadiusKm = 150
+# Optional: free Blitzortung.org data login (https://www.blitzortung.org) — leave empty for DMI only
+blitzortungUser =
+blitzortungPassword =
 
 # Use Germany/DE Alert Broadcast Data (NINA/Katwarn/DWD via warnung.bund.de)
 enableDEalerts = True

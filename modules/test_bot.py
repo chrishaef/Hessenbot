@@ -207,6 +207,21 @@ class TestBot(unittest.TestCase):
         self.assertEqual(parse_metar_icao_from_message("metar ethf"), "ETHF")
         self.assertIsNone(parse_metar_icao_from_message("!metar"))
 
+    def test_uv_risk_de(self):
+        from modules.wx_extra import _uv_risk_de
+
+        self.assertEqual(_uv_risk_de(2), "niedrig")
+        self.assertEqual(_uv_risk_de(7), "hoch")
+
+    @_skip_unless_checkall()
+    def test_get_uv_regen_blitz(self):
+        from modules.wx_extra import get_blitz, get_regen, get_uv
+
+        for fn, tag in ((get_uv, "UV"), (get_regen, "REGEN"), (get_blitz, "BLITZ")):
+            result = fn(lat, lon)
+            self.assertIsInstance(result, str)
+            self.assertIn(tag, result)
+
     def test_metar_decode_help(self):
         from modules.metar import get_metar_decode_help
 

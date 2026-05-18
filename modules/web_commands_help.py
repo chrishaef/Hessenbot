@@ -137,6 +137,27 @@ def _sections() -> List[CommandSection]:
                     and getattr(st, "metar_enabled", True),
                 ),
                 CommandEntry(
+                    f"{p}uv",
+                    "UV-Index heute und morgen für deinen Standort (Open-Meteo).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "use_meteo_wxApi", True)
+                    and getattr(st, "wx_extra_commands", True),
+                ),
+                CommandEntry(
+                    f"{p}regen",
+                    "Stündlicher Regen für die nächsten Stunden (Open-Meteo).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "use_meteo_wxApi", True)
+                    and getattr(st, "wx_extra_commands", True),
+                ),
+                CommandEntry(
+                    f"{p}blitz",
+                    "Live-Blitze im Umkreis (DMI EU; optional Blitzortung.org) plus kurze Gewitter-Vorhersage.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "use_meteo_wxApi", True)
+                    and getattr(st, "wx_extra_commands", True),
+                ),
+                CommandEntry(
                     f"{p}warning",
                     "Aktive Warnungen für den Kreis deiner GPS-Position.",
                     enabled=lambda: getattr(st, "enableDEalerts", False),
