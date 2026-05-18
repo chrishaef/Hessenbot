@@ -359,6 +359,7 @@ try:
     volcanoAlertBroadcastEnabled = config['location'].getboolean('volcanoAlertBroadcastEnabled', False) # default False
     enableGBalerts = config['location'].getboolean('enableGBalerts', False) # default False
     enableDEalerts = config['location'].getboolean('enableDEalerts', False) # default False
+    deAlertAutoBroadcast = config['location'].getboolean('deAlertAutoBroadcast', False)
 
     ignoreEASenable = config['location'].getboolean('ignoreEASenable', False) # default False
     ignoreEASwords = config['location'].get('ignoreEASwords', 'test,advisory').split(',') # default test,advisory

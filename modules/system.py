@@ -1472,7 +1472,7 @@ def handleAlertBroadcast(deviceID=1):
                 if should_send_alert("overdue", overdueAlerts, min_interval=300): # 5 minutes interval for overdue alerts
                     send_message(overdueAlerts, emergency_responder_alert_channel, 0, emergency_responder_alert_interface)
 
-        if not enableDEalerts:
+        if not enableDEalerts or not deAlertAutoBroadcast:
             return False
 
         # Only allow API call every alert_duration minutes at xx:00, xx:20, xx:40
@@ -3070,7 +3070,7 @@ async def watchdog():
 
                 handleMultiPing(0, i)
 
-                if usAlerts or checklist_enabled or enableDEalerts:
+                if usAlerts or checklist_enabled or (enableDEalerts and deAlertAutoBroadcast):
                     handleAlertBroadcast(i)
 
                 intData = displayNodeTelemetry(0, i)

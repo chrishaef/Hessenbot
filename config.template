@@ -236,6 +236,8 @@ UseMeteoWxAPI = True
 
 # Use Germany/DE Alert Broadcast Data (NINA/Katwarn/DWD via warnung.bund.de)
 enableDEalerts = True
+# True = Bot sendet NINA/Katwarn/DWD periodisch in Kanäle; False = nur !warning / !dealert auf Anfrage
+deAlertAutoBroadcast = False
 # Comma-separated Amtlicher Regionalschlüssel (ARS) for NINA/Warnung Bund (dealert broadcast).
 # Mesh command !warning uses the requesting node's GPS to query NINA/Katwarn/DWD for that Kreis.
 # !loc shows a node's last GPS from the NodeDB (!loc, !loc <name>, !loc !hex).
@@ -244,7 +246,7 @@ enableDEalerts = True
 myRegionalKeysDE = 066310009009,066310008008,066110000000,064120000000 
 
 # Alerts are sent to the emergency_handler interface and channel duplicate messages are send here if set
-eAlertBroadcastCh = 1
+eAlertBroadcastCh = 
 
 # CheckList Checkin/Checkout
 [checklist]

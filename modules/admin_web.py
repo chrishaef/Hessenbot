@@ -317,7 +317,7 @@ def create_app(
             host_block
             + """
 <p class="text-muted small mb-0">
-  DM, News, Messages, NodeDB, MOTD, Scheduler, BBS, Banliste und Logs erreichst du über die Tabs oben.
+  DM, News, Messages, NodeDB, MOTD, Scheduler, BBS, Einstellungen, Banliste und Logs erreichst du über die Tabs oben.
 </p>
 <p class="text-center mt-4 mb-0">
   <a href="{{ url_for('index_dashboard') }}" class="btn btn-sm btn-link text-muted">
@@ -1567,6 +1567,37 @@ def create_app(
         ok, txt = bbs.bbs_delete_dm_at_index(idx)
         flash(txt, "success" if ok else "error")
         return redirect(url_for("bbs_dm_index"))
+
+    @app.route("/einstellungen", methods=["GET", "POST"])
+    @app.route("/settings", methods=["GET", "POST"])
+    @login_required
+    def settings_index():
+        from modules import admin_web_ops as ops
+        import modules.settings as st
+        from modules.admin_config import build_settings_form_html
+
+        if request.method == "POST":
+            try:
+                full_reload = ops.save_config_from_admin_form(request.form)
+                msg = "Einstellungen gespeichert und übernommen."
+                if not full_reload:
+                    msg += " Einige Werte (z. B. Radio-Interface) erst nach Bot-Neustart aktiv."
+                flash(msg, "success")
+            except OSError as e:
+                if getattr(e, "errno", None) == 13:
+                    flash(ops.runtime_file_permission_hint(st.config_file), "error")
+                else:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+            except Exception as e:
+                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+            return redirect(url_for("settings_index"))
+
+        st.config.read(st.config_file, encoding="utf-8")
+        return _render_admin_template(
+            build_settings_form_html(st.config),
+            title="Einstellungen",
+            active_tab="settings",
+        )
 
     @app.route("/umfragen")
     @login_required

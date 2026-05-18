@@ -500,6 +500,108 @@ def save_mesh_admin_list(node_ids: List[str]) -> List[str]:
     return cleaned
 
 
+_CONFIG_ATTR_ALIASES = {
+    "respond_by_dm_only": "useDMForResponse",
+    "filemon_enabled": "file_monitor_enabled",
+    "LogBackupCount": "log_backup_count",
+    "bee": "bee_enabled",
+}
+
+
+def _patch_settings_from_config(st) -> None:
+    """Alle bekannten settings-Attribute aus config.ini aktualisieren (ohne Modul-Reload)."""
+    st.config.read(st.config_file, encoding="utf-8")
+    for section in st.config.sections():
+        for key in st.config[section]:
+            attr = _CONFIG_ATTR_ALIASES.get(key, key)
+            if not hasattr(st, attr):
+                continue
+            cur = getattr(st, attr)
+            try:
+                if isinstance(cur, bool):
+                    setattr(st, attr, st.config[section].getboolean(key))
+                elif isinstance(cur, int) and not isinstance(cur, bool):
+                    setattr(st, attr, st.config[section].getint(key))
+                elif isinstance(cur, float):
+                    setattr(st, attr, st.config[section].getfloat(key))
+                elif isinstance(cur, list):
+                    setattr(
+                        st,
+                        attr,
+                        [x.strip() for x in st.config[section].get(key, "").split(",") if x.strip()],
+                    )
+                else:
+                    setattr(st, attr, st.config[section].get(key, ""))
+            except (ValueError, AttributeError):
+                continue
+
+
+def _sync_settings_to_system() -> None:
+    import modules.settings as st
+
+    try:
+        import modules.system as sm
+    except Exception:
+        return
+
+    skip = {
+        "config",
+        "config_file",
+        "WELCOME_MSG",
+        "EMERGENCY_RESPONSE",
+        "MOTD",
+        "NO_ALERTS",
+        "NO_DATA_NOGPS",
+        "ERROR_FETCHING_DATA",
+    }
+    for name, value in vars(st).items():
+        if name in skip or name.startswith("_"):
+            continue
+        if name in vars(sm):
+            setattr(sm, name, value)
+
+
+def reload_runtime_settings() -> bool:
+    """Nach Web-Admin-Config-Speichern: settings neu laden und an system spiegeln."""
+    import importlib
+
+    import modules.settings as st
+
+    st.config.read(st.config_file, encoding="utf-8")
+    full_reload = False
+    try:
+        importlib.reload(st)
+        full_reload = True
+    except Exception as e:
+        from modules.log import logger
+
+        logger.warning(
+            f"Web-Admin: Vollständiger Modul-Reload nicht möglich ({e!s}); "
+            "wende partielle Config-Aktualisierung an."
+        )
+        _patch_settings_from_config(st)
+
+    _sync_settings_to_system()
+
+    try:
+        rebuild_scheduler_jobs()
+    except Exception:
+        pass
+
+    return full_reload
+
+
+def save_config_from_admin_form(form) -> None:
+    """Alle cfg__* Formularfelder in config.ini schreiben und Runtime aktualisieren."""
+    import modules.settings as st
+    from modules.admin_config import apply_form_to_config
+
+    st.config.read(st.config_file, encoding="utf-8")
+    apply_form_to_config(st.config, form, config_file=st.config_file)
+    full = reload_runtime_settings()
+    return full
+
+
 def rebuild_scheduler_jobs() -> None:
     """Clear all schedule jobs and rebuild main scheduler plus MOTD/News broadcasts."""
     import schedule
