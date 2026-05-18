@@ -994,7 +994,47 @@ def messageChunker(message):
         return message
     except Exception as e:
         logger.warning(f"System: Exception during message chunking: {e} (message length: {len(message)})")
-        
+
+
+def dm_chunk_wants_delivery_ack(nodeid, chunk_index, want_ack_all=False, want_ack_on_dm=True):
+    """True if this outbound chunk should request a mesh ACK (DM: first chunk only)."""
+    if nodeid == 0:
+        return bool(want_ack_all)
+    return bool(want_ack_on_dm) and chunk_index == 0
+
+
+def _log_dm_delivery_result(packet, dest_node, device_id):
+    """Log mesh ACK/NAK for a DM we sent with wantAck (via Meshtastic onResponse)."""
+    decoded = packet.get('decoded') or {}
+    routing = decoded.get('routing') or {}
+    error_reason = routing.get('errorReason', routing.get('error_reason', ''))
+    request_id = decoded.get('requestId', decoded.get('request_id', packet.get('id')))
+    dest_name = get_name_from_number(dest_node, 'long', device_id)
+    if _significant_routing_error(error_reason):
+        pki_hint = PKI_ROUTING_ERROR_HINTS.get(error_reason, '')
+        if str(error_reason).startswith('PKI_'):
+            logger.warning(
+                f"System: DM delivery failed (PKI) Device:{device_id} To:{dest_name} Node:{dest_node} "
+                f"Reason:{error_reason} RequestId:{request_id} Guidance:{pki_hint}"
+            )
+        else:
+            logger.warning(
+                f"System: DM delivery failed Device:{device_id} To:{dest_name} Node:{dest_node} "
+                f"Reason:{error_reason} RequestId:{request_id}"
+            )
+    else:
+        logger.info(
+            f"System: DM delivery confirmed Device:{device_id} To:{dest_name} Node:{dest_node} "
+            f"RequestId:{request_id}"
+        )
+
+
+def _dm_delivery_ack_callback(dest_node, device_id):
+    def _on_dm_routing_response(packet):
+        _log_dm_delivery_result(packet, dest_node, device_id)
+    return _on_dm_routing_response
+
+
 def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_id=None):
     # Send a message to a channel or DM
     interface = globals()[f'interface{nodeInt}']
@@ -1004,26 +1044,35 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
 
     try:
         def _send_with_reply(**kwargs):
-            # For threaded replies, send as DATA payload to match Meshtastic inline-reply behavior. no API call today.
-            if reply_id is not None:
+            want_ack = kwargs.pop('wantAck', False)
+            on_response = kwargs.pop('onResponse', None)
+            on_response_ack_permitted = kwargs.pop('onResponseAckPermitted', False)
+
+            # sendData: threaded replies, and DM delivery ACK callbacks (onResponseAckPermitted).
+            if reply_id is not None or on_response is not None:
                 text_payload = kwargs.pop('text', '')
                 if isinstance(text_payload, str):
                     raw_payload = text_payload.encode('utf-8')
                 else:
                     raw_payload = text_payload
 
+                destination_id = kwargs.pop('destinationId', None)
+                channel_index = kwargs.pop('channelIndex', ch)
                 data_kwargs = {
                     # 1 == TEXT_MESSAGE_APP, required so clients render payload as chat text.
                     'portNum': 1,
-                    'channelIndex': kwargs.get('channelIndex', ch),
-                    'wantAck': kwargs.get('wantAck', wantAck),
+                    'channelIndex': channel_index,
+                    'wantAck': want_ack,
                 }
-                if kwargs.get('destinationId'):
-                    data_kwargs['destinationId'] = kwargs.get('destinationId')
-                # send the data payload with the replyId for threading
-                return interface.sendData(raw_payload, replyId=reply_id, **data_kwargs)
-            # Otherwise, send as normal text message
-            return interface.sendText(**kwargs)
+                if destination_id is not None:
+                    data_kwargs['destinationId'] = destination_id
+                if on_response is not None:
+                    data_kwargs['onResponse'] = on_response
+                    data_kwargs['onResponseAckPermitted'] = on_response_ack_permitted
+                if reply_id is not None:
+                    return interface.sendData(raw_payload, replyId=reply_id, **data_kwargs)
+                return interface.sendData(raw_payload, **data_kwargs)
+            return interface.sendText(wantAck=want_ack, **kwargs)
 
         # Force chunking and log if message exceeds maxBuffer
         if len(message.encode('utf-8')) > maxBuffer:
@@ -1036,58 +1085,56 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
             message_list = [message]
 
         if isinstance(message_list, list):
-            # Send the message to the channel or DM
-            total_length = sum(len(chunk) for chunk in message_list)
             num_chunks = len(message_list)
-            for m in message_list:
-                chunkOf = f"{message_list.index(m)+1}/{num_chunks}"
+            for idx, m in enumerate(message_list):
+                chunk_of = f"{idx + 1}/{num_chunks}"
+                chunk_want_ack = dm_chunk_wants_delivery_ack(nodeid, idx, wantAck, wantAckOnDm)
+                send_kwargs = {'text': m, 'channelIndex': ch, 'wantAck': chunk_want_ack}
+                if nodeid != 0:
+                    send_kwargs['destinationId'] = nodeid
+                    if chunk_want_ack:
+                        send_kwargs['onResponse'] = _dm_delivery_ack_callback(nodeid, nodeInt)
+                        send_kwargs['onResponseAckPermitted'] = True
+                ack_tag = CustomFormatter.red + "req.ACK " if chunk_want_ack else ""
                 if nodeid == 0:
-                    # Send to channel
-                    if wantAck:
-                        logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + f"req.ACK " + f"Chunker{chunkOf} SendingChannel: " + CustomFormatter.white + m.replace('\n', ' '))
-                        _send_with_reply(text=m, channelIndex=ch, wantAck=True)
-                    else:
-                        logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + f"Chunker{chunkOf} SendingChannel: " + CustomFormatter.white + m.replace('\n', ' '))
-                        _send_with_reply(text=m, channelIndex=ch)
+                    logger.info(
+                        f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} {ack_tag}"
+                        f"Chunker{chunk_of} SendingChannel: {CustomFormatter.white}{m.replace(chr(10), ' ')}"
+                    )
                 else:
-                    # Send to DM
-                    if wantAck:
-                        logger.info(f"Device:{nodeInt} " + CustomFormatter.red + f"req.ACK " + f"Chunker{chunkOf} Sending DM: " + CustomFormatter.white + m.replace('\n', ' ') + CustomFormatter.purple +\
-                                 " To: " + CustomFormatter.white + f"{get_name_from_number(nodeid, 'long', nodeInt)}")
-                        _send_with_reply(text=m, channelIndex=ch, destinationId=nodeid, wantAck=True)
-                    else:
-                        logger.info(f"Device:{nodeInt} " + CustomFormatter.red + f"Chunker{chunkOf} Sending DM: " + CustomFormatter.white + m.replace('\n', ' ') + CustomFormatter.purple +\
-                                    " To: " + CustomFormatter.white + f"{get_name_from_number(nodeid, 'long', nodeInt)}")
-                        _send_with_reply(text=m, channelIndex=ch, destinationId=nodeid)
+                    logger.info(
+                        f"Device:{nodeInt} {ack_tag}Chunker{chunk_of} Sending DM: {CustomFormatter.white}"
+                        f"{m.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
+                        f"{get_name_from_number(nodeid, 'long', nodeInt)}"
+                    )
+                _send_with_reply(**send_kwargs)
 
-                # Throttle the message sending to prevent spamming the device
-                if (message_list.index(m)+1) % 4 == 0:
+                if (idx + 1) % 4 == 0:
                     time.sleep(responseDelay + 1)
-                    if (message_list.index(m)+1) % 5 == 0:
-                        logger.warning(f"System: throttling rate Interface{nodeInt} on {chunkOf}")
-
-                # wait an amount of time between sending each split message
+                    if (idx + 1) % 5 == 0:
+                        logger.warning(f"System: throttling rate Interface{nodeInt} on {chunk_of}")
                 time.sleep(splitDelay)
-        else: # message is less than MESSAGE_CHUNK_SIZE characters
+        else:
+            chunk_want_ack = dm_chunk_wants_delivery_ack(nodeid, 0, wantAck, wantAckOnDm)
+            send_kwargs = {'text': message, 'channelIndex': ch, 'wantAck': chunk_want_ack}
+            if nodeid != 0:
+                send_kwargs['destinationId'] = nodeid
+                if chunk_want_ack:
+                    send_kwargs['onResponse'] = _dm_delivery_ack_callback(nodeid, nodeInt)
+                    send_kwargs['onResponseAckPermitted'] = True
+            ack_tag = CustomFormatter.red + "req.ACK " if chunk_want_ack else ""
             if nodeid == 0:
-                # Send to channel
-                if wantAck:
-                    logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + "req.ACK " + "SendingChannel: " + CustomFormatter.white + message.replace('\n', ' '))
-                    _send_with_reply(text=message, channelIndex=ch, wantAck=True)
-                else:
-                    logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + "SendingChannel: " + CustomFormatter.white + message.replace('\n', ' '))
-                    _send_with_reply(text=message, channelIndex=ch)
+                logger.info(
+                    f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} {ack_tag}"
+                    f"SendingChannel: {CustomFormatter.white}{message.replace(chr(10), ' ')}"
+                )
             else:
-                # Send to DM
-                if wantAck:
-                    logger.info(f"Device:{nodeInt} " + CustomFormatter.red + "req.ACK " + "Sending DM: " + CustomFormatter.white + message.replace('\n', ' ') + CustomFormatter.purple +\
-                                 " To: " + CustomFormatter.white + f"{get_name_from_number(nodeid, 'long', nodeInt)}")
-                    _send_with_reply(text=message, channelIndex=ch, destinationId=nodeid, wantAck=True)
-                else:
-                    logger.info(f"Device:{nodeInt} " + CustomFormatter.red + "Sending DM: " + CustomFormatter.white + message.replace('\n', ' ') + CustomFormatter.purple +\
-                                " To: " + CustomFormatter.white + f"{get_name_from_number(nodeid, 'long', nodeInt)}")
-                    _send_with_reply(text=message, channelIndex=ch, destinationId=nodeid)
-            # Throttle the message sending to prevent spamming the device
+                logger.info(
+                    f"Device:{nodeInt} {ack_tag}Sending DM: {CustomFormatter.white}"
+                    f"{message.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
+                    f"{get_name_from_number(nodeid, 'long', nodeInt)}"
+                )
+            _send_with_reply(**send_kwargs)
             time.sleep(responseDelay)
         return True
     except Exception as e:

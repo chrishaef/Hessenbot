@@ -14,12 +14,14 @@ from markupsafe import Markup
 
 from modules.paths import path_in_repo
 
-PKI_MARKERS = (
+# Log-Zeilen, die auf PKI- oder DM-Zustellprobleme hinweisen (inkl. wantAckOnDm-Auswertung).
+SCAN_MARKERS = (
     "PKI Routing Error",
     "PKI_SEND_FAIL",
     "PKI_UNKNOWN_PUBKEY",
     "PKI_FAILED",
     "Reason:PKI_",
+    "DM delivery failed",
 )
 
 GUIDANCE = {
@@ -33,6 +35,11 @@ GUIDANCE = {
     ),
     "PKI_FAILED": (
         "PKI-Versand ist fehlgeschlagen. Firmware aktuell halten und Kontakt zum Bot erneuern."
+    ),
+    "DM_DELIVERY": (
+        "Eine Bot-DM wurde nicht quittiert oder mit Routing-Fehler zurückgewiesen. "
+        "Bei <strong>PKI</strong> in der Meldung: Kontakt zum Bot auf dem Gerät löschen und neu hinzufügen. "
+        "Sonst: Erreichbarkeit/Hops prüfen und später erneut testen."
     ),
 }
 
@@ -110,10 +117,14 @@ def _line_mentions_node(line: str, node_id: int, hex_id: str) -> bool:
     return hex_id.lower() in plain.lower()
 
 
-def _extract_pki_reason(line: str) -> str:
-    m = re.search(r"Reason:(PKI_[A-Z0-9_]+)", line)
+def _extract_problem_reason(line: str) -> str:
+    m = re.search(r"Reason:([A-Z0-9_]+)", line)
     if m:
         return m.group(1)
+    if "DM delivery failed (PKI)" in line:
+        return "DM delivery (PKI)"
+    if "DM delivery failed" in line:
+        return "DM delivery failed"
     for marker in ("PKI_SEND_FAIL_PUBLIC_KEY", "PKI_UNKNOWN_PUBKEY", "PKI_FAILED"):
         if marker in line:
             return marker
@@ -125,14 +136,33 @@ def _hit_role(line: str, node_id: int) -> str:
     dec = str(node_id)
     if re.search(rf"TargetNode:\s*{dec}\b", plain):
         return "Ziel"
+    if re.search(rf"\bNode:\s*{dec}\b", plain):
+        return "Ziel (DM)"
     if re.search(rf"RequesterNode:\s*{dec}\b", plain):
         return "Absender"
+    if re.search(rf"\bTo:.*\b{dec}\b", plain):
+        return "Ziel (DM)"
     return "erwähnt"
 
 
-def _is_pki_line(line: str) -> bool:
+def _is_problem_line(line: str) -> bool:
     plain = _strip_ansi(line)
-    return any(m in plain for m in PKI_MARKERS)
+    return any(m in plain for m in SCAN_MARKERS)
+
+
+def _guidance_for_reason(reason: str) -> List[str]:
+    out: List[str] = []
+    if reason.startswith("PKI_") or "PKI" in reason or reason == "DM delivery (PKI)":
+        for key, text in GUIDANCE.items():
+            if key == "DM_DELIVERY":
+                continue
+            if key in reason and text not in out:
+                out.append(text)
+    if reason.startswith("DM delivery") or reason.startswith("PKI_"):
+        dm_text = GUIDANCE["DM_DELIVERY"]
+        if dm_text not in out:
+            out.append(dm_text)
+    return out
 
 
 def scan_pki_log_for_node(
@@ -162,14 +192,15 @@ def scan_pki_log_for_node(
     for path in paths:
         for line in _tail_lines(path, max_bytes=max_bytes_per_file):
             lines_scanned += 1
-            if not _is_pki_line(line):
+            if not _is_problem_line(line):
                 continue
             if not _line_mentions_node(line, node_id, hex_id):
                 continue
+            reason = _extract_problem_reason(line)
             hits.append(
                 {
                     "line": _strip_ansi(line).strip(),
-                    "reason": _extract_pki_reason(line),
+                    "reason": reason,
                     "role": _hit_role(line, node_id),
                 }
             )
@@ -181,8 +212,8 @@ def scan_pki_log_for_node(
     reasons = sorted({h["reason"] for h in hits})
     guidance: List[str] = []
     for r in reasons:
-        for key, text in GUIDANCE.items():
-            if key in r and text not in guidance:
+        for text in _guidance_for_reason(r):
+            if text not in guidance:
                 guidance.append(text)
 
     if hits:
@@ -220,15 +251,17 @@ def render_pki_checker_html(result: Optional[Dict[str, Any]] = None) -> str:
             if result.get("summary") == "problems_found":
                 msg_html = (
                     f"Für Node <code>{nid}</code> (<code>{nhex}</code>) wurden "
-                    f"<strong>{len(hits)}</strong> PKI-Hinweise im Bot-Protokoll gefunden."
+                    f"<strong>{len(hits)}</strong> PKI- oder Zustell-Hinweise im Bot-Protokoll gefunden."
                 )
             else:
                 lines = result.get("lines_scanned", 0)
                 msg_html = (
-                    f"Keine PKI-Einträge für <code>{nid}</code> (<code>{nhex}</code>) "
+                    f"Keine PKI- oder DM-Zustell-Einträge für <code>{nid}</code> (<code>{nhex}</code>) "
                     f"im geprüften Protokoll-Ausschnitt ({lines:,} Zeilen). "
-                    "Das schließt ein PKI-Problem nicht aus — oft hilft trotzdem: "
-                    "Bot-Kontakt auf dem Gerät löschen und neu hinzufügen."
+                    "Das schließt Probleme nicht aus — oft hilft: "
+                    "Bot-Kontakt auf dem Gerät löschen und neu hinzufügen; "
+                    "bei aktivem <code>wantAckOnDm</code> erscheinen Fehler als "
+                    "„DM delivery failed“ im Log."
                 )
             hit_rows = ""
             if hits:
@@ -263,7 +296,8 @@ def render_pki_checker_html(result: Optional[Dict[str, Any]] = None) -> str:
   <p class="text-muted small mb-3">
     Wenn DMs vom Bot nicht ankommen, kann ein <strong>Schlüsselproblem (PKI)</strong> vorliegen.
     Trage deine <strong>dezimale Node-ID</strong> oder <code>!hex</code> ein — wir prüfen, ob der Bot
-    kürzlich PKI-Fehler zu dieser Node protokolliert hat. Die ID findest du in der Meshtastic-App
+    kürzlich <strong>PKI-</strong> oder <strong>DM-Zustellfehler</strong> zu dieser Node protokolliert hat
+    (u. a. <code>PKI Routing Error</code> und <code>DM delivery failed</code>). Die ID findest du in der Meshtastic-App
     unter Node-Info (oder als !xxxxxxxx).
   </p>
   <form method="post" action="/faq/pki-check" class="row g-2 align-items-end">
