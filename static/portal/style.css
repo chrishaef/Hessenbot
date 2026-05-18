@@ -1212,6 +1212,16 @@ pre.admin-pre {
   opacity: 0.9;
 }
 
+.faq-entry:last-child {
+  border-bottom: none !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.faq-answer code {
+  font-size: 0.9em;
+}
+
 .cmd-help-cmd {
   white-space: nowrap;
   width: 1%;
