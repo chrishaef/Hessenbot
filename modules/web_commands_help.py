@@ -31,6 +31,16 @@ def _prefix() -> str:
     return "!" if getattr(st, "cmdBang", False) else ""
 
 
+def _cmd(
+    cmd: str,
+    description: str,
+    *,
+    enabled: Optional[Callable[[], bool]] = None,
+) -> CommandEntry:
+    """Eine Tabellenzeile pro Befehl oder Syntax-Variante."""
+    return CommandEntry(cmd, description, enabled=enabled)
+
+
 def _sections() -> List[CommandSection]:
     p = _prefix()
 
@@ -40,25 +50,52 @@ def _sections() -> List[CommandSection]:
             "bi-lightning-charge",
             "Diese Befehle sind fast immer verfügbar. Sende sie im Mesh-Kanal oder per DM an den Bot.",
             (
-                CommandEntry(f"{p}cmd", "Kurze Liste der auf deinem Bot aktivierten Befehle."),
-                CommandEntry(
+                _cmd(f"{p}cmd", "Kurze Liste der auf deinem Bot aktivierten Befehle."),
+                _cmd(
+                    f"{p}cmd?",
+                    "Hilfe zu einem Befehl (ersetze cmd durch den Befehlsnamen, z. B. metar?).",
+                ),
+                _cmd(
                     f"{p}ping",
                     "Testet die Verbindung; Antwort mit SNR, RSSI und Hop-Anzahl.",
-                    f"{p}ping",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}pong",
-                    "Kurze Ping-Antwort.",
+                    "Kurze Ping-Antwort (gleiche Funktion wie ping).",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}pinging",
+                    "Alias für ping.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}testing",
+                    "Alias für ping.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}test",
+                    "Alias für ping.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}cq",
+                    "Alias für ping.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
                     f"{p}echo",
-                    "Gibt deinen Text zurück (Echo-Test).",
-                    f"{p}echo Hallo",
+                    "Echo-Test: Text nach dem Befehl wird zurückgesendet.",
                     enabled=lambda: getattr(st, "enableEcho", False),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}echo Hallo",
+                    "Beispiel für echo mit beliebigem Text.",
+                    enabled=lambda: getattr(st, "enableEcho", False),
+                ),
+                _cmd(
                     f"{p}motd",
                     "Message of the Day — Begrüßungstext des Bots.",
                     enabled=lambda: getattr(st, "motd_enabled", True),
@@ -80,38 +117,74 @@ def _sections() -> List[CommandSection]:
                 f"{p}map delete <Name> entfernt einen Ort. {p}map public <Name> fragt einen öffentlichen Ort ab."
             ),
             (
-                CommandEntry(
+                _cmd(
                     f"{p}whoami",
                     "Infos zu deiner Node: ID, Name, Signal, ggf. letzte GPS-Koordinaten.",
                     enabled=lambda: getattr(st, "whoami_enabled", True),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}whois",
-                    "Infos zu einer anderen Node (Name/ID). Admins sehen mehr Details.",
-                    f"{p}whois Kurzname",
+                    "Infos zu einer anderen Node (ohne Argument: Kurzinfo).",
                     enabled=lambda: getattr(st, "whoami_enabled", True),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}whois Kurzname",
+                    "Infos zu einer bestimmten Node (Name, Dezimal-ID oder !hex). Admins sehen mehr.",
+                    enabled=lambda: getattr(st, "whoami_enabled", True),
+                ),
+                _cmd(
                     f"{p}loc",
-                    "Letzte Position: zuerst GPS aus der NodeDB, sonst Koordinaten aus der konfigurierten Mesh-Karten-JSON (leaderboardMeshMapURL).",
-                    f"{p}loc HB9ABC",
+                    "Letzte Position deiner Node (GPS aus NodeDB, sonst Mesh-Karten-JSON).",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}loc Kurzname",
+                    "Position einer anderen Node (Name/ID).",
+                    enabled=lambda: getattr(st, "location_enabled", False),
+                ),
+                _cmd(
                     f"{p}whereami",
                     "Ortstext zu deiner aktuellen Position (Geocoding).",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
-                CommandEntry(
-                    f"{p}map",
-                    "Orte speichern und Entfernung/Richtung abfragen.",
-                    f"{p}map save Treffpunkt | {p}map Treffpunkt | {p}map list",
+                _cmd(
+                    f"{p}map save Name",
+                    "Aktuelle Position privat speichern (optional Beschreibung).",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}map save public Name",
+                    "Aktuelle Position öffentlich speichern (für alle sichtbar).",
+                    enabled=lambda: getattr(st, "location_enabled", False),
+                ),
+                _cmd(
+                    f"{p}map list",
+                    "Gespeicherte Orte auflisten.",
+                    enabled=lambda: getattr(st, "location_enabled", False),
+                ),
+                _cmd(
+                    f"{p}map Name",
+                    "Entfernung und Richtung zu einem gespeicherten Ort (von deiner GPS-Position).",
+                    enabled=lambda: getattr(st, "location_enabled", False),
+                ),
+                _cmd(
+                    f"{p}map public Name",
+                    "Öffentlichen Ort abfragen (Entfernung/Richtung).",
+                    enabled=lambda: getattr(st, "location_enabled", False),
+                ),
+                _cmd(
+                    f"{p}map delete Name",
+                    "Eigenen gespeicherten Ort löschen.",
+                    enabled=lambda: getattr(st, "location_enabled", False),
+                ),
+                _cmd(
                     f"{p}howfar",
-                    "Zurückgelegte Strecke seit dem letzten Aufruf; reset setzt den Startpunkt zurück.",
-                    f"{p}howfar | {p}howfar reset",
+                    "Zurückgelegte Strecke seit dem letzten Aufruf (erneuter Aufruf aktualisiert den Zähler).",
+                    enabled=lambda: getattr(st, "location_enabled", False),
+                ),
+                _cmd(
+                    f"{p}howfar reset",
+                    "Startpunkt für die Streckenmessung zurücksetzen.",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
             ),
@@ -123,46 +196,57 @@ def _sections() -> List[CommandSection]:
             "bi-cloud-lightning-rain",
             "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD).",
             (
-                CommandEntry(
+                _cmd(
                     f"{p}wx",
                     "Wettervorhersage für deinen Standort (Open-Meteo).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}metar",
-                    "METAR: ohne Argument = nächster Flugplatz; mit ICAO z.B. !metar EDDF; !metar? erklärt den METAR-Aufbau.",
-                    f"{p}metar EDDF",
+                    "METAR des nächsten Flugplatzes zu deinem Standort.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "metar_enabled", True),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}metar EDDF",
+                    "METAR für einen ICAO-Flugplatz (4 Buchstaben, z. B. EDDF, ETHF).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "metar_enabled", True),
+                ),
+                _cmd(
+                    f"{p}metar?",
+                    "Erklärung des Aufbaus einer METAR-Meldung.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "metar_enabled", True),
+                ),
+                _cmd(
                     f"{p}uv",
                     "UV-Index heute und morgen für deinen Standort (Open-Meteo).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}regen",
                     "Stündlicher Regen für die nächsten Stunden (Open-Meteo).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}blitz",
                     "Live-Blitze im Umkreis (DMI EU; optional Blitzortung.org) plus kurze Gewitter-Vorhersage.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}warning",
                     "Aktive Warnungen für den Kreis deiner GPS-Position.",
                     enabled=lambda: getattr(st, "enableDEalerts", False),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}dealert",
                     "Warnungen für konfigurierte Regionen (Broadcast).",
                     enabled=lambda: getattr(st, "enableDEalerts", False),
@@ -216,55 +300,49 @@ def _sections() -> List[CommandSection]:
             "Bulletin Board (BBS)",
             "bi-inboxes",
             (
-                "Das BBS hat zwei Bereiche: öffentliche Beiträge für alle (bbsdb) und private "
-                "BBS-DMs an eine bestimmte Node (bbsdm).\n\n"
-                f"Öffentlich: {p}bbslist zeigt Nummern, {p}bbsread #Nr. liest, {p}bbspost $Betreff #Text "
-                f"schreibt. Eigene Beiträge mit {p}bbsdelete #Nr. löschen.\n\n"
-                f"BBS-DM (Store-and-Forward): {p}bbspost @Empfänger #Nachricht legt eine private Nachricht "
-                f"in die Warteschlange. Empfänger = Dezimal-Node-ID, Kurzname oder !hex. Sobald die "
-                f"Ziel-Node wieder im Mesh sendet, liefert der Bot die Mail automatisch per DM "
-                f"(Präfix „Mail:“) und entfernt sie aus der Queue. Es gibt keinen separaten "
-                f"„DM lesen“-Befehl — nur senden und warten auf Zustellung.\n\n"
-                f"Optional: {p}ping @Kurzname legt ebenfalls eine kurze BBS-DM an (wenn BBS aktiv). "
-                f"{p}bbsinfo zeigt Anzahl öffentlicher Beiträge und wartender DMs. "
-                f"{p}bbslink / {p}bbsack synchronisieren öffentliche Beiträge zwischen Bots (bbslink_enabled)."
+                "Öffentliches BBS (bbsdb) und private BBS-DMs (bbsdm, Store-and-Forward). "
+                "DMs werden zugestellt, sobald die Ziel-Node wieder im Mesh aktiv ist (Präfix „Mail:“)."
             ),
             (
-                CommandEntry(f"{p}bbshelp", "Kurzliste aller BBS-Befehle (auch im Mesh)."),
-                CommandEntry(
-                    f"{p}bbslist",
-                    "Öffentliche Beiträge mit Nummer [#1], [#2], …",
-                    f"{p}bbslist",
+                _cmd(f"{p}bbshelp", "Kurzliste aller BBS-Befehle (auch im Mesh)."),
+                _cmd(f"{p}bbslist", "Öffentliche Beiträge mit Nummern [#1], [#2], …"),
+                _cmd(
+                    f"{p}bbspost $Betreff #Text",
+                    "Öffentlichen Beitrag schreiben ($ = Betreff, # = Text).",
                 ),
-                CommandEntry(
-                    f"{p}bbspost",
-                    "Öffentlicher Beitrag ($Betreff) oder BBS-DM an eine Node (@Empfänger).",
-                    f"{p}bbspost $Treffen #Ort 18 Uhr | {p}bbspost @HB9ABC #Hallo",
+                _cmd(
+                    f"{p}bbspost @Empfänger #Text",
+                    "Private BBS-DM an eine Node (Empfänger: Kurzname, Dezimal-ID oder !hex).",
                 ),
-                CommandEntry(
-                    f"{p}bbsread",
+                _cmd(
+                    f"{p}bbsread #Nr",
                     "Öffentlichen Beitrag anhand der Nummer aus bbslist lesen.",
-                    f"{p}bbsread #3",
                 ),
-                CommandEntry(
-                    f"{p}bbsdelete",
-                    "Eigenen öffentlichen Beitrag löschen (Admins: alle).",
-                    f"{p}bbsdelete #3",
+                _cmd(
+                    f"{p}bbsdelete #Nr",
+                    "Eigenen öffentlichen Beitrag löschen (Admins: alle Beiträge).",
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}bbsinfo",
                     "Anzahl öffentlicher Beiträge und wartender BBS-DMs.",
-                    f"{p}bbsinfo",
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}ping @Kurzname",
+                    "Kurze BBS-DM an eine Node (wenn BBS aktiv; gleiche Queue wie bbspost @…).",
+                ),
+                _cmd(
                     f"{p}bbslink",
-                    "Bot-zu-Bot: öffentliche Beiträge ab einer ID anfragen/senden (Whitelist).",
-                    f"{p}bbslink 0",
+                    "Bot-zu-Bot-Sync: öffentliche Beiträge anfragen (Whitelist, bbslink_enabled).",
                     enabled=lambda: getattr(st, "bbs_link_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}bbslink 0",
+                    "Sync ab Beitrags-ID 0 (alle öffentlichen Beiträge vom Peer-Bot).",
+                    enabled=lambda: getattr(st, "bbs_link_enabled", False),
+                ),
+                _cmd(
                     f"{p}bbsack",
-                    "Bestätigung beim bbslink-Sync (nächste Nachricht vom Peer-Bot).",
+                    "Bestätigung beim bbslink-Sync (Antwort auf die nächste Nachricht vom Peer-Bot).",
                     enabled=lambda: getattr(st, "bbs_link_enabled", False),
                 ),
             ),
@@ -275,27 +353,24 @@ def _sections() -> List[CommandSection]:
             "bi-bar-chart-steps",
             "Abstimmungen im Mesh. Anlegen und Auswertung im Admin-Backend unter „Umfragen“.",
             (
-                CommandEntry(
+                _cmd(
                     f"{p}poll",
                     "Aktive Umfragen anzeigen.",
-                    f"{p}poll",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}poll liste",
                     "Alle Umfragen (auch geschlossene).",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
-                CommandEntry(
-                    f"{p}poll <Nr>",
-                    "Frage, Optionen und aktuelle Stimmenzahlen.",
+                _cmd(
                     f"{p}poll 1",
+                    "Frage, Optionen und Stimmenzahlen der Umfrage Nr. 1.",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
-                CommandEntry(
-                    f"{p}poll <Nr> <Option>",
-                    "Abstimmen (Option 1, 2, …). Eine Stimme pro Knoten.",
+                _cmd(
                     f"{p}poll 1 2",
+                    "Für Umfrage 1 Option 2 wählen (eine Stimme pro Knoten).",
                     enabled=lambda: getattr(st, "polls_enabled", False),
                 ),
             ),
@@ -328,31 +403,33 @@ def _sections() -> List[CommandSection]:
             "bi-hdd-network",
             "",
             (
-                CommandEntry(
+                _cmd(
                     f"{p}sysinfo",
                     "Systeminfos zum Bot-Host.",
                     enabled=lambda: getattr(st, "sitrep_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}sitrep",
                     "Zuletzt gehörte Knoten / Lagebild.",
                     enabled=lambda: getattr(st, "sitrep_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}lheard",
                     "Knoten-Liste (ähnlich Sitrep).",
                     enabled=lambda: getattr(st, "sitrep_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
                     f"{p}leaderboard",
-                    "Extremwerte aus dem Mesh (u. a. kälteste/heißeste °C, Akku, Höhe) — "
-                    "aus NodeDB & Telemetrie dieses Bots; optional ergänzt um regionale Karten-JSON "
-                    "(config: leaderboardMeshMapURL), z. B. meshhessen nodes.json. Kein Wetter-App-Ersatz. "
-                    f"Admins: {p}leaderboard reset löscht die Liste.",
+                    "Extremwerte aus dem Mesh (Temperatur, Akku, Höhe; optional regionale Karten-JSON).",
                     enabled=lambda: getattr(st, "sitrep_enabled", False),
                 ),
-                CommandEntry(f"{p}messages", "Letzte empfangene Nachrichten."),
-                CommandEntry(
+                _cmd(
+                    f"{p}leaderboard reset",
+                    "Leaderboard-Liste löschen (nur Admins).",
+                    enabled=lambda: getattr(st, "sitrep_enabled", False),
+                ),
+                _cmd(f"{p}messages", "Letzte empfangene Nachrichten."),
+                _cmd(
                     f"{p}history",
                     "Verlauf deiner letzten Befehle.",
                     enabled=lambda: getattr(st, "enableCmdHistory", False),
@@ -364,10 +441,14 @@ def _sections() -> List[CommandSection]:
             "bi-antenna",
             "",
             (
-                CommandEntry(
+                _cmd(
                     f"{p}dx",
-                    "DX-Spots abfragen.",
+                    "DX-Spots abfragen (alle oder gefiltert).",
+                    enabled=lambda: getattr(st, "dxspotter_enabled", True),
+                ),
+                _cmd(
                     f"{p}dx band=20m",
+                    "DX-Spots nur für ein Band (z. B. band=20m, band=40m).",
                     enabled=lambda: getattr(st, "dxspotter_enabled", True),
                 ),
             ),
@@ -378,8 +459,12 @@ def _sections() -> List[CommandSection]:
             "bi-robot",
             "Benötigt lokalen Ollama-Server.",
             (
-                CommandEntry(f"{p}ask:", "Frage an das lokale LLM.", f"{p}ask: Was ist Meshtastic?"),
-                CommandEntry(f"{p}askai", "Alternative Trigger für LLM."),
+                _cmd(f"{p}ask:", "Frage an das lokale LLM (Text direkt nach dem Doppelpunkt)."),
+                _cmd(
+                    f"{p}ask: Was ist Meshtastic?",
+                    "Beispiel: Frage an Ollama mit freiem Text.",
+                ),
+                _cmd(f"{p}askai", "Alternative Trigger für dasselbe LLM."),
             ),
             section_enabled=lambda: getattr(st, "llm_enabled", False),
         ),
@@ -388,14 +473,84 @@ def _sections() -> List[CommandSection]:
             "bi-clipboard-check",
             "Optionale Module für Veranstaltungen / Lagerverwaltung.",
             (
-                CommandEntry(
-                    f"{p}checklist",
-                    "Check-in/out und Genehmigungen.",
+                _cmd(
+                    f"{p}checkin",
+                    "Check-in (Checklisten-Modul).",
                     enabled=lambda: getattr(st, "checklist_enabled", False),
                 ),
-                CommandEntry(
+                _cmd(
+                    f"{p}checkout",
+                    "Check-out (Checklisten-Modul).",
+                    enabled=lambda: getattr(st, "checklist_enabled", False),
+                ),
+                _cmd(
+                    f"{p}checklist",
+                    "Checklisten-Status anzeigen.",
+                    enabled=lambda: getattr(st, "checklist_enabled", False),
+                ),
+                _cmd(
+                    f"{p}approvecl",
+                    "Checkliste genehmigen (Admin/Moderation).",
+                    enabled=lambda: getattr(st, "checklist_enabled", False),
+                ),
+                _cmd(
+                    f"{p}denycl",
+                    "Checkliste ablehnen.",
+                    enabled=lambda: getattr(st, "checklist_enabled", False),
+                ),
+                _cmd(
                     f"{p}itemlist",
-                    "Inventar / Mini-POS (weitere item*-Befehle).",
+                    "Inventarliste anzeigen.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}item",
+                    "Artikel-Details abfragen.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}itemloan",
+                    "Artikel ausleihen.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}itemreturn",
+                    "Ausgeliehenen Artikel zurückgeben.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}itemsell",
+                    "Artikel verkaufen (Mini-POS).",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}itemadd",
+                    "Artikel zum Inventar hinzufügen.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}itemremove",
+                    "Artikel aus dem Inventar entfernen.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}cartadd",
+                    "Artikel in den Warenkorb legen.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}cartlist",
+                    "Warenkorb anzeigen.",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}cartbuy",
+                    "Warenkorb kaufen (Mini-POS).",
+                    enabled=lambda: getattr(st, "inventory_enabled", False),
+                ),
+                _cmd(
+                    f"{p}cartclear",
+                    "Warenkorb leeren.",
                     enabled=lambda: getattr(st, "inventory_enabled", False),
                 ),
             ),
