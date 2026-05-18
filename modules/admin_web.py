@@ -182,10 +182,10 @@ def create_app(
 """
         return render_template_string(raw)
 
-    def _render_faq_page():
+    def _render_faq_page(pki_result=None):
         from modules.web_faq_help import render_faq_page_body
 
-        body = render_faq_page_body()
+        body = render_faq_page_body(pki_result)
         return (
             portal_shell_start(
                 title="FAQ / Hilfe – Hessenbot",
@@ -207,6 +207,16 @@ def create_app(
     @app.route("/hilfe")
     def faq_help():
         return _render_faq_page()
+
+    @limiter.limit("20 per minute")
+    @app.route("/faq/pki-check", methods=["POST"])
+    def faq_pki_check():
+        from modules.web_faq_pki_check import scan_pki_log_for_node
+
+        node_raw = (request.form.get("node_id") or "").strip()
+        result = scan_pki_log_for_node(node_raw, log_dir)
+        result["node_input"] = node_raw
+        return _render_faq_page(result)
 
     @app.route("/befehle")
     @app.route("/commands")

@@ -67,6 +67,23 @@ class TestBot(unittest.TestCase):
         pkt2["id"] = 43
         self.assertFalse(packet_dedup.should_drop_duplicate_packet(pkt2))
 
+    def test_faq_pki_log_scan(self):
+        import os
+        import tempfile
+
+        from modules.web_faq_pki_check import scan_pki_log_for_node
+
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    "2025-01-01 | WARNING | System: PKI Routing Error "
+                    "Reason:PKI_UNKNOWN_PUBKEY RequesterNode:424242\n"
+                )
+            r = scan_pki_log_for_node("424242", td)
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["summary"], "problems_found")
+
     def test_load_bbsdb(self):
         from modules.bbstools import load_bbsdb
         self.assertTrue(load_bbsdb())
