@@ -72,6 +72,19 @@ fi
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
 echo "Current branch: $BRANCH"
 
+# Local rotated logs (logs/meshbot.log.*) must not block pull if a bad commit tracked the same path.
+if [[ -d logs ]]; then
+    mkdir -p logs/.local_backup
+    for f in logs/meshbot.log.*; do
+        [[ -e "$f" ]] || continue
+        if ! git ls-files --error-unmatch "$f" &>/dev/null; then
+            dest="logs/.local_backup/$(basename "$f").$$"
+            echo ">> Moving aside untracked $f (safe for git pull)"
+            mv -f "$f" "$dest" 2>/dev/null || rm -f "$f"
+        fi
+    done
+fi
+
 if ! git pull --ff-only; then
     echo "WARN: git pull --ff-only failed (e.g. diverged history). Trying merge pull..."
     git pull || {

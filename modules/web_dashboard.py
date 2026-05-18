@@ -100,6 +100,33 @@ class _NodeDirectory:
         return {"id": "", "hex": "", "short": "", "long": label}
 
 
+def _parse_channel_from_log(plain: str, device: Optional[int]) -> tuple[Optional[int], str]:
+    """Channel index + display label from meshbot.log (legacy and Channel:N|name)."""
+    rx = device if device is not None else 1
+    m = re.search(r"Channel:(\d+)(?:\|([^|\s]+))?", plain)
+    if m:
+        ch = int(m.group(1))
+        label = (m.group(2) or "").strip()
+        if label:
+            return ch, label
+        try:
+            from modules.system import format_channel_label
+
+            return ch, format_channel_label(ch, rx)
+        except Exception:
+            return ch, f"Kanal {ch}"
+    m2 = re.search(r"Channel:?\s*(\d+)", plain)
+    if m2:
+        ch = int(m2.group(1))
+        try:
+            from modules.system import format_channel_label
+
+            return ch, format_channel_label(ch, rx)
+        except Exception:
+            return ch, f"Kanal {ch}"
+    return None, "?"
+
+
 def _extract_message_event(
     plain: str, timestamp: datetime, nodes: _NodeDirectory
 ) -> Optional[Dict[str, Any]]:
@@ -108,14 +135,14 @@ def _extract_message_event(
         return None
 
     dev_m = re.search(r"Device:(\d+)", plain)
-    ch_m = re.search(r"Channel:?\s*(\d+)", plain)
     device = int(dev_m.group(1)) if dev_m else None
-    channel = int(ch_m.group(1)) if ch_m else None
+    channel, channel_label = _parse_channel_from_log(plain, device)
     base: Dict[str, Any] = {
         "time": timestamp.isoformat(),
         "time_short": timestamp.strftime("%H:%M:%S"),
         "device": device,
         "channel": channel,
+        "channel_label": channel_label,
     }
 
     if "Sending DM:" in plain or "Sending Multi-Chunk DM:" in plain:
@@ -179,14 +206,17 @@ def _format_message_line(entry: Dict[str, Any]) -> str:
     peer = _format_message_peer(entry)
 
     if entry.get("kind") == "channel" and entry.get("dir") == "out":
-        ch = entry.get("channel")
-        return f"{t} · Kanal {ch if ch is not None else '?'} (gesendet)"
+        label = entry.get("channel_label") or (
+            f"Kanal {entry['channel']}" if entry.get("channel") is not None else "?"
+        )
+        return f"{t} · {label} (gesendet)"
 
     suffix = ""
     if entry.get("kind") == "dm":
         suffix = " · DM"
     elif entry.get("kind") == "channel" and entry.get("channel") is not None:
-        suffix = f" · Kanal {entry['channel']}"
+        suffix = f" · {entry.get('channel_label') or f'Kanal {entry['channel']}'}"
+
 
     return f"{t} · {direction}: {peer}{suffix}"
 
@@ -250,16 +280,27 @@ def _parse_messages_log_tail(
     for line in lines[-max_lines:]:
         m = re.match(
             r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
-            r"Device:(\d+) Channel:(\d+) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
+            r"Device:(\d+) (Channel:\d+(?:\|[^|]+)?) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
             line.strip(),
         )
         if not m:
+            m = re.match(
+                r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
+                r"Device:(\d+) Channel:(\d+) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
+                line.strip(),
+            )
+        if not m:
             continue
-        ts_s, _dev, ch, name, _text = m.groups()
+        ts_s, dev_s, ch_field, name, _text = m.groups()
         try:
             ts = datetime.strptime(ts_s, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             continue
+        device = int(dev_s)
+        if ch_field.startswith("Channel:"):
+            channel, channel_label = _parse_channel_from_log(ch_field, device)
+        else:
+            channel, channel_label = int(ch_field), f"Kanal {ch_field}"
         peer = nodes.resolve(name.strip())
         is_dm = " DM |" in line
         events.append(
@@ -268,7 +309,9 @@ def _parse_messages_log_tail(
                 "time_short": ts.strftime("%H:%M:%S"),
                 "dir": "in",
                 "kind": "dm" if is_dm else "channel",
-                "channel": int(ch),
+                "channel": channel,
+                "channel_label": channel_label,
+                "device": device,
                 "text": _text.strip().replace("\n", " "),
                 **peer,
             }
@@ -958,16 +1001,34 @@ def _render_toplist_message_item(entry: Dict[str, Any]) -> str:
     return f'<li class="dash-toplist-msg"><div class="dash-toplist-msg__meta">{meta}</div></li>'
 
 
-def _render_toplist_html(log: Dict[str, Any], *, channel: int = 1) -> str:
+def _default_dashboard_channel() -> int:
+    try:
+        import modules.settings as st
+
+        return int(getattr(st, "publicChannel", 0))
+    except Exception:
+        return 0
+
+
+def _render_toplist_html(log: Dict[str, Any], *, channel: Optional[int] = None) -> str:
+    if channel is None:
+        channel = _default_dashboard_channel()
     entries = _channel_recent_messages(log, channel=channel, limit=10)
+    try:
+        from modules.system import format_channel_label
+
+        ch_title = format_channel_label(channel, 1)
+    except Exception:
+        ch_title = f"Kanal {channel}"
     if entries:
         items = "".join(_render_toplist_message_item(e) for e in entries)
     else:
         items = (
-            f'<li class="text-muted">Noch keine Nachrichten auf Kanal {channel} im Log.</li>'
+            f'<li class="text-muted">Noch keine Nachrichten auf {html_escape(ch_title)} im Log.</li>'
         )
     return f"""
 <div class="dash-card-body">
+  <p class="small text-muted mb-2">Kanal: <strong>{html_escape(ch_title)}</strong></p>
   <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{items}</ul>
 </div>
 """
@@ -1095,6 +1156,12 @@ def collect_runtime_stats() -> Dict[str, Any]:
 
 
 def collect_dashboard(log_dir: str) -> Dict[str, Any]:
+    try:
+        from modules.system import refresh_channel_cache
+
+        refresh_channel_cache()
+    except Exception:
+        pass
     base = log_dir if os.path.isabs(log_dir) else path_in_repo(log_dir)
     log_path = os.path.join(base, "meshbot.log")
     if not os.path.isfile(log_path):
