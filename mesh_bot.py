@@ -954,6 +954,7 @@ def handle_boot(mesh=True):
         if my_settings.autoBanEnabled:
             logger.debug(f"System: Auto-Ban Enabled for {my_settings.autoBanThreshold} messages in {my_settings.autoBanTimeframe} seconds")
             load_bbsBanList()
+            load_autoBanList()
 
         if my_settings.log_messages_to_file:
             logger.debug("System: Logging Messages to disk")
@@ -1265,8 +1266,12 @@ def onReceive(packet, interface):
                     # log the message to stdout
                     logger.info(f"Device:{rxNode} Channel: {channel_number} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                 "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
-                    # respond with DM
-                    send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode)
+                    # rate limit check
+                    if is_cmd_rate_limited(message_from_id):
+                        send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                    else:
+                        # respond with DM
+                        send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode)
                 else:
                     if llm_enabled and my_settings.llmReplyToNonCommands:
                         llm = handle_llm(message_from_id, channel_number, rxNode, message_string, publicChannel)
@@ -1306,7 +1311,10 @@ def onReceive(packet, interface):
                         # message is for bot to respond to, seriously this time..
                         logger.info(f"Device:{rxNode} Channel:{channel_number} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                     "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
-                        if my_settings.useDMForResponse:
+                        # rate limit check
+                        if is_cmd_rate_limited(message_from_id):
+                            send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                        elif my_settings.useDMForResponse:
                             # respond to channel message via direct message
                             send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode, reply_id=packet_id)
                         else:

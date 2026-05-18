@@ -405,10 +405,17 @@ def cleanup_memory():
         
         # # Clean up multiPingList of completed or stale entries
         # if 'multiPingList' in globals():
-        #     multiPingList[:] = [ping for ping in multiPingList 
-        #                       if ping.get('message_from_id', 0) != 0 and 
+        #     multiPingList[:] = [ping for ping in multiPingList
+        #                       if ping.get('message_from_id', 0) != 0 and
         #                       ping.get('count', 0) > 0]
-        
+
+        # Clean up stale entries from cmd rate tracker
+        if _cmd_rate_tracker:
+            cutoff = current_time - cmdRateLimitWindow
+            stale = [k for k, ts_list in _cmd_rate_tracker.items() if not any(t > cutoff for t in ts_list)]
+            for k in stale:
+                del _cmd_rate_tracker[k]
+
     except Exception as e:
         logger.error(f"System: Error during memory cleanup: {e}")
 
@@ -628,7 +635,7 @@ def get_node_list(nodeInt=1):
             short_node_list.append(f"{x[0]} SNR:{x[2]}")
 
         for x in short_node_list:
-            if x != "" or x != '\n':
+            if x != "" and x != '\n':
                 node_list += x + "\n"
     except Exception as e:
         logger.error(f"System: Error creating node list: {e}")
@@ -1197,6 +1204,7 @@ def ban_hammer(node_id, rxInterface=None, channel=None, reason=""):
 
     # If the node has exceeded the ban threshold within the time window
     autoBanlist.append(node_id_str)
+    save_autoBanList()
     logger.info(f"System: Node {node_id_str} exceeded auto-ban threshold with {node_entry['auto_ban_count']} messages")
     if autoBanEnabled:
         logger.warning(f"System: Auto-banned node {node_id_str} Reason: {reason}")
@@ -1206,6 +1214,31 @@ def ban_hammer(node_id, rxInterface=None, channel=None, reason=""):
         return True  # Node is now banned
 
     return False  # No ban applied
+
+
+_cmd_rate_tracker: dict = {}  # node_id_str -> list of timestamps
+
+def is_cmd_rate_limited(node_id) -> bool:
+    """Returns True and logs a warning if the node is sending commands too fast."""
+    if not cmdRateLimitEnabled:
+        return False
+    if isNodeAdmin(str(node_id)):
+        return False
+
+    node_key = str(node_id)
+    now = time.time()
+    cutoff = now - cmdRateLimitWindow
+    timestamps = _cmd_rate_tracker.get(node_key, [])
+    # Drop timestamps outside the current window
+    timestamps = [t for t in timestamps if t > cutoff]
+    timestamps.append(now)
+    _cmd_rate_tracker[node_key] = timestamps
+
+    if len(timestamps) > cmdRateLimitMax:
+        logger.warning(f"System: Rate limit hit for node {node_key} ({len(timestamps)} cmds in {cmdRateLimitWindow}s)")
+        return True
+    return False
+
 
 def bbs_ban_list_file_path():
     from modules.paths import path_in_repo
@@ -1258,6 +1291,42 @@ def load_bbsBanList():
     for node in loaded_list:
         if node not in bbs_ban_list:
             bbs_ban_list.append(node)
+
+def _autoban_file_path():
+    from modules.paths import path_in_repo
+    return path_in_repo("data/autoban.json")
+
+def save_autoBanList():
+    global autoBanlist
+    path = _autoban_file_path()
+    ensure_parent_dir(path)
+    try:
+        import json
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(list(autoBanlist), f)
+        logger.debug(f"System: autoBanlist saved ({len(autoBanlist)} entries)")
+        return True
+    except Exception as e:
+        logger.error(f"System: Error saving autoBanlist: {e}")
+        return False
+
+def load_autoBanList():
+    global autoBanlist
+    path = _autoban_file_path()
+    try:
+        import json
+        with open(path, encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, list):
+            for node in loaded:
+                if node and node not in autoBanlist:
+                    autoBanlist.append(node)
+            logger.debug(f"System: autoBanlist loaded ({len(autoBanlist)} entries)")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.error(f"System: Error loading autoBanlist: {e}")
+
 
 def isNodeAdmin(nodeID):
     # check if the nodeID is in the bbs_admin_list
@@ -1340,9 +1409,9 @@ def handleMultiPing(nodeID=0, deviceID=1):
             if count > 1:
                 count -= 1
                 # update count in the list
-                for i in range(len(multiPingList)):
-                    if multiPingList[i]['message_from_id'] == message_id_from:
-                        multiPingList[i]['count'] = count
+                for j in range(len(multiPingList)):
+                    if multiPingList[j]['message_from_id'] == message_id_from:
+                        multiPingList[j]['count'] = count
 
                 # handle bufferTest
                 if type == '🎙TEST':
@@ -3043,6 +3112,10 @@ def saveAllData():
         # Save ban list
         if save_bbsBanList():
             logger.debug("Persistence: Ban list saved")
+
+        # Save auto-ban list
+        if save_autoBanList():
+            logger.debug("Persistence: Auto-ban list saved")
 
         #logger.info("Persistence: Save completed")
     except Exception as e:

@@ -1167,6 +1167,11 @@ def create_app(
                     auto = getattr(st, "autoBanlist", None)
                     if isinstance(auto, list) and nid in auto:
                         auto.remove(nid)
+                        try:
+                            from modules.system import save_autoBanList
+                            save_autoBanList()
+                        except Exception:
+                            pass
                     flash(f"Knoten {nid} von der Banliste entfernt.", "success")
                 else:
                     flash("Knoten nicht auf der Banliste.", "error")
