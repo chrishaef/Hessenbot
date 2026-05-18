@@ -9,8 +9,9 @@ import pickle
 import platform
 import re
 import subprocess
+import time
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape as html_escape
 from typing import Any, Dict, List, Optional
 
@@ -346,7 +347,11 @@ def _empty_log_stats() -> Dict[str, Any]:
         "log_lines": 0,
         "log_error": None,
         "node_rx_counts_by_id": {},
+        "node_rx_counts_24h_by_id": {},
     }
+
+
+_LEADERBOARD_24H_SEC = 86400
 
 
 def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
@@ -527,6 +532,8 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
         recent_messages = sorted(merged.values(), key=lambda x: x["time"])
 
     node_rx_counts: defaultdict[int, int] = defaultdict(int)
+    node_rx_counts_24h: defaultdict[int, int] = defaultdict(int)
+    cutoff_24h = datetime.now() - timedelta(hours=24)
     for e in recent_messages:
         if e.get("dir") != "in":
             continue
@@ -534,9 +541,17 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
         if not eid:
             continue
         try:
-            node_rx_counts[int(eid)] += 1
+            nid = int(eid)
         except (TypeError, ValueError):
             continue
+        node_rx_counts[nid] += 1
+        evt_time = e.get("time")
+        if evt_time:
+            try:
+                if datetime.fromisoformat(evt_time) >= cutoff_24h:
+                    node_rx_counts_24h[nid] += 1
+            except ValueError:
+                pass
 
     stats["command_counts"] = command_counts
     stats["message_types"] = message_types
@@ -550,6 +565,7 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     stats["bbs_dm_delivered"] = bbs_dm_delivered[-25:]
     stats["bbs_dm_queued"] = bbs_dm_queued[-50:]
     stats["node_rx_counts_by_id"] = dict(node_rx_counts)
+    stats["node_rx_counts_24h_by_id"] = dict(node_rx_counts_24h)
     return stats
 
 
@@ -848,8 +864,49 @@ def _load_mesh_leaderboard() -> Dict[str, Any]:
     return lb
 
 
-def _leaderboard_web_rows(lb: Dict[str, Any]) -> List[str]:
-    """Human-readable mesh leaderboard lines for the public dashboard."""
+def _leaderboard_24h_cutoff() -> float:
+    return time.time() - _LEADERBOARD_24H_SEC
+
+
+def _leaderboard_record_in_window(rec: Any, cutoff_ts: float) -> bool:
+    if not isinstance(rec, dict) or rec.get("nodeID") is None:
+        return False
+    ts = rec.get("timestamp") or 0
+    try:
+        return float(ts) >= cutoff_ts
+    except (TypeError, ValueError):
+        return False
+
+
+def _leaderboard_24h_message_leader(log: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Meiste empfangene Kanal/DM-Nachrichten in den letzten 24h (aus Log)."""
+    if not log:
+        return None
+    counts = log.get("node_rx_counts_24h_by_id")
+    if not isinstance(counts, dict) or not counts:
+        return None
+    best_id = None
+    best_n = 0
+    for raw_id, raw_n in counts.items():
+        try:
+            n = int(raw_n)
+            nid = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if n > best_n:
+            best_n = n
+            best_id = nid
+    if best_id is None or best_n <= 0:
+        return None
+    return {"nodeID": best_id, "value": best_n, "timestamp": time.time()}
+
+
+def _leaderboard_web_rows(
+    lb: Dict[str, Any], *, log: Optional[Dict[str, Any]] = None
+) -> List[str]:
+    """Human-readable mesh leaderboard lines (nur Einträge der letzten 24h)."""
+    cutoff = _leaderboard_24h_cutoff()
+    msg_24h = _leaderboard_24h_message_leader(log)
     specs = [
         ("mostMessages", "💬 Meiste Nachrichten", lambda r: str(int(r["value"]))),
         ("mostTMessages", "📊 Meiste Telemetrie", lambda r: str(int(r["value"]))),
@@ -864,8 +921,11 @@ def _leaderboard_web_rows(lb: Dict[str, Any]) -> List[str]:
     ]
     lines: List[str] = []
     for key, title, fmt in specs:
-        rec = lb.get(key)
-        if not isinstance(rec, dict) or rec.get("nodeID") is None:
+        if key == "mostMessages" and msg_24h:
+            rec = msg_24h
+        else:
+            rec = lb.get(key)
+        if not _leaderboard_record_in_window(rec, cutoff):
             continue
         if key == "lowestBattery" and float(rec.get("value", 101)) >= 101:
             continue
@@ -878,17 +938,17 @@ def _leaderboard_web_rows(lb: Dict[str, Any]) -> List[str]:
     return lines
 
 
-def _render_mesh_leaderboard_html(lb: Dict[str, Any]) -> str:
-    lines = _leaderboard_web_rows(lb)
+def _render_mesh_leaderboard_html(
+    lb: Dict[str, Any], *, log: Optional[Dict[str, Any]] = None
+) -> str:
+    lines = _leaderboard_web_rows(lb, log=log)
     if not lines:
         return (
             '<div class="dash-card-body">'
-            '<p class="small text-muted mb-2">Mesh-Rekorde seit letztem Reset</p>'
-            '<p class="text-muted small mb-0">Noch keine Leaderboard-Daten.</p></div>'
+            '<p class="text-muted small mb-0">In den letzten 24 Stunden noch keine Rekorde.</p></div>'
         )
     return (
         '<div class="dash-card-body">'
-        '<p class="small text-muted mb-2">Mesh-Rekorde seit letztem Reset</p>'
         '<ul class="dash-list dash-scroll dash-equal-scroll mb-0">'
         + "".join(f"<li>{html_escape(line)}</li>" for line in lines)
         + "</ul></div>"
@@ -1001,25 +1061,42 @@ def _render_toplist_message_item(entry: Dict[str, Any]) -> str:
     return f'<li class="dash-toplist-msg"><div class="dash-toplist-msg__meta">{meta}</div></li>'
 
 
-def _default_dashboard_channel() -> int:
+def _dashboard_messages_channel() -> int:
+    """Kanalindex für die Messages-Topliste auf der Statistik-Seite (regional meist 1)."""
     try:
         import modules.settings as st
 
-        return int(getattr(st, "publicChannel", 0))
+        ch = int(getattr(st, "publicChannel", 0))
+        if ch > 0:
+            return ch
     except Exception:
-        return 0
+        pass
+    return 1
+
+
+def _dashboard_channel_title(channel: int, rx_node: int = 1) -> str:
+    try:
+        from modules.system import format_channel_label
+
+        return format_channel_label(channel, rx_node)
+    except Exception:
+        return f"Kanal {channel}"
+
+
+def _dashboard_messages_heading(channel: int) -> str:
+    """Überschrift-Zusatz z. B. „Kanal 1 · #1MeshHessen“."""
+    name = _dashboard_channel_title(channel)
+    generic = f"Kanal {channel}"
+    if name == generic or name == f"Channel{channel}":
+        return html_escape(generic)
+    return html_escape(f"{generic} · {name}")
 
 
 def _render_toplist_html(log: Dict[str, Any], *, channel: Optional[int] = None) -> str:
     if channel is None:
-        channel = _default_dashboard_channel()
+        channel = _dashboard_messages_channel()
     entries = _channel_recent_messages(log, channel=channel, limit=10)
-    try:
-        from modules.system import format_channel_label
-
-        ch_title = format_channel_label(channel, 1)
-    except Exception:
-        ch_title = f"Kanal {channel}"
+    ch_title = _dashboard_channel_title(channel)
     if entries:
         items = "".join(_render_toplist_message_item(e) for e in entries)
     else:
@@ -1028,10 +1105,8 @@ def _render_toplist_html(log: Dict[str, Any], *, channel: Optional[int] = None) 
         )
     return f"""
 <div class="dash-card-body">
-  <p class="small text-muted mb-2">Kanal: <strong>{html_escape(ch_title)}</strong></p>
   <ul class="dash-list dash-scroll dash-equal-scroll mb-0">{items}</ul>
-</div>
-"""
+</div>"""
 
 
 def _activity_series(hourly: Dict[str, int], *, hours: int = 48) -> tuple[List[str], List[int]]:
@@ -1376,8 +1451,10 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
         log.get("bbs_dm_queued") or [],
         enabled=bool(rt.get("bbs_enabled")),
     )
-    toplist_html = _render_toplist_html(log)
-    leaderboard_html = _render_mesh_leaderboard_html(lb)
+    msg_ch = _dashboard_messages_channel()
+    msg_ch_heading = _dashboard_messages_heading(msg_ch)
+    toplist_html = _render_toplist_html(log, channel=msg_ch)
+    leaderboard_html = _render_mesh_leaderboard_html(lb, log=log)
     log_note = ""
     if log.get("log_error"):
         log_note = f'<p class="alert alert-info mb-3"><i class="bi bi-info-circle me-2"></i>{html_escape(log["log_error"])}</p>'
@@ -1437,13 +1514,16 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
 <div class="row g-3 mb-4 dash-equal-cards">
   <div class="col-lg-6 d-flex">
     <div class="section-card flex-fill d-flex flex-column w-100">
-      <h2 class="section-title h5"><i class="bi bi-chat-left-text me-2 text-success"></i>Messages</h2>
+      <h2 class="section-title h5">
+        <i class="bi bi-chat-left-text me-2 text-success"></i>Messages
+        <span class="text-muted fw-normal fs-6">— {msg_ch_heading}</span>
+      </h2>
       {toplist_html}
     </div>
   </div>
   <div class="col-lg-6 d-flex">
     <div class="section-card flex-fill d-flex flex-column w-100">
-      <h2 class="section-title h5"><i class="bi bi-award me-2 text-success"></i>Leaderboard</h2>
+      <h2 class="section-title h5"><i class="bi bi-award me-2 text-success"></i>Leaderboard (24h)</h2>
       {leaderboard_html}
     </div>
   </div>
