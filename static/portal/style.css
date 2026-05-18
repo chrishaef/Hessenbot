@@ -1139,6 +1139,37 @@ pre.admin-pre {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
 
+.cfg-field-label {
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+.cfg-field-label__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cfg-field-label__icon {
+  font-size: 0.85rem;
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+.cfg-field-label:hover .cfg-field-label__icon,
+.cfg-field-label:focus .cfg-field-label__icon {
+  opacity: 0.95;
+  color: var(--bs-success, #198754);
+}
+
+.tooltip.cfg-field-tooltip .tooltip-inner {
+  max-width: min(22rem, 90vw);
+  text-align: left;
+  font-size: 0.82rem;
+}
+
 @media (max-width: 860px) {
   .admin-tab { padding: 0.55rem 0.75rem; font-size: 0.82rem; }
 }

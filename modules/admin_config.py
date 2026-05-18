@@ -7,6 +7,8 @@ import html
 import re
 from typing import List, Optional, Tuple
 
+from modules.admin_config_tooltips import field_tooltip
+
 SECTION_ORDER = [
     "general",
     "interface",
@@ -61,18 +63,6 @@ FIELD_LABELS = {
     ("location", "alertDuration"): "Abfrage-Intervall (Minuten)",
     ("general", "respond_by_dm_only"): "Antworten nur per DM",
     ("general", "spaceWeather"): "Weltraumwetter (sun, satpass, …)",
-}
-
-FIELD_HINTS = {
-    ("location", "deAlertAutoBroadcast"): (
-        "Aus: Warnungen nur auf Anfrage (!warning per DM, !dealert). "
-        "An: periodisch an Notfall-Kanal und eAlertBroadcastCh."
-    ),
-    ("location", "eAlertBroadcastCh"): (
-        "Leer = keine Extra-Kanäle. Notfall-Kanal: [emergencyHandler] alert_channel."
-    ),
-    ("location", "myRegionalKeysDE"): "Amtliche Regionalschlüssel, kommagetrennt.",
-    ("general", "respond_by_dm_only"): "Auch !warning und andere Befehle per DM.",
 }
 
 PASSWORD_KEYS = frozenset(
@@ -132,15 +122,47 @@ def field_label(section: str, key: str) -> str:
     return FIELD_LABELS.get((section, key), key)
 
 
-def field_hint(section: str, key: str) -> str:
-    return FIELD_HINTS.get((section, key), "")
+def _tooltip_attr(section: str, key: str) -> str:
+    tip = field_tooltip(section, key).strip()
+    if not tip:
+        return ""
+    return (
+        f' data-bs-toggle="tooltip" data-bs-placement="top" '
+        f'data-bs-title="{html.escape(tip, quote=True)}"'
+    )
+
+
+SETTINGS_TOOLTIP_SCRIPT = """
+<script>
+(function () {
+  function initCfgTooltips() {
+    if (typeof bootstrap === 'undefined') return;
+    document.querySelectorAll('#admin-settings-form [data-bs-toggle="tooltip"]').forEach(function (el) {
+      var existing = bootstrap.Tooltip.getInstance(el);
+      if (existing) existing.dispose();
+      new bootstrap.Tooltip(el, {
+        delay: { show: 250, hide: 80 },
+        trigger: 'hover focus',
+        customClass: 'cfg-field-tooltip'
+      });
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCfgTooltips);
+  } else {
+    initCfgTooltips();
+  }
+})();
+</script>
+"""
 
 
 def build_settings_form_html(config) -> str:
     chunks: List[str] = [
         '<p class="text-muted small">'
         "Alle Werte aus <code>config.ini</code>. Viele Einstellungen gelten sofort nach Speichern; "
-        "Interface- oder Log-Level-Änderungen ggf. Bot neu starten."
+        "Interface- oder Log-Level-Änderungen ggf. Bot neu starten. "
+        "Fahre mit der Maus über einen Feldnamen (ⓘ) für eine Kurzerklärung."
         "</p>",
         '<form method="post" id="admin-settings-form">',
         '<div id="settingsAccordion" class="accordion">',
@@ -166,8 +188,13 @@ def build_settings_form_html(config) -> str:
             raw = config[section][key]
             fname = field_name(section, key)
             label = html.escape(field_label(section, key))
-            hint = field_hint(section, key)
-            hint_html = f'<div class="form-text">{html.escape(hint)}</div>' if hint else ""
+            tip_attr = _tooltip_attr(section, key)
+            label_html = (
+                f'<label class="form-label small mb-1 cfg-field-label"{tip_attr}>'
+                f'<span class="cfg-field-label__text">{label}</span>'
+                f'<i class="bi bi-info-circle cfg-field-label__icon" aria-hidden="true"></i>'
+                f"</label>"
+            )
 
             if key in PASSWORD_KEYS:
                 inp = (
@@ -196,11 +223,7 @@ def build_settings_form_html(config) -> str:
                     f'name="{html.escape(fname)}" value="{html.escape(raw)}">'
                 )
 
-            chunks.append(
-                f'<div class="col-md-6 col-lg-4">'
-                f'<label class="form-label small mb-1">{label}</label>'
-                f"{inp}{hint_html}</div>"
-            )
+            chunks.append(f'<div class="col-md-6 col-lg-4">{label_html}{inp}</div>')
 
         chunks.append("</div></div></div>")
 
@@ -210,6 +233,7 @@ def build_settings_form_html(config) -> str:
         '<button type="submit" class="btn btn-success">Einstellungen speichern</button>'
         "</div></form>"
     )
+    chunks.append(SETTINGS_TOOLTIP_SCRIPT)
     return "".join(chunks)
 
 
