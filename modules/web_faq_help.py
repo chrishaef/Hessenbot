@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape as html_escape
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -176,8 +176,10 @@ def _render_entry(entry: FaqEntry) -> str:
 </div>"""
 
 
-def render_faq_page_body() -> str:
+def render_faq_page_body(pki_result: Optional[dict] = None) -> str:
     """HTML body (inside portal wrapper) for /faq."""
+    from modules.web_faq_pki_check import render_pki_checker_html
+
     intro = """
 <div class="cmd-help-intro portal-card p-4 mb-4">
   <h1 class="h3 section-title mb-3">
@@ -191,6 +193,7 @@ def render_faq_page_body() -> str:
 
     parts: List[str] = [
         intro,
+        render_pki_checker_html(pki_result),
         '<div class="accordion cmd-help-accordion" id="faqHelpAccordion">',
     ]
     for sec_idx, section in enumerate(_sections()):
