@@ -536,6 +536,27 @@ def _patch_settings_from_config(st) -> None:
                 continue
 
 
+def _sync_wx_extra_trap_list() -> None:
+    """!uv/!regen/!blitz in trap_list nach Web-Admin-Änderung."""
+    import modules.settings as st
+
+    try:
+        import modules.system as sm
+        from modules.wx_extra import trap_list_wx_extra
+    except Exception:
+        return
+
+    without = tuple(t for t in sm.trap_list if t not in trap_list_wx_extra)
+    if (
+        st.location_enabled
+        and getattr(st, "use_meteo_wxApi", False)
+        and getattr(st, "wx_extra_commands", True)
+    ):
+        sm.trap_list = without + trap_list_wx_extra
+    else:
+        sm.trap_list = without
+
+
 def _sync_metar_trap_list() -> None:
     """!metar in trap_list nach Web-Admin-Änderung (ohne Bot-Neustart)."""
     import modules.settings as st
@@ -600,6 +621,7 @@ def reload_runtime_settings() -> bool:
 
     _sync_settings_to_system()
     _sync_metar_trap_list()
+    _sync_wx_extra_trap_list()
 
     try:
         rebuild_scheduler_jobs()

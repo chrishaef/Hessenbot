@@ -109,6 +109,11 @@ if location_enabled:
     # Open-Meteo Configuration for worldwide weather
     if use_meteo_wxApi:
         from modules.wx_meteo import * # from the spudgunman/meshing-around repo
+    if wx_extra_commands and use_meteo_wxApi:
+        from modules.wx_extra import trap_list_wx_extra
+
+        trap_list = trap_list + trap_list_wx_extra
+        help_message = help_message + ", uv, regen, blitz"
     if repeater_lookup != False:
         help_message = help_message + ", rlist"
 

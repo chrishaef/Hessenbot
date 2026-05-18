@@ -340,6 +340,11 @@ try:
     fuzzItAll = config['location'].getboolean('fuzzAllLocations', False) # default False, only fuzz config location
     use_meteo_wxApi = config['location'].getboolean('UseMeteoWxAPI', False) # default False use NOAA
     metar_enabled = config['location'].getboolean('metar_enabled', True)
+    wx_extra_commands = config['location'].getboolean('wxExtraCommands', True)
+    blitz_live_data = config['location'].getboolean('blitzLiveData', True)
+    blitz_radius_km = config['location'].getint('blitzRadiusKm', 150)
+    blitzortung_user = config['location'].get('blitzortungUser', '').strip()
+    blitzortung_password = config['location'].get('blitzortungPassword', '').strip()
     use_metric = config['location'].getboolean('useMetric', False) # default Imperial units
     repeater_lookup = config['location'].get('repeaterLookup', 'rbook') # default repeater lookup source
     n2yoAPIKey = config['location'].get('n2yoAPIKey', '') # default empty
