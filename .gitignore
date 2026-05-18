@@ -5,8 +5,9 @@ ini_merge_log.txt
 install_notes.txt
 alert.txt
 
-# logs
-logs/*.log
+# logs (bot writes here; never commit rotations)
+logs/*
+!logs/README.md
 
 # modified .service files
 etc/*.service

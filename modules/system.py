@@ -361,22 +361,100 @@ def resolve_channel_name(channel_number, rxNode=1, interface_obj=None):
         cached = build_channel_cache()
         # quick search in cache first (no node calls)
         for device in cached:
-            if device.get("interface_id") == rxNode:
+            if rxNode and device.get("interface_id") != rxNode:
+                continue
+            device_channels = device.get("channels", {}) or {}
+            # info is dict: {name: {'number': X, 'hash': Y}}
+            for chan_name, info in device_channels.items():
+                try:
+                    if isinstance(info, dict):
+                        if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
+                            return (chan_name, info.get('number') or info.get('hash'))
+                    else:
+                        if str(info) == str(channel_number):
+                            return (chan_name, info)
+                except Exception:
+                    continue
+            if rxNode:
+                break
+        # fallback: any interface (e.g. dashboard without rxNode)
+        if rxNode:
+            for device in cached:
                 device_channels = device.get("channels", {}) or {}
-                # info is dict: {name: {'number': X, 'hash': Y}}
                 for chan_name, info in device_channels.items():
                     try:
                         if isinstance(info, dict):
                             if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
                                 return (chan_name, info.get('number') or info.get('hash'))
-                        else:
-                            if str(info) == str(channel_number):
-                                return (chan_name, info)
                     except Exception:
                         continue
-                break  # stop searching other devices
     except Exception as e:
         logger.debug(f"System: Error resolving channel name from cache: {e}")
+
+
+def format_channel_label(channel_number, rxNode=1, interface_obj=None) -> str:
+    """Configured Meshtastic channel name, e.g. '#1MeshHessen', or 'Kanal N'."""
+    if channel_number is None:
+        return "?"
+    try:
+        ch = int(channel_number)
+    except (TypeError, ValueError):
+        return str(channel_number)
+    res = resolve_channel_name(ch, rxNode, interface_obj)
+    if res and res[0] and str(res[0]).strip():
+        name = str(res[0]).strip()
+        if name.lower() != "unknown" and name != f"Channel{ch}":
+            return name
+    return f"Kanal {ch}"
+
+
+def format_channel_log(channel_number, rxNode=1, interface_obj=None) -> str:
+    """
+    Log token: Channel:1|#1MeshHessen (index + name) or Channel:1 if unnamed.
+    Parser-friendly; human-readable in meshbot.log.
+    """
+    if channel_number is None:
+        return "Channel:?"
+    try:
+        ch = int(channel_number)
+    except (TypeError, ValueError):
+        return f"Channel:{channel_number}"
+    label = format_channel_label(ch, rxNode, interface_obj)
+    if label == f"Kanal {ch}":
+        return f"Channel:{ch}"
+    safe = label.replace("|", "/")
+    return f"Channel:{ch}|{safe}"
+
+
+def parse_channel_log_field(field: str, rxNode=1):
+    """
+    Parse Channel: token from logs. Returns (channel_index, display_label).
+    Supports Channel:1, Channel:1|#1MeshHessen, Channel: 1 (legacy).
+    """
+    if field is None:
+        return None, "?"
+    raw = str(field).strip()
+    if not raw.lower().startswith("channel:"):
+        raw = f"Channel:{raw}"
+    body = raw.split(":", 1)[1].strip()
+    if "|" in body:
+        num_s, name = body.split("|", 1)
+        try:
+            return int(num_s), name.strip()
+        except ValueError:
+            return None, name.strip()
+    if body.isdigit():
+        ch = int(body)
+        return ch, format_channel_label(ch, rxNode)
+    # name-only (new logs with named channel only)
+    cached = build_channel_cache()
+    for device in cached:
+        if rxNode and device.get("interface_id") != rxNode:
+            continue
+        for chan_name, info in (device.get("channels") or {}).items():
+            if chan_name == body and isinstance(info, dict) and info.get("number") is not None:
+                return int(info["number"]), body
+    return None, body
 
 
 def cleanup_memory():
@@ -961,10 +1039,10 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
                 if nodeid == 0:
                     # Send to channel
                     if wantAck:
-                        logger.info(f"Device:{nodeInt} Channel:{ch} " + CustomFormatter.red + f"req.ACK " + f"Chunker{chunkOf} SendingChannel: " + CustomFormatter.white + m.replace('\n', ' '))
+                        logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + f"req.ACK " + f"Chunker{chunkOf} SendingChannel: " + CustomFormatter.white + m.replace('\n', ' '))
                         _send_with_reply(text=m, channelIndex=ch, wantAck=True)
                     else:
-                        logger.info(f"Device:{nodeInt} Channel:{ch} " + CustomFormatter.red + f"Chunker{chunkOf} SendingChannel: " + CustomFormatter.white + m.replace('\n', ' '))
+                        logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + f"Chunker{chunkOf} SendingChannel: " + CustomFormatter.white + m.replace('\n', ' '))
                         _send_with_reply(text=m, channelIndex=ch)
                 else:
                     # Send to DM
@@ -989,10 +1067,10 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
             if nodeid == 0:
                 # Send to channel
                 if wantAck:
-                    logger.info(f"Device:{nodeInt} Channel:{ch} " + CustomFormatter.red + "req.ACK " + "SendingChannel: " + CustomFormatter.white + message.replace('\n', ' '))
+                    logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + "req.ACK " + "SendingChannel: " + CustomFormatter.white + message.replace('\n', ' '))
                     _send_with_reply(text=message, channelIndex=ch, wantAck=True)
                 else:
-                    logger.info(f"Device:{nodeInt} Channel:{ch} " + CustomFormatter.red + "SendingChannel: " + CustomFormatter.white + message.replace('\n', ' '))
+                    logger.info(f"Device:{nodeInt} {format_channel_log(ch, nodeInt)} " + CustomFormatter.red + "SendingChannel: " + CustomFormatter.white + message.replace('\n', ' '))
                     _send_with_reply(text=message, channelIndex=ch)
             else:
                 # Send to DM

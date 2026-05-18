@@ -1296,7 +1296,7 @@ def onReceive(packet, interface):
                 # check if the message contains a trap word, DMs are always responded to
                 if (messageTrap(message_string) and not llm_enabled) or messageTrap(message_string.split()[0]):
                     # log the message to stdout
-                    logger.info(f"Device:{rxNode} Channel: {channel_number} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
+                    logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                 "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
                     # rate limit check
                     if is_cmd_rate_limited(message_from_id):
@@ -1326,7 +1326,7 @@ def onReceive(packet, interface):
                         
                     # log the message to the message log
                     if log_messages_to_file:
-                        msgLogger.info(f"Device:{rxNode} Channel:{channel_number} | {get_name_from_number(message_from_id, 'long', rxNode)} | DM | " + message_log_string)
+                        msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | DM | " + message_log_string)
             else:
                 # message is on a channel
                 if messageTrap(message_string):
@@ -1341,7 +1341,7 @@ def onReceive(packet, interface):
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Didnt sound like they meant it")
                     else:
                         # message is for bot to respond to, seriously this time..
-                        logger.info(f"Device:{rxNode} Channel:{channel_number} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
+                        logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                     "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
                         # rate limit check
                         if is_cmd_rate_limited(message_from_id):
@@ -1378,10 +1378,10 @@ def onReceive(packet, interface):
                     msg_history.append((get_name_from_number(message_from_id, 'long', rxNode), message_string, channel_number, timestamp, rxNode))
 
                     # print the message to the log and sdout
-                    logger.info(f"Device:{rxNode} Channel:{channel_number} " + CustomFormatter.green + "Ignoring Message:" + CustomFormatter.white +\
+                    logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "Ignoring Message:" + CustomFormatter.white +\
                                 f" {message_log_string} " + CustomFormatter.purple + "From:" + CustomFormatter.white + f" {get_name_from_number(message_from_id)}")
                     if my_settings.log_messages_to_file:
-                        msgLogger.info(f"Device:{rxNode} Channel:{channel_number} | {get_name_from_number(message_from_id, 'long', rxNode)} | " + message_log_string)
+                        msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | " + message_log_string)
 
                     # repeat the message on the other device
                     if my_settings.repeater_enabled and my_settings.multiple_interface:
