@@ -63,23 +63,44 @@ def _load_warning_detail(warning_id: str) -> dict:
     return result
 
 
+def _area_from_payload(item: dict) -> str:
+    """Extract area directly from dashboard payload.data (no extra HTTP call)."""
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    return str(data.get("area") or data.get("areaDesc") or "").strip()
+
+
+def _description_from_payload(item: dict) -> str:
+    """Extract description + instruction directly from dashboard payload.data."""
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    desc = str(data.get("description") or "").strip()
+    instr = str(data.get("instruction") or "").strip()
+    if desc and instr:
+        return f"{desc}\nℹ️ {instr}"
+    return desc or instr
+
+
 def _fetch_warning_area(item: dict) -> str:
-    """Return short areaDesc (max 60 chars) for display in alert lines."""
-    warning_id = _warning_id_from_item(item)
-    if not warning_id:
-        return ""
-    area = _load_warning_detail(warning_id).get("area", "")
+    """Return short areaDesc (max 60 chars). Uses payload.data first, detail API as fallback."""
+    area = _area_from_payload(item)
+    if not area:
+        warning_id = _warning_id_from_item(item)
+        if warning_id:
+            area = _load_warning_detail(warning_id).get("area", "")
     if len(area) > 60:
         area = area[:59] + "…"
     return area
 
 
 def _fetch_warning_description(item: dict) -> str:
-    """Return full description text for DM detail responses."""
-    warning_id = _warning_id_from_item(item)
-    if not warning_id:
-        return ""
-    return _load_warning_detail(warning_id).get("description", "")
+    """Return full description text. Uses payload.data first, detail API as fallback."""
+    desc = _description_from_payload(item)
+    if not desc:
+        warning_id = _warning_id_from_item(item)
+        if warning_id:
+            desc = _load_warning_detail(warning_id).get("description", "")
+    return desc
 
 
 def normalize_nina_ars(regional_key: str) -> str:
