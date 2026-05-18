@@ -459,9 +459,15 @@ def handle_dealert(message_from_id, deviceID):
     return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
 
 def handle_wxc(message_from_id, deviceID, days=None, vox=False):
+    from modules.wx_meteo import format_wx_info_header, get_wx_meteo
+
     location = get_node_location(message_from_id, deviceID)
     unit = 1 if my_settings.use_metric else 0
-    return get_wx_meteo(str(location[0]), str(location[1]), unit)
+    report = get_wx_meteo(str(location[0]), str(location[1]), unit)
+    if not report or report == ERROR_FETCHING_DATA:
+        return report
+    header = format_wx_info_header(location[0], location[1])
+    return f"{header}\n{report}"
 
 def handle_warning(message_from_id, deviceID, channel_number, isDM):
     if not my_settings.enableDEalerts:
