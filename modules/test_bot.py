@@ -174,6 +174,13 @@ class TestBot(unittest.TestCase):
         self.assertIsInstance(get_wx_meteo(lat, lon), str)
 
     @_skip_unless_checkall()
+    def test_get_metar(self):
+        from modules.metar import get_metar
+        result = get_metar(lat, lon)
+        self.assertIsInstance(result, str)
+        self.assertIn("METAR", result)
+
+    @_skip_unless_checkall()
     def test_get_flood_openmeteo(self):
         from modules.wx_meteo import get_flood_openmeteo
         self.assertIsInstance(get_flood_openmeteo(lat, lon), str)

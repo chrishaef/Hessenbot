@@ -164,6 +164,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "whois": lambda: handle_whois(message, deviceID, channel_number, message_from_id),
     "wiki": lambda: handle_wiki(message, isDM),
     "wx": lambda: handle_wxc(message_from_id, deviceID),
+    "metar": lambda: handle_metar(message_from_id, deviceID),
     "x:": lambda: handleShellCmd(message, message_from_id, channel_number, isDM, deviceID),
     "📍": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
     "🔔": lambda: handle_alertBell(message_from_id, deviceID, message),
@@ -468,6 +469,18 @@ def handle_wxc(message_from_id, deviceID, days=None, vox=False):
         return report
     header = format_wx_info_header(location[0], location[1])
     return f"{header}\n{report}"
+
+
+def handle_metar(message_from_id, deviceID):
+    if not my_settings.location_enabled:
+        return "Standortmodul aus ([location] enabled = False)."
+    if not getattr(my_settings, "metar_enabled", True):
+        return "🤖 METAR (!metar) ist in der Konfiguration deaktiviert."
+    from modules.metar import get_metar
+
+    location = get_node_location(message_from_id, deviceID)
+    return get_metar(str(location[0]), str(location[1]))
+
 
 def handle_warning(message_from_id, deviceID, channel_number, isDM):
     if not my_settings.enableDEalerts:

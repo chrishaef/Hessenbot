@@ -130,6 +130,12 @@ def _sections() -> List[CommandSection]:
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
                 CommandEntry(
+                    f"{p}metar",
+                    "METAR des nächsten Flugplatzes zu deinem Standort (aviationweather.gov).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "metar_enabled", True),
+                ),
+                CommandEntry(
                     f"{p}warning",
                     "Aktive Warnungen für den Kreis deiner GPS-Position.",
                     enabled=lambda: getattr(st, "enableDEalerts", False),

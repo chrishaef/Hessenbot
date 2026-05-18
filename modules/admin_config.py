@@ -61,6 +61,8 @@ FIELD_LABELS = {
     ("location", "myRegionalKeysDE"): "ARS-Regionen (!dealert / Auto-Broadcast)",
     ("location", "eAlertBroadcastCh"): "Zusätzliche Kanäle (kommagetrennt)",
     ("location", "alertDuration"): "Abfrage-Intervall (Minuten)",
+    ("location", "metar_enabled"): "METAR !metar (nächster Flugplatz)",
+    ("location", "UseMeteoWxAPI"): "Wetter !wx (Open-Meteo statt NOAA)",
     ("general", "respond_by_dm_only"): "Antworten nur per DM",
     ("general", "spaceWeather"): "Weltraumwetter (sun, satpass, …)",
 }
