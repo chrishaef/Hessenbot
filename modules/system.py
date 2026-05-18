@@ -96,6 +96,11 @@ if location_enabled:
     from modules.locationdata import * # from the spudgunman/meshing-around repo
     trap_list = trap_list + trap_list_location
     help_message = help_message + ", whereami, wx, howfar, loc"
+    if metar_enabled:
+        from modules.metar import trap_list_metar
+
+        trap_list = trap_list + trap_list_metar
+        help_message = help_message + ", metar"
     if enableDEalerts:
         from modules.globalalert import * # from the spudgunman/meshing-around repo
         trap_list = trap_list + trap_list_location_de

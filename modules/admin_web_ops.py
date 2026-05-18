@@ -536,6 +536,23 @@ def _patch_settings_from_config(st) -> None:
                 continue
 
 
+def _sync_metar_trap_list() -> None:
+    """!metar in trap_list nach Web-Admin-Änderung (ohne Bot-Neustart)."""
+    import modules.settings as st
+
+    try:
+        import modules.system as sm
+        from modules.metar import trap_list_metar
+    except Exception:
+        return
+
+    without = tuple(t for t in sm.trap_list if t not in trap_list_metar)
+    if st.location_enabled and getattr(st, "metar_enabled", True):
+        sm.trap_list = without + trap_list_metar
+    else:
+        sm.trap_list = without
+
+
 def _sync_settings_to_system() -> None:
     import modules.settings as st
 
@@ -582,6 +599,7 @@ def reload_runtime_settings() -> bool:
         _patch_settings_from_config(st)
 
     _sync_settings_to_system()
+    _sync_metar_trap_list()
 
     try:
         rebuild_scheduler_jobs()

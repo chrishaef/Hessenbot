@@ -233,6 +233,8 @@ satList = 25544,7530
 
 # use Open-Meteo API for weather data not NOAA useful for non US locations
 UseMeteoWxAPI = True
+# METAR of nearest airport for !metar (aviationweather.gov; needs GPS or config lat/lon)
+metar_enabled = True
 
 # Use Germany/DE Alert Broadcast Data (NINA/Katwarn/DWD via warnung.bund.de)
 enableDEalerts = True
