@@ -4,8 +4,28 @@
 import requests
 import json
 from modules.log import logger
-from modules.settings import ERROR_FETCHING_DATA
+from modules.settings import ERROR_FETCHING_DATA, NO_DATA_NOGPS
 from modules.locale_de import wmo_weather_de, wind_direction_de
+
+
+def format_wx_info_header(lat, lon) -> str:
+    """Erste Zeile für !wx: Standort, für den die Vorhersage gilt."""
+    try:
+        lat_f, lon_f = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return "WX INFO @ QTH ?"
+    if int(lat_f) == 0 and int(lon_f) == 0:
+        return "WX INFO @ QTH (kein Standort)"
+    try:
+        from modules.locationdata import get_place_name
+
+        place = get_place_name(lat_f, lon_f)
+    except Exception:
+        place = "?"
+    if place and place != "?":
+        return f"WX INFO @ QTH {place}"
+    return f"WX INFO @ QTH {lat_f:.2f}, {lon_f:.2f}"
+
 
 def get_weather_data(api_url, params):
     response = requests.get(api_url, params=params)
@@ -34,6 +54,13 @@ def get_wx_meteo(lat=0, lon=0, unit=0):
 		params["precipitation_unit"] = "inch"
 		params["distance_unit"] = "mile"
 		params["pressure_unit"] = "inHg"
+
+	try:
+		lat_f, lon_f = float(lat), float(lon)
+	except (TypeError, ValueError):
+		lat_f, lon_f = 0.0, 0.0
+	if int(lat_f) == 0 and int(lon_f) == 0:
+		return NO_DATA_NOGPS
 
 	try:
 		# Fetch the weather data
