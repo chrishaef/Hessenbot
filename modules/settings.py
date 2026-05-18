@@ -547,6 +547,9 @@ try:
     autoBanThreshold = config['messagingSettings'].getint('autoBanThreshold', 5) # default 5 offenses
     autoBanTimeframe = config['messagingSettings'].getint('autoBanTimeframe', 3600) # default 1 hour in seconds
     apiThrottleValue = config['messagingSettings'].getint('apiThrottleValue', 20) # default 20 requests
+    cmdRateLimitEnabled = config['messagingSettings'].getboolean('cmdRateLimitEnabled', True)
+    cmdRateLimitMax = config['messagingSettings'].getint('cmdRateLimitMax', 5) # max commands per window
+    cmdRateLimitWindow = config['messagingSettings'].getint('cmdRateLimitWindow', 30) # window in seconds
 
     # data persistence settings
     dataPersistence_enabled = config.getboolean('dataPersistence', 'enabled', fallback=True) # default True

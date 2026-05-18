@@ -604,6 +604,7 @@ def handle_boot(mesh=True):
         if my_settings.autoBanEnabled:
             logger.debug(f"System: Auto-Ban Enabled for {my_settings.autoBanThreshold} messages in {my_settings.autoBanTimeframe} seconds")
             load_bbsBanList()
+            load_autoBanList()
 
         if my_settings.log_messages_to_file:
             logger.debug("System: Logging Messages to disk")
