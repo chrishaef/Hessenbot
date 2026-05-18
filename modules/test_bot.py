@@ -49,6 +49,24 @@ class TestBot(unittest.TestCase):
     def test_example(self):
         self.assertEqual(1 + 1, 2)
 
+    def test_packet_dedup_by_id(self):
+        from modules import packet_dedup
+
+        packet_dedup._seen.clear()
+        packet_dedup._stats["dropped"] = 0
+        packet_dedup._stats["accepted"] = 0
+        pkt = {
+            "from": 1234567890,
+            "id": 42,
+            "to": 0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!cmd"},
+        }
+        self.assertFalse(packet_dedup.should_drop_duplicate_packet(pkt))
+        self.assertTrue(packet_dedup.should_drop_duplicate_packet(pkt))
+        pkt2 = dict(pkt)
+        pkt2["id"] = 43
+        self.assertFalse(packet_dedup.should_drop_duplicate_packet(pkt2))
+
     def test_load_bbsdb(self):
         from modules.bbstools import load_bbsdb
         self.assertTrue(load_bbsdb())

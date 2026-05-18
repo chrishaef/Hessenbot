@@ -1,0 +1,6 @@
+2026-05-15 16:40:10,146 |    DEBUG | System: bbsdb.pkl not found, creating new one
+2026-05-15 16:40:10,147 |    DEBUG | System: Creating new data/bbsdm.pkl
+2026-05-15 19:42:36,335 |    DEBUG | NINA: loaded 11058 gemeinden for ARS lookup
+2026-05-15 20:02:16,547 |    DEBUG | NINA: loaded 11058 gemeinden for ARS lookup
+2026-05-15 20:02:25,220 |    DEBUG | NINA: loaded 11058 gemeinden for ARS lookup
+2026-05-15 21:18:47,234 |     INFO | FileMon: No news sources found

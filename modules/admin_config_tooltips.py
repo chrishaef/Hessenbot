@@ -20,6 +20,9 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("interface2", "hostname"): "IP/Hostname des zweiten Geräts bei tcp.",
     ("interface2", "mac"): "Bluetooth-MAC des zweiten Geräts bei ble.",
     # ── general ──
+    ("general", "packetDedupEnabled"): "True: Gleiches Mesh-Paket nur einmal verarbeiten (z. B. wenn es per MQTT und UDP ankommt). UDP bleibt als Fallback aktiv.",
+    ("general", "packetDedupTtlSeconds"): "Wie lange ein Paket als „schon gesehen“ gilt (Sekunden).",
+    ("general", "packetDedupMaxEntries"): "Maximale Anzahl gespeicherter Paket-IDs; älteste fallen weg.",
     ("general", "respond_by_dm_only"): "Antworten gehen als DM an die anfragende Node — auch wenn der Befehl im Kanal kam.",
     ("general", "autoPingInChannel"): "True: !ping kann mehrere Folge-Pings auslösen; False: nur eine Antwort.",
     ("general", "defaultChannel"): "Nummer des öffentlichen Meshtastic-Kanals (LongFast oft 0). -1 = kein Standardkanal.",

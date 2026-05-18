@@ -1035,8 +1035,11 @@ def onReceive(packet, interface):
         decoded = {}
 
     from modules.mesh_sim_tunnel import unwrap_sim_tunnel_packet
+    from modules.packet_dedup import should_drop_duplicate_packet
 
     unwrap_sim_tunnel_packet(packet)
+    if should_drop_duplicate_packet(packet):
+        return
     decoded = packet.get('decoded') or {}
 
     # extract interface details from inbound packet
