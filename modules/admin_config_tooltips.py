@@ -229,6 +229,7 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("messagingSettings", "MESSAGE_CHUNK_SIZE"): "Max. Zeichen pro Mesh-Nachrichtenteil.",
     ("messagingSettings", "wantAck"): "True: Bot fordert Empfangsbestätigung für alle Kanal-Teile einer Antwort.",
     ("messagingSettings", "wantAckOnDm"): "True: Bei DM-Antworten Bestätigung nur für das erste Teil anfordern; Log: „DM delivery confirmed/failed“.",
+    ("messagingSettings", "dmDeliveryFailAlertThreshold"): "Nach so vielen DM-Zustellfehlern hintereinander an dieselbe Node: Admin-Warnung im Log.",
     ("messagingSettings", "maxBuffer"): "Max. Bytes für Puffertest/Auto-Ping-Nachrichtenlänge.",
     ("messagingSettings", "enableHopLogs"): "True: Hop-Anzahl wird in Logs/Antworten detaillierter protokolliert.",
     ("messagingSettings", "noisyNodeLogging"): "True: Knoten mit viel Telemetrie werden im Log gemeldet.",

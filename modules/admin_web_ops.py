@@ -47,17 +47,38 @@ def _parse_node_gps(node: Dict[str, Any]) -> Tuple[bool, Optional[float], Option
 
 
 def format_node_location_html(
-    has_gps: bool,
+    has_position: bool,
     lat: Optional[float] = None,
     lon: Optional[float] = None,
+    *,
+    source: str = "gps",
 ) -> str:
-    if not has_gps or lat is None or lon is None:
-        return '<span class="text-muted" title="Keine GPS-Position in der NodeDB">—</span>'
+    if not has_position or lat is None or lon is None:
+        return '<span class="text-muted" title="Keine Position (weder NodeDB noch Mesh-Karte)">—</span>'
     coords = html.escape(f"{lat:.5f}, {lon:.5f}")
-    return (
-        f'<span class="badge bg-success me-1" title="GPS in NodeDB">GPS</span>'
-        f'<code class="small text-nowrap">{coords}</code>'
-    )
+    if source == "map":
+        badge = (
+            '<span class="badge bg-info me-1" title="Position aus Mesh-Karte (nodes.json)">Karte</span>'
+        )
+    else:
+        badge = '<span class="badge bg-success me-1" title="Position in der NodeDB">GPS</span>'
+    return f'{badge}<code class="small text-nowrap">{coords}</code>'
+
+
+def _map_position_for_node(node_num: int) -> Tuple[bool, Optional[float], Optional[float]]:
+    sm = _system_mod()
+    try:
+        sm._ensure_mesh_map_positions_loaded()
+        snap = sm.mesh_map_node_positions.get(int(node_num))
+        if not snap:
+            return False, None, None
+        lat = float(snap["lat"])
+        lon = float(snap["lon"])
+        if lat == 0.0 and lon == 0.0:
+            return False, None, None
+        return True, lat, lon
+    except Exception:
+        return False, None, None
 
 
 def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
@@ -88,6 +109,12 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
         snr = node.get("snr", "")
         is_self = num == myn
         has_gps, lat, lon = _parse_node_gps(node)
+        loc_source = "gps"
+        if not has_gps:
+            has_map, lat, lon = _map_position_for_node(int(num))
+            if has_map:
+                has_gps = True
+                loc_source = "map"
         try:
             node_id_disp = html.escape(decimal_to_hex(int(num)))
         except (TypeError, ValueError):
@@ -103,7 +130,10 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
                 "snr": snr,
                 "is_self": is_self,
                 "has_gps": has_gps,
-                "location_html": format_node_location_html(has_gps, lat, lon),
+                "location_source": loc_source,
+                "location_html": format_node_location_html(
+                    has_gps, lat, lon, source=loc_source
+                ),
             }
         )
     rows.sort(key=lambda r: r.get("lastHeard_raw", 0), reverse=True)

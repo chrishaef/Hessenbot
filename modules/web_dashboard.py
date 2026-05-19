@@ -1230,6 +1230,15 @@ def collect_runtime_stats() -> Dict[str, Any]:
     return out
 
 
+def _want_ack_on_dm_enabled() -> bool:
+    try:
+        from modules import settings as st
+
+        return bool(getattr(st, "wantAckOnDm", True))
+    except Exception:
+        return True
+
+
 def collect_dashboard(log_dir: str) -> Dict[str, Any]:
     try:
         from modules.system import refresh_channel_cache
@@ -1241,12 +1250,30 @@ def collect_dashboard(log_dir: str) -> Dict[str, Any]:
     log_path = os.path.join(base, "meshbot.log")
     if not os.path.isfile(log_path):
         log_path = path_in_repo("logs/meshbot.log")
+    want_ack_dm = _want_ack_on_dm_enabled()
+    dm_delivery_24h = None
+    if want_ack_dm:
+        try:
+            from modules.dm_delivery_stats import parse_dm_delivery_stats_24h
+
+            dm_delivery_24h = parse_dm_delivery_stats_24h(log_dir)
+        except Exception:
+            dm_delivery_24h = {
+                "confirmed": 0,
+                "failed_pki": 0,
+                "failed_other": 0,
+                "hours": 24,
+                "lines_scanned": 0,
+                "top_problem_nodes": [],
+            }
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "repo": repo_root(),
         "log_path": log_path,
         "log": parse_meshbot_log(log_path),
         "runtime": collect_runtime_stats(),
+        "want_ack_on_dm": want_ack_dm,
+        "dm_delivery_24h": dm_delivery_24h,
     }
 
 
@@ -1455,6 +1482,41 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     msg_ch_heading = _dashboard_messages_heading(msg_ch)
     toplist_html = _render_toplist_html(log, channel=msg_ch)
     leaderboard_html = _render_mesh_leaderboard_html(lb, log=log)
+    want_ack_dm = bool(data.get("want_ack_on_dm"))
+    dm_stats = data.get("dm_delivery_24h")
+    row_col = "col-lg-4" if want_ack_dm else "col-lg-6"
+    dm_delivery_col = ""
+    if want_ack_dm and dm_stats is not None:
+        from modules.dm_delivery_stats import render_dm_delivery_stats_html
+
+        dm_delivery_col = f"""
+  <div class="{row_col} d-flex">
+    <div class="section-card flex-fill d-flex flex-column w-100">
+      <h2 class="section-title h5">
+        <i class="bi bi-envelope-check me-2 text-success"></i>DM-Zustellung (24h)
+      </h2>
+      {render_dm_delivery_stats_html(dm_stats, compact=True)}
+    </div>
+  </div>"""
+    messages_lb_row_html = f"""
+<div class="row g-3 mb-4 dash-equal-cards">
+  <div class="{row_col} d-flex">
+    <div class="section-card flex-fill d-flex flex-column w-100">
+      <h2 class="section-title h5">
+        <i class="bi bi-chat-left-text me-2 text-success"></i>Messages
+        <span class="text-muted fw-normal fs-6">— {msg_ch_heading}</span>
+      </h2>
+      {toplist_html}
+    </div>
+  </div>
+  <div class="{row_col} d-flex">
+    <div class="section-card flex-fill d-flex flex-column w-100">
+      <h2 class="section-title h5"><i class="bi bi-award me-2 text-success"></i>Leaderboard (24h)</h2>
+      {leaderboard_html}
+    </div>
+  </div>
+  {dm_delivery_col}
+</div>"""
     log_note = ""
     if log.get("log_error"):
         log_note = f'<p class="alert alert-info mb-3"><i class="bi bi-info-circle me-2"></i>{html_escape(log["log_error"])}</p>'
@@ -1511,23 +1573,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
   </div>
 </div>
 
-<div class="row g-3 mb-4 dash-equal-cards">
-  <div class="col-lg-6 d-flex">
-    <div class="section-card flex-fill d-flex flex-column w-100">
-      <h2 class="section-title h5">
-        <i class="bi bi-chat-left-text me-2 text-success"></i>Messages
-        <span class="text-muted fw-normal fs-6">— {msg_ch_heading}</span>
-      </h2>
-      {toplist_html}
-    </div>
-  </div>
-  <div class="col-lg-6 d-flex">
-    <div class="section-card flex-fill d-flex flex-column w-100">
-      <h2 class="section-title h5"><i class="bi bi-award me-2 text-success"></i>Leaderboard (24h)</h2>
-      {leaderboard_html}
-    </div>
-  </div>
-</div>
+{messages_lb_row_html}
 
 <div class="row g-3 mb-4">
   <div class="col-lg-6">
