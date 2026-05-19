@@ -170,7 +170,7 @@ def render_dm_delivery_stats_html(stats: Dict[str, Any], *, compact: bool = Fals
         total = c + fp + fo
         if total > 0:
             chart_block = (
-                '<div class="chart-canvas-wrap dm-delivery-chart-wrap mt-2">'
+                '<div class="chart-canvas-wrap dm-delivery-chart-wrap">'
                 '<canvas id="dmDeliveryChart" aria-label="DM-Zustellung Diagramm"></canvas>'
                 "</div>"
             )
@@ -181,7 +181,7 @@ def render_dm_delivery_stats_html(stats: Dict[str, Any], *, compact: bool = Fals
                 "</p>"
             )
         return f"""
-<div class="dm-delivery-stats-compact d-flex flex-column h-100">
+<div class="dm-delivery-stats-compact">
   <div class="row g-2 text-center mb-0">
     <div class="col-4">
       <div class="metric-label small">Bestätigt</div>
