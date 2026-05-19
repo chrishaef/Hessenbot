@@ -60,6 +60,8 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("general", "llmUseWikiContext"): "True: LLM erhält automatisch Wikipedia/Kiwix-Kontext (RAG).",
     ("general", "StoreForward"): "True: Bot kann Nachrichten zwischenspeichern und später ausliefern.",
     ("general", "StoreLimit"): "Maximale Anzahl gespeicherter Nachrichten pro Node.",
+    ("general", "messagesChannel"): "Kanalindex für !messages (z. B. 1 = #1MeshHessen).",
+    ("general", "messagesLimit"): "Wie viele Nachrichten !messages anzeigt (Standard 5).",
     ("general", "reverseSF"): "True: Älteste gespeicherte Nachricht zuerst; False: neueste zuerst.",
     ("general", "enableCmdHistory"): "True: Befehle !history / lheard nutzen Verlauf.",
     ("general", "lheardCmdIgnoreNodes"): "Knoten-IDs, deren Befehle nicht im Verlauf erscheinen.",

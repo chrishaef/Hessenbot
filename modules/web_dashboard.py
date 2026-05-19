@@ -1062,13 +1062,11 @@ def _render_toplist_message_item(entry: Dict[str, Any]) -> str:
 
 
 def _dashboard_messages_channel() -> int:
-    """Kanalindex für die Messages-Topliste auf der Statistik-Seite (regional meist 1)."""
+    """Kanalindex für die Messages-Topliste (gleicher Kanal wie !messages)."""
     try:
         import modules.settings as st
 
-        ch = int(getattr(st, "publicChannel", 0))
-        if ch > 0:
-            return ch
+        return int(getattr(st, "messages_channel", 1))
     except Exception:
         pass
     return 1

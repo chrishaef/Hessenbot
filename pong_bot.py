@@ -35,7 +35,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
         "lheard": lambda: handle_lheard(message, message_from_id, deviceID, isDM),
         "motd": lambda: handle_motd(message, MOTD),
         "ping": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-        "pong": lambda: "🏓PING!!🛜",
+        "pong": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
         "sitrep": lambda: lambda: handle_lheard(message, message_from_id, deviceID, isDM),
         "sysinfo": lambda: sysinfo(message, message_from_id, deviceID),
         "test": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
@@ -71,45 +71,30 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
         "🏓 ping @USERID to send a Joke from the bot"
         return pingHelp
     
+    msg_lower = message.lower()
+    words = msg_lower.split()
     msg = ""
-    type = ''
+    type = ""
+    rich_ping = True
 
-    if "ping" in message.lower():
-        msg = "🏓PONG"
-        type = "🏓PING"
-    elif "test" in message.lower() or "testing" in message.lower():
-        msg = random.choice(["🎙Testing 1,2,3", "🎙Testing",\
-                             "🎙Testing, testing",\
-                             "🎙Ah-wun, ah-two...", "🎙Is this thing on?",\
-                             "🎙Roger that!",])
+    if "test" in msg_lower or "testing" in msg_lower:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
         type = "🎙TEST"
-    elif "ack" in message.lower():
-        msg = random.choice(["✋ACK-ACK!\n", "✋Ack to you!\n"])
+    elif "pong" in words:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        type = "🏓PONG"
+    elif "ping" in msg_lower:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        type = "🏓PING"
+    elif "ack" in msg_lower:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ACK")
         type = "✋ACK"
-    elif "cqcq" in message.lower() or "cq" in message.lower() or "cqcqcq" in message.lower():
-        if deviceID == 1:
-            myname = get_name_from_number(deviceID, 'short', 1)
-        elif deviceID == 2:
-            myname = get_name_from_number(deviceID, 'short', 2)
-        msg = f"QSP QSL OM DE  {myname}   K\n"
+    elif "cqcq" in msg_lower or "cq" in words or "cqcqcq" in msg_lower:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        type = "CQ"
     else:
-        msg = "🔊 Can you hear me now?"
-
-    # append SNR/RSSI or hop info
-    if hop.startswith("Gateway") or hop.startswith("MQTT"):
-        msg += " [GW]"
-    elif hop.startswith("Direct"):
-        msg += " [RF]"
-    else:
-        #flood
-        msg += " [F]"
-    
-    if (float(snr) != 0 or float(rssi) != 0) and "Hop" not in hop:
-        msg += f"\nSNR:{snr} RSSI:{rssi}"
-    elif "Hop" in hop:
-        # janky, remove the words Gateway or MQTT if present
-        hop = hop.replace("Gateway", "").replace("Direct", "").replace("MQTT", "").strip()
-        msg += f"\n{hop} "
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        type = "QSL"
 
     if "@" in message:
         msg = msg + " @" + message.split("@")[1]
@@ -155,10 +140,9 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
             else:
                 msg = f"🚦Initalizing {pingCount} auto-ping"
 
-    # if not a DM add the username to the beginning of msg
-    if not my_settings.useDMForResponse and not isDM:
-        msg = "@" + get_name_from_number(message_from_id, 'short', deviceID) + " " + msg
-            
+    if not my_settings.useDMForResponse and not isDM and not rich_ping:
+        msg = "@" + get_name_from_number(message_from_id, "short", deviceID) + " " + msg
+
     return msg
 
 def handle_motd(message, message_from_id, isDM):
