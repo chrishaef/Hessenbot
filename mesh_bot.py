@@ -710,6 +710,59 @@ def handle_whereami(message_from_id, deviceID, channel_number):
     return msg
 
 
+def handle_howfar(message, message_from_id, deviceID, isDM):
+    if "?" in message:
+        return (
+            "!howfar — zurückgelegte Strecke seit dem letzten Aufruf. "
+            "!howfar reset setzt den Startpunkt zurück."
+        )
+    if not my_settings.location_enabled:
+        return "Standortmodul aus ([location] enabled = False)."
+    check_throttle = api_throttle(message_from_id, deviceID, apiName="howfar")
+    if check_throttle:
+        return check_throttle
+    location = get_node_location(message_from_id, deviceID)
+    reset = "reset" in message.lower()
+    return distance(location[0], location[1], message_from_id, reset=reset)
+
+
+def handle_howtall(message, message_from_id, deviceID, isDM):
+    if "?" in message:
+        return (
+            "!howtall <Schatten> — Höhe per Sonnenwinkel, "
+            "z. B. !howtall 2 (Schattenlänge in m oder ft)."
+        )
+    if not my_settings.solar_conditions_enabled:
+        return "Sonnen-Befehle aus (spaceWeather = False in config)."
+    check_throttle = api_throttle(message_from_id, deviceID, apiName="howtall")
+    if check_throttle:
+        return check_throttle
+    location = get_node_location(message_from_id, deviceID)
+    shadow = None
+    parts = message.replace("!", " ").split()
+    for i, part in enumerate(parts):
+        if part.lower().startswith("howtall"):
+            if i + 1 < len(parts):
+                try:
+                    shadow = float(parts[i + 1].replace(",", "."))
+                except ValueError:
+                    pass
+            break
+    if shadow is None:
+        for part in parts:
+            pl = part.lower()
+            if pl in ("howtall", "howtall?"):
+                continue
+            try:
+                shadow = float(part.replace(",", "."))
+                break
+            except ValueError:
+                continue
+    if shadow is None:
+        return "Bitte Schattenlänge angeben, z. B. !howtall 2"
+    return measureHeight(location[0], location[1], shadow)
+
+
 def handle_loc(message, message_from_id, deviceID, channel_number):
     """Show last known position of a mesh node from NodeDB or mesh map snapshot."""
     if "?" in message:
