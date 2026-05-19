@@ -97,8 +97,9 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          layout: { padding: 4 },
           plugins: {
-            legend: { position: "bottom", labels: { color: ticks, boxWidth: 12, padding: 10 } },
+            legend: { display: false },
           },
         },
       });

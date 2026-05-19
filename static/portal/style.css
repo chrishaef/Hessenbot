@@ -869,9 +869,26 @@ body.page-login {
   height: 240px;
 }
 
-.dm-delivery-chart-wrap {
+/* Top-Befehle + DM-Zustellung: gleiche Kachelhöhe, Charts unten bündig */
+.dash-charts-pair .dash-card-body {
   flex: 1 1 auto;
-  min-height: 160px;
+  min-height: 0;
+}
+
+.dash-charts-pair .dash-card-body > .chart-canvas-wrap,
+.dash-charts-pair .dm-delivery-chart-wrap {
+  margin-top: auto;
+  height: 200px;
+  flex: 0 0 200px;
+  overflow: hidden;
+}
+
+.dash-charts-pair .dm-delivery-stats-compact {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .dash-view-nav .dash-view-btn {

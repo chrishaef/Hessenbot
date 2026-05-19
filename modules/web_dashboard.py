@@ -1556,11 +1556,11 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
   {activity_chart_body}
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4 dash-equal-cards dash-charts-pair">
   <div class="col-lg-6">
-    <div class="section-card">
+    <div class="section-card h-100">
       <h2 class="section-title h5"><i class="bi bi-bar-chart text-success me-2"></i>Top-Befehle</h2>
-      {cmd_chart_body}
+      <div class="dash-card-body">{cmd_chart_body}</div>
     </div>
   </div>
   <div class="col-lg-6">
@@ -1568,7 +1568,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
       <h2 class="section-title h5">
         <i class="bi bi-envelope-check me-2 text-success"></i>DM-Zustellung (24h)
       </h2>
-      {dm_delivery_body}
+      <div class="dash-card-body">{dm_delivery_body}</div>
     </div>
   </div>
 </div>
