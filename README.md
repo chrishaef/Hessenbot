@@ -1,21 +1,19 @@
 # Hessenbot
 
-**Hessenbot** ist ein Meshtastic-Autoresponder-Bot für den deutschsprachigen Raum — ein Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
+**Hessenbot** ist ein Meshtastic-Autoresponder für [Meshhessen](https://meshhessen.de) — ein Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
 
-Der Bot antwortet auf Mesh-Befehle per Text, bietet BBS, Wetter, NINA/Katwarn-Warnungen, ein Web-Dashboard und weitere Werkzeuge für Netzwerk und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden in diesem Fork entfernt; der Fokus liegt auf **EU/DE** und dem eigenen Flask-Portal unter `static/portal/`.
+Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang), bietet BBS, Wetter, NINA/Katwarn-Warnungen, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden entfernt; der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
 
 ![Example Use](etc/pong-bot.jpg "Example Use")
 
 ## Danksagung / Acknowledgements
 
-Dieses Projekt wäre ohne die Arbeit von **Kelly Keeton (K7MHI)** und allen Mitwirkenden an [**meshing-around**](https://github.com/SpudGunMan/meshing-around) nicht entstanden. Herzlichen Dank für den umfangreichen Open-Source-Bot, die Module, Dokumentation und die Community rund um Meshtastic.
-
-Wenn du den Original-Bot mit vollem Funktionsumfang (Spiele, US-Alerts, …) suchst, nutze bitte das Upstream-Repository:
+Dieses Projekt wäre ohne **Kelly Keeton (K7MHI)** und alle Mitwirkenden an [**meshing-around**](https://github.com/SpudGunMan/meshing-around) nicht entstanden.
 
 - Upstream: https://github.com/SpudGunMan/meshing-around  
 - Fork-Basis: Branch `main` von meshing-around
 
-Weitere Inspiration und Credits aus dem Original finden sich unten unter [Credits (Upstream)](#credits-upstream).
+Weitere Credits unten unter [Credits (Upstream)](#credits-upstream).
 
 ## Schnellstart
 
@@ -24,51 +22,98 @@ Weitere Inspiration und Credits aus dem Original finden sich unten unter [Credit
 | Installation | [INSTALL.md](INSTALL.md) |
 | Konfiguration | [config.template](config.template) → `config.ini` |
 | Modul-Details | [modules/README.md](modules/README.md) |
+| Befehlsreferenz (Web) | `/befehle` am laufenden Portal |
+| FAQ | `/faq` am laufenden Portal |
 
 ```sh
 git clone https://github.com/chrishaef/Hessenbot.git
 cd Hessenbot
 cp config.template config.ini
-# config.ini anpassen, dann:
+# config.ini anpassen (UTF-8), dann:
 ./bootstrap.sh   # oder install.sh — siehe INSTALL.md
 ./launch.sh mesh
 ```
 
+**Wichtig für Meshhessen:** Der Bot ignoriert in der Regel den öffentlichen Standardkanal (ShortSlow). Befehle im **regionalen Kanal 1** (`#1MeshHessen`) senden oder als **DM** an den Bot.
+
 ## Was dieser Fork auszeichnet
 
-### Deutschland / EU
-- **NINA / Katwarn / DWD** über [warnung.bund.de](https://warnung.bund.de): `!warning` (Standort der anfragenden Node), `!dealert` (konfigurierte Regionen), optional automatischer Broadcast
-- **Wetter** über **Open-Meteo** (`!wx`, `!wxc`) — Standard in `config.template`
-- **Standort & Karte**: `whereami`, `howfar`, `map`, Repeater-Listen, gespeicherte Orte
+### Meshhessen / Deutschland
+
+- Betrieb im regionalen Kanal **1**; `defaultChannel` (oft 0 = ShortSlow) wird typischerweise **nicht** bedient (`ignoreDefaultChannel = True` in `config.template`)
+- **NINA / Katwarn / DWD** über [warnung.bund.de](https://warnung.bund.de): `!warning`, `!dealert`, optional Broadcast
+- **Wetter** über **Open-Meteo** (`!wx`, `!wxc`, `!uv`, `!blitz`, …)
+- **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
+
+### Ping & DM-Zustellung
+
+- **`!ping` / `!pong` / `!test` / `!ack` / `!cq`**: QSL-Antwort im Format  
+  `LongName [!nodeid] QSL @ "Ort" | N Hops LoRa|MQTT`
+- **`wantAckOnDm`**: Mesh-ACK auf DM-Antworten; Fehlzustellungen (inkl. PKI) werden geloggt und im Admin/Dashboard ausgewertet
+- Konfiguration: `[messagingSettings]` in `config.ini` (`wantAckOnDm`, `dmDeliveryFailAlertThreshold`)
 
 ### Web-UI (Flask)
-- Öffentliches **Statistik-Dashboard** (`/`)
-- **Admin-Backend** (`/admin`): BBS, Logs, MOTD, Scheduler, NodeDB, News/Alert-Dateien
-- Assets: `static/portal/` (Charts, NodeDB-Suche, BBS-Ansichten)
-- Aktivierung: `[webAdmin] enabled = True` in `config.ini` (siehe [config.template](config.template))
+
+| URL | Inhalt |
+|-----|--------|
+| `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard, DM-Zustellung 24h) |
+| `/befehle` | Befehlsliste |
+| `/faq` | Hilfe & PKI-Check |
+| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, NodeDB, Einstellungen, … |
+
+- Einheitliche **Top-Navigation** (Statistik, Befehle, BBS, NodeDB, FAQ) in öffentlichem und Admin-Bereich
+- Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template))
 
 ### Kernfunktionen (aus meshing-around, beibehalten)
-- Keyword-Responder (`!ping`, `!cmd`, …), Notfall-Stichwörter (112, …)
+
+- Keyword-Responder, Notfall-Stichwörter (112, …)
 - **BBS** (Posten, Lesen, DM, Link zwischen Bots)
 - **LLM** (Ollama / OpenWebUI, optional)
-- **Solar / HF** (`!solar`, `!hfcond`, `!sun`, `!moon`)
+- **Solar / HF** (`!solar`, `!hfcond`, `!sun`, `!moon`, `!howtall`)
 - Scheduler, File-Monitor, Sentry-Nähe, QRZ-Begrüßung, Inventar/Checklist (optional)
 - Multi-Interface (bis zu 9 Radios), Nachrichten-Chunking (160 Zeichen)
+- **Store & Forward**: `!messages` — letzte Nachrichten von Kanal 1 (`messagesChannel`, `messagesLimit` in `[general]`)
 
 ## Wichtige Mesh-Befehle (Auswahl)
 
 | Befehl | Beschreibung |
 |--------|----------------|
-| `!cmd` | Befehlsliste |
-| `!ping` / `!ack` | Erreichbarkeitstest |
+| `!cmd` | Kurze Befehlsliste (aktivierte Traps) |
+| `!ping` / `!pong` / `!test` | QSL mit Ort, Hops, LoRa/MQTT |
+| `!ack` | Wie Ping, Keyword ACK |
 | `!warning` | NINA/Katwarn für **deinen** Standort (GPS der Node) |
-| `!dealert` | Warnungen für in `myRegionalKeysDE` eingetragene Regionen |
+| `!dealert` | Warnungen für `myRegionalKeysDE` |
 | `!wx` / `!wxc` | Wetter (Open-Meteo) |
-| `!whereami` / `!whoami` | Standort / Node-Info |
-| `!loc` | Letzte GPS-Position eines Knotens aus der NodeDB (optional Name/ID) |
+| `!whereami` | Ortsname (Geocoding) + Höhe falls übertragen |
+| `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |
+| `!howfar` / `!howfar reset` | Zurückgelegte Strecke seit letztem Aufruf |
+| `!howtall <Schatten>` | Höhe per Sonnenwinkel (Schattenlänge in m/ft) |
+| `!messages` | Letzte Nachrichten von Kanal 1 (ohne Bot-Befehle) |
 | `!bbslist`, `!bbspost`, … | Bulletin Board |
 
-Voraussetzungen in `config.ini`: u. a. `[location] enabled = True`, `enableDEalerts = True`, `UseMeteoWxAPI = True`, `cmdBang = True`.
+Voraussetzungen in `config.ini` (Auszug):
+
+```ini
+[general]
+defaultChannel = 0
+ignoreDefaultChannel = True
+messagesChannel = 1
+messagesLimit = 5
+
+[location]
+enabled = True
+enableDEalerts = True
+UseMeteoWxAPI = True
+
+[messagingSettings]
+wantAckOnDm = True
+dmDeliveryFailAlertThreshold = 3
+
+[webAdmin]
+enabled = True
+```
+
+`cmdBang = True` — Befehle beginnen mit `!`.
 
 ## Was in diesem Fork **nicht** mehr enthalten ist
 
@@ -81,6 +126,8 @@ Voraussetzungen in `config.ini`: u. a. `[location] enabled = True`, `enableDEale
 
 Entwicklung und Betrieb typischerweise auf **Linux** (z. B. Raspberry Pi) mit aktueller **Meshtastic-Firmware**. Python **3.8+**; Abhängigkeiten: [requirements.txt](requirements.txt).
 
+`config.ini` muss **UTF-8** sein (keine Windows-1252-Kommentare), sonst bricht der Start ab.
+
 Bitte verantwortungsvoll nutzen und lokale Vorschriften für Funk/Meshtastic beachten. Der Bot protokolliert Traffic und kann Positionsdaten verarbeiten.
 
 ### Docker
@@ -89,11 +136,11 @@ Siehe [script/docker/README.md](script/docker/README.md).
 
 ### MQTT
 
-Wie im Upstream: kein dedizierter MQTT-Code; Nutzer berichten von Betrieb über `meshtasticd` + MQTT-verknüpfte Software-Nodes. Siehe [Meshtastic MQTT-Doku](https://meshtastic.org/docs/software/integrations/mqtt/mosquitto/).
+Wie im Upstream: kein dedizierter MQTT-Code; Betrieb über `meshtasticd` + MQTT-verknüpfte Software-Nodes ist möglich. Siehe [Meshtastic MQTT-Doku](https://meshtastic.org/docs/software/integrations/mqtt/mosquitto/).
 
 ### Firmware: DM-Keys & Favoriten
 
-Ab Firmware 2.6: PKC/DM-Keys — Favoriten für BBS-Admins setzen (`script/addFav.py`, `favoriteNodeList` in `config.ini`). Details im Upstream-README und [INSTALL.md](INSTALL.md).
+Ab Firmware 2.6: PKC/DM-Keys — Favoriten für BBS-Admins (`script/addFav.py`, `favoriteNodeList`). Details in [INSTALL.md](INSTALL.md) und `/faq` (PKI-Check).
 
 ## Tests
 
@@ -103,16 +150,18 @@ python3 modules/test_bot.py
 touch .checkall && python3 modules/test_bot.py
 ```
 
+## Lizenz & Haftung
+
+Meshtastic® ist eine eingetragene Marke von Meshtastic LLC. Die Meshtastic-Softwarekomponenten stehen unter verschiedenen Lizenzen — siehe GitHub. **Keine Gewährleistung — Nutzung auf eigenes Risiko.**
+
 ## Credits (Upstream)
 
-Übernommen und gekürzt aus dem Original-README von meshing-around.
-
 ### Inspiration
+
 - [MeshLink](https://github.com/Murturtle/MeshLink)
 - [Meshtastic Python Examples](https://github.com/pdxlocations/meshtastic-Python-Examples)
 - [Meshtastic Matrix Relay](https://github.com/geoffwhittington/meshtastic-matrix-relay)
 
 ### Tools
-- [Node Slurper](https://github.com/SpudGunMan/node-slurper) (Node-Backup)
 
-Meshtastic® ist eine eingetragene Marke von Meshtastic LLC. Die Meshtastic-Softwarekomponenten stehen unter verschiedenen Lizenzen — siehe GitHub. **Keine Gewährleistung — Nutzung auf eigenes Risiko.**
+- [Node Slurper](https://github.com/SpudGunMan/node-slurper) (Node-Backup)
