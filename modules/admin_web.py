@@ -161,7 +161,11 @@ def create_app(
 </div>
 """
         return (
-            portal_shell_start(title=f"{title} – Hessenbot", particles=False, active_nav="stats")
+            portal_shell_start(
+                title=f"{title} – Hessenbot",
+                particles=False,
+                active_nav="admin",
+            )
             + block
             + portal_shell_end()
         )
@@ -190,7 +194,6 @@ def create_app(
             portal_shell_start(
                 title="FAQ / Hilfe – Hessenbot",
                 active_nav="faq",
-                dash_view_tabs=True,
                 particles=True,
                 admin_href=url_for(
                     "choose" if current_user.is_authenticated else "admin_login"
@@ -228,7 +231,6 @@ def create_app(
             portal_shell_start(
                 title="Befehle – Hessenbot",
                 active_nav="commands",
-                dash_view_tabs=True,
                 particles=True,
                 admin_href=url_for(
                     "choose" if current_user.is_authenticated else "admin_login"
@@ -323,7 +325,7 @@ def create_app(
             portal_shell_start(
                 title="Admin – Hessenbot",
                 body_class="page-login",
-                active_nav="stats",
+                active_nav="admin",
                 particles=False,
             )
             + login_inner

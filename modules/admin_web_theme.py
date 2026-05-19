@@ -91,9 +91,6 @@ def portal_navbar(
     faq_href: str = "/faq",
     dash_view_tabs: bool = False,
 ) -> str:
-    stats_active = " active" if active == "stats" else ""
-    commands_active = " active" if active == "commands" else ""
-    faq_active = " active" if active == "faq" else ""
     admin_btn = ""
     if admin_href:
         admin_btn = (
@@ -102,30 +99,11 @@ def portal_navbar(
         )
     chref = commands_href or "/befehle"
     fhref = faq_href or "/faq"
-    use_dash_nav = dash_view_tabs or active in ("commands", "faq")
-    if use_dash_nav:
-        if active == "commands":
-            nav_primary = f"""
+    # Öffentlich: Statistik-Seite nutzt Buttons für BBS/NodeDB-Umschaltung; sonst einheitliche Link-Leiste.
+    if dash_view_tabs and active == "stats":
+        nav_primary = f"""
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
-        {_dash_nav_link("Statistik", "bar-chart-line", "/")}
-        {_dash_nav_link("Befehle", "terminal", chref, active=True)}
-        {_dash_nav_link("BBS", "inboxes", "/#bbs")}
-        {_dash_nav_link("NodeDB", "diagram-3", "/#nodedb")}
-        {_dash_nav_link("FAQ/Hilfe", "life-preserver", fhref)}
-      </ul>"""
-        elif active == "faq":
-            nav_primary = f"""
-      <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
-        {_dash_nav_link("Statistik", "bar-chart-line", "/")}
-        {_dash_nav_link("Befehle", "terminal", chref)}
-        {_dash_nav_link("BBS", "inboxes", "/#bbs")}
-        {_dash_nav_link("NodeDB", "diagram-3", "/#nodedb")}
-        {_dash_nav_link("FAQ/Hilfe", "life-preserver", fhref, active=True)}
-      </ul>"""
-        else:
-            nav_primary = f"""
-      <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
-        {_dash_nav_button("stats", "Statistik", "bar-chart-line", active=active == "stats")}
+        {_dash_nav_button("stats", "Statistik", "bar-chart-line", active=True)}
         {_dash_nav_link("Befehle", "terminal", chref)}
         {_dash_nav_button("bbs", "BBS", "inboxes")}
         {_dash_nav_button("nodedb", "NodeDB", "diagram-3")}
@@ -133,22 +111,12 @@ def portal_navbar(
       </ul>"""
     else:
         nav_primary = f"""
-      <ul class="navbar-nav me-auto">
-        <li class="nav-item">
-          <a class="nav-link px-3{stats_active}" href="/">
-            <i class="bi bi-bar-chart-line me-1"></i>Statistik
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link px-3{commands_active}" href="{html_escape(chref)}">
-            <i class="bi bi-terminal me-1"></i>Befehle
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link px-3{faq_active}" href="{html_escape(fhref)}">
-            <i class="bi bi-life-preserver me-1"></i>FAQ/Hilfe
-          </a>
-        </li>
+      <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
+        {_dash_nav_link("Statistik", "bar-chart-line", "/", active=(active == "stats"))}
+        {_dash_nav_link("Befehle", "terminal", chref, active=(active == "commands"))}
+        {_dash_nav_link("BBS", "inboxes", "/#bbs")}
+        {_dash_nav_link("NodeDB", "diagram-3", "/#nodedb")}
+        {_dash_nav_link("FAQ/Hilfe", "life-preserver", fhref, active=(active == "faq"))}
       </ul>"""
     return f"""
 <nav class="navbar navbar-expand-lg sticky-top portal-navbar" data-bs-theme="dark">
@@ -177,7 +145,7 @@ def portal_navbar(
 
 
 def portal_footer() -> str:
-    return '<footer class="portal-footer"><span>Hessenbot · Meshtastic Mesh-Bot</span></footer>'
+    return '<footer class="portal-footer"><span>Hessenbot - powered by Meshhessen.de</span></footer>'
 
 
 def portal_particles_html() -> str:
