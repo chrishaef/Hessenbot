@@ -1408,17 +1408,12 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     raw_cmd = log.get("command_counts") or {}
     cmd: Counter = raw_cmd if isinstance(raw_cmd, Counter) else Counter(raw_cmd)
     top_cmds = cmd.most_common(12)
-    raw_msg = log.get("message_types") or {}
-    msg_types: Counter = raw_msg if isinstance(raw_msg, Counter) else Counter(raw_msg)
-    msg_keys = list(msg_types.keys())
     activity_labels, activity_values = _activity_series(log.get("hourly_activity") or {})
     lb = rt.get("mesh_leaderboard") or {}
     chart_data_json = json.dumps(
         {
             "cmdLabels": [c[0] for c in top_cmds],
             "cmdValues": [c[1] for c in top_cmds],
-            "msgLabels": msg_keys,
-            "msgValues": [int(msg_types[k]) for k in msg_keys],
             "activityLabels": activity_labels,
             "activityValues": activity_values,
         },
@@ -1434,12 +1429,6 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
         if top_cmds
         else '<p class="text-muted small mb-0">Noch keine Befehle im Log.</p>'
     )
-    msg_chart_body = (
-        '<div class="chart-canvas-wrap"><canvas id="msgChart"></canvas></div>'
-        if msg_keys
-        else '<p class="text-muted small mb-0">Noch keine Nachrichten im Log.</p>'
-    )
-
     cards = [
         _metric_card("Nachrichten", str(log["total_messages"]), "meshbot.log"),
         _metric_card("Befehle", str(len(cmd)), f"{sum(cmd.values())} Aufrufe", "text-success"),
@@ -1484,23 +1473,25 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     leaderboard_html = _render_mesh_leaderboard_html(lb, log=log)
     want_ack_dm = bool(data.get("want_ack_on_dm"))
     dm_stats = data.get("dm_delivery_24h")
-    row_col = "col-lg-4" if want_ack_dm else "col-lg-6"
-    dm_delivery_col = ""
-    if want_ack_dm and dm_stats is not None:
-        from modules.dm_delivery_stats import render_dm_delivery_stats_html
+    from modules.dm_delivery_stats import render_dm_delivery_stats_html
 
-        dm_delivery_col = f"""
-  <div class="{row_col} d-flex">
-    <div class="section-card flex-fill d-flex flex-column w-100">
-      <h2 class="section-title h5">
-        <i class="bi bi-envelope-check me-2 text-success"></i>DM-Zustellung (24h)
-      </h2>
-      {render_dm_delivery_stats_html(dm_stats, compact=True)}
-    </div>
-  </div>"""
+    if want_ack_dm and dm_stats is not None:
+        dm_delivery_body = render_dm_delivery_stats_html(dm_stats, compact=True)
+    elif want_ack_dm:
+        dm_delivery_body = (
+            '<p class="text-muted small mb-0">Keine DM-Zustell-Daten im Log-Ausschnitt.</p>'
+        )
+    else:
+        dm_delivery_body = (
+            '<p class="text-muted small mb-0">'
+            "DM-Zustellüberwachung ist aus "
+            "(<code>wantAckOnDm = False</code> in der Config)."
+            "</p>"
+        )
+
     messages_lb_row_html = f"""
 <div class="row g-3 mb-4 dash-equal-cards">
-  <div class="{row_col} d-flex">
+  <div class="col-lg-6 d-flex">
     <div class="section-card flex-fill d-flex flex-column w-100">
       <h2 class="section-title h5">
         <i class="bi bi-chat-left-text me-2 text-success"></i>Messages
@@ -1509,13 +1500,12 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
       {toplist_html}
     </div>
   </div>
-  <div class="{row_col} d-flex">
+  <div class="col-lg-6 d-flex">
     <div class="section-card flex-fill d-flex flex-column w-100">
       <h2 class="section-title h5"><i class="bi bi-award me-2 text-success"></i>Leaderboard (24h)</h2>
       {leaderboard_html}
     </div>
   </div>
-  {dm_delivery_col}
 </div>"""
     log_note = ""
     if log.get("log_error"):
@@ -1566,9 +1556,11 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     </div>
   </div>
   <div class="col-lg-6">
-    <div class="section-card">
-      <h2 class="section-title h5"><i class="bi bi-pie-chart text-success me-2"></i>Nachrichtentypen</h2>
-      {msg_chart_body}
+    <div class="section-card h-100">
+      <h2 class="section-title h5">
+        <i class="bi bi-envelope-check me-2 text-success"></i>DM-Zustellung (24h)
+      </h2>
+      {dm_delivery_body}
     </div>
   </div>
 </div>
