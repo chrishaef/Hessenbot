@@ -80,11 +80,11 @@ def _sections() -> List[FaqSection]:
                     "Du hast zu viele Befehle in kurzer Zeit gesendet. Einige Sekunden warten und erneut versuchen.",
                 ),
                 FaqEntry(
-                    "Im öffentlichen Standardkanal (z. B. LongFast) keine Reaktion",
+                    "Im öffentlichen Standardkanal (ShortSlow) keine Reaktion",
                     (
-                        "Dieser Bot hört möglicherweise <strong>nicht</strong> auf den öffentlichen Standardkanal. "
-                        "Befehl im <strong>regionalen Kanal</strong> eures Netzes senden oder als "
-                        "<strong>DM</strong> direkt an den Bot."
+                        "Dieser Bot hört <strong>nicht</strong> auf den öffentlichen Standardkanal. "
+                        "Befehle bitte im <strong>MeshHessen Kanal</strong> senden oder als "
+                        "<strong>DM</strong> direkt an den Bot richten."
                     ),
                 ),
                 FaqEntry(
