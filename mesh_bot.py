@@ -21,63 +21,6 @@ restrictedCommands = []
 restrictedResponse = ""
 
 
-def _parse_hop_info(hop: str) -> tuple[int | None, str]:
-    """Hop-Anzahl und Verbindungstyp (LoRa / MQTT) aus der Paket-Hop-Zeichenkette."""
-    hop_s = (hop or "").strip()
-    m = re.search(r"(\d+)\s*Hop", hop_s, re.I)
-    hop_n = int(m.group(1)) if m else None
-    upper = hop_s.upper()
-    if "MQTT" in upper:
-        return (hop_n if hop_n is not None else 0), "MQTT"
-    if "GATEWAY" in upper or hop_s.startswith("Gateway"):
-        return (hop_n if hop_n is not None else 0), "MQTT"
-    if hop_s == "Direct" or hop_s.startswith("Direct"):
-        return 0, "LoRa"
-    if hop_n is not None:
-        return hop_n, "LoRa"
-    return None, "LoRa"
-
-
-def _bot_place_name() -> str:
-    if getattr(my_settings, "location_enabled", False):
-        try:
-            from modules.locationdata import get_place_name
-
-            return get_place_name(
-                my_settings.latitudeValue, my_settings.longitudeValue
-            )
-        except Exception:
-            pass
-    return "Meshhessen"
-
-
-def _format_ping_qsl(
-    message_from_id,
-    deviceID,
-    hop: str,
-    snr,
-    rssi,
-    keyword: str,
-) -> str:
-    short = get_name_from_number(message_from_id, "short", deviceID)
-    node_hex = decimal_to_hex(message_from_id)
-    place = _bot_place_name()
-    hop_n, link = _parse_hop_info(hop)
-    if hop_n is None:
-        hop_part = "? Hops"
-    elif hop_n == 1:
-        hop_part = "1 Hop"
-    else:
-        hop_part = f"{hop_n} Hops"
-    msg = f"{short} [{node_hex}] {keyword} @ {place} | {hop_part} {link}"
-    try:
-        if float(snr) != 0 or float(rssi) != 0:
-            msg += f" SNR:{snr} RSSI:{rssi}"
-    except (TypeError, ValueError):
-        pass
-    return msg
-
-
 def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):
     global cmdHistory
     #Auto response to messages
@@ -140,7 +83,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "motd": lambda: handle_motd(message, message_from_id, isDM),
     "ping": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "pinging": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "pong": lambda: "🏓PING!!🛜",
+    "pong": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "readnews": lambda: handleNews(message_from_id, deviceID, message, isDM),
     "readrss": lambda: get_rss_feed(message),
     "rlist": lambda: handle_repeaterQuery(message_from_id, deviceID, channel_number),
@@ -227,55 +170,40 @@ def handle_cmd(message, message_from_id, deviceID):
 
 def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, channel_number):
     global multiPing
-    myNodeNum = globals().get(f'myNodeNum{deviceID}', 777)
     if  "?" in message and isDM:
         pingHelp = (
             "🤖 Hessenbot · Ping-Hilfe:\n"
-            "🏓 ping / test — QSL mit Ort, Hops, LoRa/MQTT, SNR.\n"
+            "🏓 ping / pong / test — QSL: Name [ID] @ Ort | Hops LoRa/MQTT\n"
             "🏓 ping <Zahl> — mehrere Pings per DM.\n"
             "🏓 ping @Knoten — Ping als BBS-DM."
         )
         return pingHelp
 
     msg_lower = message.lower()
+    words = msg_lower.split()
     msg = ""
     type = ""
-    rich_ping = False
+    rich_ping = True
 
     if "test" in msg_lower or "testing" in msg_lower:
-        msg = _format_ping_qsl(message_from_id, deviceID, hop, snr, rssi, "QSL")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
         type = "🎙TEST"
-        rich_ping = True
-    elif "ping" in msg_lower:
-        msg = _format_ping_qsl(message_from_id, deviceID, hop, snr, rssi, "PONG")
+    elif "pong" in words:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        type = "🏓PONG"
+    elif "ping" in msg_lower or "pinging" in msg_lower:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
         type = "🏓PING"
-        rich_ping = True
     elif "ack" in msg_lower:
-        msg = _format_ping_qsl(message_from_id, deviceID, hop, snr, rssi, "ACK")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ACK")
         type = "✋ACK"
-        rich_ping = True
-    elif "cqcq" in msg_lower or "cq" in msg_lower or "cqcqcq" in msg_lower:
-        myname = get_name_from_number(myNodeNum, "short", deviceID)
-        hop_n, link = _parse_hop_info(hop)
-        hops = f"{hop_n} Hops" if hop_n not in (None, 1) else ("1 Hop" if hop_n == 1 else "? Hops")
-        msg = f"{myname} QSL @ {_bot_place_name()} | {hops} {link} DE K"
+    elif "cqcq" in msg_lower or "cq" in words or "cqcqcq" in msg_lower:
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
         type = "CQ"
-        rich_ping = True
     else:
-        msg = "🔊 Hörst du mich?"
-
-    if not rich_ping:
-        if hop.startswith("Gateway") or hop.startswith("MQTT"):
-            msg += " [GW]"
-        elif hop.startswith("Direct"):
-            msg += " [RF]"
-        else:
-            msg += " [F]"
-        if (float(snr) != 0 or float(rssi) != 0) and "Hop" not in hop:
-            msg += f"\nSNR:{snr} RSSI:{rssi}"
-        elif "Hop" in hop:
-            hop_clean = hop.replace("Gateway", "").replace("Direct", "").replace("MQTT", "").strip()
-            msg += f"\n{hop_clean} "
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        type = "QSL"
+        rich_ping = True
 
     if "@" in message:
         msg = msg + " @" + message.split("@")[1]
@@ -595,49 +523,55 @@ def handle_bbsdelete(message, message_from_id):
         return "Bitte Nummer: bbsdelete #14"
 
 def handle_messages(message, deviceID, channel_number, msg_history, publicChannel, isDM):
-    if  "?" in message and isDM:
-        return f"{message.split('?')[0]} — letzte {storeFlimit} Nachrichten auf dem Kanal."
-    else:
-        # Filter messages for this device/channel
-        filtered_msgs = [
-            msgH for msgH in msg_history
-            if msgH[4] == deviceID and (msgH[2] == channel_number or msgH[2] == publicChannel)
-        ]
-        
-        # Choose order and slice
-        # Oldest first, take first N
-        filtered_msgs = filtered_msgs[-storeFlimit:][::-1]
-        if my_settings.reverseSF:
-            # reverse that 
-            filtered_msgs = filtered_msgs[::-1]
+    msg_ch = int(getattr(my_settings, "messages_channel", 1))
+    msg_limit = int(getattr(my_settings, "messages_limit", 5))
+    ch_label = format_channel_label(msg_ch, deviceID)
 
-        response = ""
-        header = f"📨 Nachrichten:\n"
-        for msgH in filtered_msgs:
-            new_line = f"\n{msgH[0]}: {msgH[1]}"
-            test_response = response + new_line
-            if len(test_response.encode('utf-8')) > maxBuffer:
-                # Truncate message if needed
-                msg_text = msgH[1]
-                truncated = False
-                trunc_marker = "..."
-                while len(msg_text) > 0 and len((response + f"\n{msgH[0]}: {msg_text}{trunc_marker}").encode('utf-8')) > maxBuffer:
-                    msg_text = msg_text[:-1]
-                    truncated = True
-                if len(msg_text) > 10:
-                    if truncated:
-                        response += f"\n{msgH[0]}: {msg_text}{trunc_marker}"
-                    else:
-                        response += f"\n{msgH[0]}: {msg_text}"
-                    break
-                continue
-            else:
-                response += new_line
+    if "?" in message and isDM:
+        return (
+            f"{message.split('?')[0]}? — letzte {msg_limit} Nachrichten von Kanal {msg_ch} "
+            f"({ch_label}), ohne Bot-Befehle."
+        )
 
-        if len(response) > 0:
-            return header + response
-        else:
-            return "Keine 📭 Nachrichten im Verlauf"
+    filtered_msgs = [
+        msgH
+        for msgH in msg_history
+        if msgH[4] == deviceID and int(msgH[2]) == msg_ch
+    ]
+    filtered_msgs = filtered_msgs[-msg_limit:][::-1]
+    if my_settings.reverseSF:
+        filtered_msgs = filtered_msgs[::-1]
+
+    response = ""
+    header = f"📨 {ch_label} (letzte {msg_limit}):\n"
+    for msgH in filtered_msgs:
+        new_line = f"\n{msgH[0]}: {msgH[1]}"
+        test_response = response + new_line
+        if len(test_response.encode("utf-8")) > maxBuffer:
+            msg_text = msgH[1]
+            truncated = False
+            trunc_marker = "..."
+            while (
+                len(msg_text) > 0
+                and len(
+                    (response + f"\n{msgH[0]}: {msg_text}{trunc_marker}").encode("utf-8")
+                )
+                > maxBuffer
+            ):
+                msg_text = msg_text[:-1]
+                truncated = True
+            if len(msg_text) > 10:
+                if truncated:
+                    response += f"\n{msgH[0]}: {msg_text}{trunc_marker}"
+                else:
+                    response += f"\n{msgH[0]}: {msg_text}"
+                break
+            continue
+        response += new_line
+
+    if len(response) > 0:
+        return header + response
+    return f"Keine 📭 Nachrichten auf {ch_label} im Verlauf"
 
 def handle_sun(message_from_id, deviceID, channel_number, vox=False):
     if vox:
@@ -769,15 +703,19 @@ def handle_whereami(message_from_id, deviceID, channel_number):
     check_throttle = api_throttle(message_from_id, deviceID, apiName='whereami')
     if check_throttle:
         return check_throttle
-    return where_am_i(str(location[0]), str(location[1]))
+    msg = where_am_i(str(location[0]), str(location[1]))
+    alt = get_node_altitude_m(message_from_id, deviceID)
+    if alt is not None:
+        msg += f"\n{format_node_altitude_line(alt)}"
+    return msg
 
 
 def handle_loc(message, message_from_id, deviceID, channel_number):
     """Show last known position of a mesh node from NodeDB or mesh map snapshot."""
     if "?" in message:
         return (
-            "!loc — Position aus NodeDB oder Mesh-Karte (nodes.json). !loc = du, "
-            "!loc <Kurzname>, !loc 1234567890, !loc !a1b2c3d4"
+            "!loc — Position aus NodeDB oder Mesh-Karte (nodes.json), inkl. Höhe wenn "
+            "übertragen. !loc = du, !loc <Kurzname>, !loc 1234567890, !loc !a1b2c3d4"
         )
     if not my_settings.location_enabled:
         return "Standortmodul aus ([location] enabled = False)."
@@ -805,6 +743,8 @@ def handle_loc(message, message_from_id, deviceID, channel_number):
     else:
         src = "?"
     lines = [f"{short} {hex_id}", f"{lat},{lon} {src}"]
+    if info.get("altitude") is not None:
+        lines.append(format_node_altitude_line(info["altitude"]))
     try:
         import maidenhead as mh
 
@@ -1029,7 +969,10 @@ def handle_boot(mesh=True):
             logger.debug(f"System: HighFly Enabled using {my_settings.highfly_altitude}m limit reporting to channel:{my_settings.highfly_channel}")
         
         if my_settings.store_forward_enabled:
-            logger.debug(f"System: S&F(messages command) Enabled using limit: {storeFlimit} and reverse queue:{my_settings.reverseSF}")
+            logger.debug(
+                f"System: S&F(!messages) Kanal {my_settings.messages_channel}, "
+                f"limit {my_settings.messages_limit}, reverse:{my_settings.reverseSF}"
+            )
         
         if my_settings.enableEcho:
             logger.debug("System: Echo command Enabled")
@@ -1409,8 +1352,17 @@ def onReceive(packet, interface):
                         # Always keep only the most recent MAX_MSG_HISTORY entries
                         msg_history = msg_history[-my_settings.MAX_MSG_HISTORY:]
 
-                    # add the message to the history list
-                    msg_history.append((get_name_from_number(message_from_id, 'long', rxNode), message_string, channel_number, timestamp, rxNode))
+                    # Store-forward buffer nur für den !messages-Kanal (z. B. 1 Meshhessen)
+                    if int(channel_number) == int(getattr(my_settings, "messages_channel", 1)):
+                        msg_history.append(
+                            (
+                                get_name_from_number(message_from_id, "long", rxNode),
+                                message_string,
+                                channel_number,
+                                timestamp,
+                                rxNode,
+                            )
+                        )
 
                     # print the message to the log and sdout
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "Ignoring Message:" + CustomFormatter.white +\

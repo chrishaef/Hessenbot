@@ -112,6 +112,9 @@ llmUseWikiContext = False
 StoreForward = True
 StoreLimit = 3
 reverseSF = False
+# !messages: letzte Nachrichten nur von diesem Kanal (1 = regional Meshhessen)
+messagesChannel = 1
+messagesLimit = 5
 
 # history command 
 enableCmdHistory = True

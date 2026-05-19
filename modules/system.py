@@ -9,6 +9,7 @@ import json
 import asyncio
 import urllib.request
 import random
+import re
 import base64
 # not ideal but needed?
 import contextlib # for suppressing output on watchdog
@@ -510,6 +511,62 @@ def cleanup_memory():
 def decimal_to_hex(decimal_number):
     return f"!{decimal_number:08x}"
 
+
+def _hop_count_label(hop_n: int | None) -> str:
+    if hop_n is None:
+        return "? Hops"
+    if hop_n == 1:
+        return "1 Hop"
+    return f"{hop_n} Hops"
+
+
+def _parse_hop_info(hop: str) -> tuple[int | None, str]:
+    """Hop-Anzahl und Verbindungstyp (LoRa / MQTT) aus der Paket-Hop-Zeichenkette."""
+    hop_s = (hop or "").strip()
+    m = re.search(r"(\d+)\s*Hop", hop_s, re.I)
+    hop_n = int(m.group(1)) if m else None
+    upper = hop_s.upper()
+    if "MQTT" in upper:
+        return (hop_n if hop_n is not None else 0), "MQTT"
+    if "GATEWAY" in upper or hop_s.startswith("Gateway"):
+        return (hop_n if hop_n is not None else 0), "MQTT"
+    if hop_s == "Direct" or hop_s.startswith("Direct"):
+        return 0, "LoRa"
+    if hop_n is not None:
+        return hop_n, "LoRa"
+    return None, "LoRa"
+
+
+def bot_place_name() -> str:
+    if location_enabled:
+        try:
+            from modules.locationdata import get_place_name
+
+            return get_place_name(latitudeValue, longitudeValue)
+        except Exception:
+            pass
+    return "Meshhessen"
+
+
+def format_ping_qsl_response(
+    message_from_id,
+    deviceID,
+    hop: str,
+    keyword: str = "QSL",
+) -> str:
+    """
+    QSL-Antwort: LongName [NodeID] KEYWORD @ "Bot-Standort" | N Hops LoRa|MQTT
+    """
+    long_name = get_name_from_number(message_from_id, "long", deviceID)
+    if not long_name or str(long_name).startswith("!"):
+        long_name = get_name_from_number(message_from_id, "short", deviceID)
+    node_hex = decimal_to_hex(message_from_id)
+    place = bot_place_name()
+    hop_n, link = _parse_hop_info(hop)
+    hop_part = _hop_count_label(hop_n)
+    return f'{long_name} [{node_hex}] {keyword} @ "{place}" | {hop_part} {link}'
+
+
 def get_name_from_number(number, type='long', nodeInt=1):
     interface = globals()[f'interface{nodeInt}']
     name = ""
@@ -607,10 +664,61 @@ def _ensure_mesh_map_positions_loaded() -> None:
         merge_leaderboard_from_mesh_map_nodes(remote, time.time())
 
 
+def _parse_altitude_m(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        alt = float(value)
+    except (TypeError, ValueError):
+        return None
+    if alt <= 0:
+        return None
+    return alt
+
+
+def get_node_altitude_m(nodeID, nodeInt=1) -> float | None:
+    """Übertragene Höhe (m) aus NodeDB, positionMetadata oder Mesh-Karte."""
+    _ensure_mesh_map_positions_loaded()
+    for iface_num in _enabled_interface_order(nodeInt):
+        interface = globals().get(f"interface{iface_num}")
+        if interface is None or not getattr(interface, "nodes", None):
+            continue
+        for node in interface.nodes.values():
+            if nodeID != node.get("num"):
+                continue
+            pos = node.get("position")
+            if isinstance(pos, dict):
+                alt = _parse_altitude_m(pos.get("altitude"))
+                if alt is not None:
+                    return alt
+    meta = positionMetadata.get(nodeID) if isinstance(positionMetadata, dict) else None
+    if meta:
+        alt = _parse_altitude_m(meta.get("altitude"))
+        if alt is not None:
+            return alt
+    snap = mesh_map_node_positions.get(int(nodeID))
+    if snap:
+        alt = _parse_altitude_m(snap.get("altitude"))
+        if alt is not None:
+            return alt
+    return None
+
+
+def format_node_altitude_line(alt_m: float) -> str:
+    """Eine Zeile für Mesh-Antworten (!loc, !whereami, …)."""
+    if use_metric:
+        return f"⛰️{int(round(alt_m))} m MSL"
+    return f"⛰️{int(round(alt_m * 3.28084))} ft MSL"
+
+
 def _apply_mesh_map_position_to_info(info: dict, nodeID: int, round_digits: int) -> None:
+    snap = mesh_map_node_positions.get(int(nodeID))
+    if snap:
+        alt = _parse_altitude_m(snap.get("altitude"))
+        if alt is not None and info.get("altitude") is None:
+            info["altitude"] = alt
     if info.get("lat") is not None:
         return
-    snap = mesh_map_node_positions.get(int(nodeID))
     if not snap:
         return
     lat = float(snap["lat"])
@@ -626,7 +734,8 @@ def _apply_mesh_map_position_to_info(info: dict, nodeID: int, round_digits: int)
 def get_mesh_node_position_info(nodeID, nodeInt=1, round_digits=2):
     """
     Look up a node across enabled interfaces.
-    Returns dict: in_db, from_gps, from_mesh_map, lat, lon, last_heard (str|None), iface (int|None).
+    Returns dict: in_db, from_gps, from_mesh_map, lat, lon, altitude (m|None),
+    last_heard (str|None), iface (int|None).
     """
     _ensure_mesh_map_positions_loaded()
     info = {
@@ -635,6 +744,7 @@ def get_mesh_node_position_info(nodeID, nodeInt=1, round_digits=2):
         "from_mesh_map": False,
         "lat": None,
         "lon": None,
+        "altitude": None,
         "last_heard": None,
         "iface": None,
     }
@@ -669,11 +779,26 @@ def get_mesh_node_position_info(nodeID, nodeInt=1, round_digits=2):
                     info["from_gps"] = True
                     info["lat"] = lat
                     info["lon"] = lon
+                    alt = _parse_altitude_m(pos.get("altitude"))
+                    if alt is not None:
+                        info["altitude"] = alt
                 except (TypeError, ValueError) as e:
                     logger.warning(f"System: Error reading position for node {nodeID}: {e}")
+            if info.get("altitude") is None:
+                meta = positionMetadata.get(nodeID) if isinstance(positionMetadata, dict) else None
+                if meta:
+                    alt = _parse_altitude_m(meta.get("altitude"))
+                    if alt is not None:
+                        info["altitude"] = alt
             _apply_mesh_map_position_to_info(info, nodeID, round_digits)
             return info
     _apply_mesh_map_position_to_info(info, nodeID, round_digits)
+    if info.get("altitude") is None:
+        meta = positionMetadata.get(nodeID) if isinstance(positionMetadata, dict) else None
+        if meta:
+            alt = _parse_altitude_m(meta.get("altitude"))
+            if alt is not None:
+                info["altitude"] = alt
     return info
 
 def get_node_list(nodeInt=1):
@@ -1969,6 +2094,12 @@ def merge_leaderboard_from_mesh_map_nodes(data: dict, now: float) -> None:
             sn = raw.get("shortName")
             if isinstance(sn, str) and sn.strip():
                 snap["shortName"] = sn.strip()
+            alt_snap = raw.get("altitude")
+            if alt_snap is not None:
+                try:
+                    snap["altitude"] = float(alt_snap)
+                except (TypeError, ValueError):
+                    pass
             new_positions[nid] = snap
 
         bl = raw.get("batteryLevel")

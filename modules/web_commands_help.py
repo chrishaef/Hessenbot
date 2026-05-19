@@ -57,12 +57,12 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}ping",
-                    "Testet die Verbindung; Antwort mit SNR, RSSI und Hop-Anzahl.",
+                    "QSL-Antwort: LongName [NodeID] @ Bot-Standort | Hops LoRa/MQTT.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
                     f"{p}pong",
-                    "Kurze Ping-Antwort (gleiche Funktion wie ping).",
+                    "Wie ping — QSL mit Ort, Hops und Verbindungstyp.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
@@ -134,7 +134,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}loc",
-                    "Letzte Position deiner Node (GPS aus NodeDB, sonst Mesh-Karten-JSON).",
+                    "Letzte Position inkl. übertragener Höhe (m/ft), aus NodeDB oder Mesh-Karten-JSON.",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
                 _cmd(
@@ -144,7 +144,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}whereami",
-                    "Ortstext zu deiner aktuellen Position (Geocoding).",
+                    "Ortstext zu deiner Position (Geocoding), plus Höhe falls übertragen.",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
                 _cmd(
@@ -428,7 +428,10 @@ def _sections() -> List[CommandSection]:
                     "Leaderboard-Liste löschen (nur Admins).",
                     enabled=lambda: getattr(st, "sitrep_enabled", False),
                 ),
-                _cmd(f"{p}messages", "Letzte empfangene Nachrichten."),
+                _cmd(
+                    f"{p}messages",
+                    "Letzte Nachrichten von Kanal 1 (Meshhessen, messagesChannel), ohne Bot-Befehle.",
+                ),
                 _cmd(
                     f"{p}history",
                     "Verlauf deiner letzten Befehle.",

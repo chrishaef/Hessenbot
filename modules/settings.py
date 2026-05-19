@@ -272,6 +272,8 @@ try:
     store_forward_enabled = config['general'].getboolean('StoreForward', True)
     storeFlimit = config['general'].getint('StoreLimit', 3) # default 3 messages for S&F
     reverseSF = config['general'].getboolean('reverseSF', False) # default False, send oldest first
+    messages_channel = config['general'].getint('messagesChannel', 1)
+    messages_limit = config['general'].getint('messagesLimit', 5)
     welcome_message = config['general'].get('welcome_message', WELCOME_MSG)
     welcome_message = (f"{welcome_message}").replace('\\n', '\n') # allow for newlines in the welcome message
     motd_enabled = config['general'].getboolean('motdEnabled', True)

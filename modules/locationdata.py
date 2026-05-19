@@ -521,38 +521,11 @@ def get_delete_public_locations_admins_only():
         return False
 
 def get_node_altitude(nodeID, deviceID=1):
-    """Get altitude for a node from position data or positionMetadata
-    
-    Returns altitude in meters, or None if not available
-    """
+    """Höhe in Metern (NodeDB, positionMetadata, Mesh-Karte) oder None."""
     try:
-        import modules.system as system_module
-        
-        # Try to get altitude from node position dict first
-        # Access interface dynamically from system module
-        interface = getattr(system_module, f'interface{deviceID}', None)
-        if interface and hasattr(interface, 'nodes') and interface.nodes:
-            for node in interface.nodes.values():
-                if nodeID == node['num']:
-                    pos = node.get('position')
-                    if pos and isinstance(pos, dict) and pos.get('altitude') is not None:
-                        try:
-                            altitude = float(pos['altitude'])
-                            if altitude > 0:  # Valid altitude
-                                return altitude
-                        except (ValueError, TypeError):
-                            pass
-        
-        # Fall back to positionMetadata (from POSITION_APP packets)
-        positionMetadata = getattr(system_module, 'positionMetadata', None)
-        if positionMetadata and nodeID in positionMetadata:
-            metadata = positionMetadata[nodeID]
-            if 'altitude' in metadata:
-                altitude = metadata.get('altitude', 0)
-                if altitude and altitude > 0:
-                    return float(altitude)
-        
-        return None
+        from modules.system import get_node_altitude_m
+
+        return get_node_altitude_m(nodeID, deviceID)
     except Exception as e:
         logger.debug(f"Location: Error getting altitude for node {nodeID}: {e}")
         return None
