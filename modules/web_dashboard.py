@@ -1410,12 +1410,20 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     top_cmds = cmd.most_common(12)
     activity_labels, activity_values = _activity_series(log.get("hourly_activity") or {})
     lb = rt.get("mesh_leaderboard") or {}
+    dm_stats_chart = data.get("dm_delivery_24h") or {}
+    dm_delivery_values = [
+        int(dm_stats_chart.get("confirmed", 0) or 0),
+        int(dm_stats_chart.get("failed_pki", 0) or 0),
+        int(dm_stats_chart.get("failed_other", 0) or 0),
+    ]
     chart_data_json = json.dumps(
         {
             "cmdLabels": [c[0] for c in top_cmds],
             "cmdValues": [c[1] for c in top_cmds],
             "activityLabels": activity_labels,
             "activityValues": activity_values,
+            "dmDeliveryLabels": ["Bestätigt", "PKI-Fehler", "Sonst. Fehler"],
+            "dmDeliveryValues": dm_delivery_values if data.get("want_ack_on_dm") else [],
         },
         ensure_ascii=False,
     )

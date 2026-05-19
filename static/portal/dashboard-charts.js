@@ -7,6 +7,8 @@
         cmdValues: [],
         activityLabels: [],
         activityValues: [],
+        dmDeliveryLabels: [],
+        dmDeliveryValues: [],
       };
     }
     try {
@@ -18,6 +20,8 @@
         cmdValues: [],
         activityLabels: [],
         activityValues: [],
+        dmDeliveryLabels: [],
+        dmDeliveryValues: [],
       };
     }
   }
@@ -61,6 +65,40 @@
           scales: {
             x: { ticks: { color: ticks }, grid: { color: gridColor } },
             y: { ticks: { color: ticks }, grid: { color: gridColor }, beginAtZero: true },
+          },
+        },
+      });
+    }
+
+    var dmEl = document.getElementById("dmDeliveryChart");
+    if (
+      dmEl &&
+      data.dmDeliveryValues &&
+      data.dmDeliveryValues.some(function (v) {
+        return v > 0;
+      })
+    ) {
+      new Chart(dmEl, {
+        type: "doughnut",
+        data: {
+          labels: data.dmDeliveryLabels || [],
+          datasets: [
+            {
+              data: data.dmDeliveryValues,
+              backgroundColor: [
+                "rgba(25, 135, 84, 0.85)",
+                "rgba(255, 193, 7, 0.85)",
+                "rgba(220, 53, 69, 0.85)",
+              ],
+              borderWidth: 0,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "bottom", labels: { color: ticks, boxWidth: 12, padding: 10 } },
           },
         },
       });

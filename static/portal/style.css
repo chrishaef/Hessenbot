@@ -869,6 +869,11 @@ body.page-login {
   height: 240px;
 }
 
+.dm-delivery-chart-wrap {
+  flex: 1 1 auto;
+  min-height: 160px;
+}
+
 .dash-view-nav .dash-view-btn {
   color: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.25);

@@ -167,8 +167,21 @@ def render_dm_delivery_stats_html(stats: Dict[str, Any], *, compact: bool = Fals
     fo = stats.get("failed_other", 0)
     hours = int(stats.get("hours", 24))
     if compact:
+        total = c + fp + fo
+        if total > 0:
+            chart_block = (
+                '<div class="chart-canvas-wrap dm-delivery-chart-wrap mt-2">'
+                '<canvas id="dmDeliveryChart" aria-label="DM-Zustellung Diagramm"></canvas>'
+                "</div>"
+            )
+        else:
+            chart_block = (
+                '<p class="text-muted small mb-0 mt-3 text-center">'
+                "Noch keine DM-Zustell-Meldungen im Auswertungszeitraum."
+                "</p>"
+            )
         return f"""
-<div class="dm-delivery-stats-compact">
+<div class="dm-delivery-stats-compact d-flex flex-column h-100">
   <div class="row g-2 text-center mb-0">
     <div class="col-4">
       <div class="metric-label small">Bestätigt</div>
@@ -183,7 +196,7 @@ def render_dm_delivery_stats_html(stats: Dict[str, Any], *, compact: bool = Fals
       <div class="metric-value text-danger">{fo}</div>
     </div>
   </div>
-  <p class="small text-muted mb-0 mt-2">Letzte {hours}h · aus meshbot.log</p>
+  {chart_block}
 </div>"""
 
     top = stats.get("top_problem_nodes") or []
