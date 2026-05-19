@@ -5,8 +5,6 @@
       return {
         cmdLabels: [],
         cmdValues: [],
-        msgLabels: [],
-        msgValues: [],
         activityLabels: [],
         activityValues: [],
       };
@@ -18,8 +16,6 @@
       return {
         cmdLabels: [],
         cmdValues: [],
-        msgLabels: [],
-        msgValues: [],
         activityLabels: [],
         activityValues: [],
       };
@@ -66,34 +62,6 @@
             x: { ticks: { color: ticks }, grid: { color: gridColor } },
             y: { ticks: { color: ticks }, grid: { color: gridColor }, beginAtZero: true },
           },
-        },
-      });
-    }
-
-    var msgEl = document.getElementById("msgChart");
-    if (msgEl && data.msgLabels && data.msgLabels.length) {
-      new Chart(msgEl, {
-        type: "doughnut",
-        data: {
-          labels: data.msgLabels,
-          datasets: [
-            {
-              data: data.msgValues,
-              backgroundColor: [
-                "#2e7d5e",
-                "#20c997",
-                "#198754",
-                "#6c757d",
-                "#0d6efd",
-                "#ffc107",
-              ],
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: legend },
         },
       });
     }
