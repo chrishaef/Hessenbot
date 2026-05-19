@@ -93,6 +93,43 @@ class TestBot(unittest.TestCase):
             self.assertTrue(r["ok"])
             self.assertEqual(r["summary"], "problems_found")
 
+    def test_dm_delivery_stats_24h_parse(self):
+        import os
+        import tempfile
+        from datetime import datetime
+
+        from modules.dm_delivery_stats import parse_dm_delivery_stats_24h
+
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"{ts},000 | INFO | System: DM delivery confirmed Device:1 "
+                    "To:x Node:111 RequestId:1\n"
+                    f"{ts},000 | WARNING | System: DM delivery failed (PKI) Device:1 "
+                    "To:x Node:222 Reason:PKI_UNKNOWN_PUBKEY RequestId:2\n"
+                    f"{ts},000 | WARNING | System: DM delivery failed Device:1 "
+                    "To:x Node:333 Reason:TIMEOUT RequestId:3\n"
+                )
+            r = parse_dm_delivery_stats_24h(td)
+            self.assertEqual(r["confirmed"], 1)
+            self.assertEqual(r["failed_pki"], 1)
+            self.assertEqual(r["failed_other"], 1)
+
+    def test_dm_delivery_fail_streak_alert(self):
+        from modules import dm_delivery_stats as dds
+
+        dds._fail_streak.clear()
+        dds._warned_pairs.clear()
+        dds.record_dm_delivery_outcome(1, 424242, success=False, is_pki=True)
+        dds.record_dm_delivery_outcome(1, 424242, success=False, is_pki=True)
+        self.assertNotIn((1, 424242), dds._warned_pairs)
+        dds.record_dm_delivery_outcome(1, 424242, success=False, is_pki=True)
+        self.assertIn((1, 424242), dds._warned_pairs)
+        dds.record_dm_delivery_outcome(1, 424242, success=True)
+        self.assertNotIn((1, 424242), dds._fail_streak)
+
     def test_faq_pki_log_scan_dm_delivery(self):
         import os
         import tempfile

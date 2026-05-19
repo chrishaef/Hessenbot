@@ -457,6 +457,8 @@ MESSAGE_CHUNK_SIZE = 160
 wantAck = False
 # DM replies: request delivery ACK on first chunk only (PKI / routing errors in log)
 wantAckOnDm = True
+# After N consecutive DM delivery failures to the same node, log an admin warning
+dmDeliveryFailAlertThreshold = 3
 # Max limit buffer for radio testing in bytes
 maxBuffer = 200
 #Enable Extra logging of Hop count data

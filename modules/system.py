@@ -1011,8 +1011,17 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
     request_id = decoded.get('requestId', decoded.get('request_id', packet.get('id')))
     dest_name = get_name_from_number(dest_node, 'long', device_id)
     if _significant_routing_error(error_reason):
+        is_pki = str(error_reason).startswith('PKI_')
+        try:
+            from modules.dm_delivery_stats import record_dm_delivery_outcome
+
+            record_dm_delivery_outcome(
+                device_id, dest_node, success=False, is_pki=is_pki
+            )
+        except Exception as e:
+            logger.debug(f"System: dm_delivery_stats record failed: {e}")
         pki_hint = PKI_ROUTING_ERROR_HINTS.get(error_reason, '')
-        if str(error_reason).startswith('PKI_'):
+        if is_pki:
             logger.warning(
                 f"System: DM delivery failed (PKI) Device:{device_id} To:{dest_name} Node:{dest_node} "
                 f"Reason:{error_reason} RequestId:{request_id} Guidance:{pki_hint}"
@@ -1023,6 +1032,12 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
                 f"Reason:{error_reason} RequestId:{request_id}"
             )
     else:
+        try:
+            from modules.dm_delivery_stats import record_dm_delivery_outcome
+
+            record_dm_delivery_outcome(device_id, dest_node, success=True)
+        except Exception as e:
+            logger.debug(f"System: dm_delivery_stats record failed: {e}")
         logger.info(
             f"System: DM delivery confirmed Device:{device_id} To:{dest_name} Node:{dest_node} "
             f"RequestId:{request_id}"

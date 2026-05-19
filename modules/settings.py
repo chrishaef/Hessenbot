@@ -545,6 +545,7 @@ try:
     MESSAGE_CHUNK_SIZE = config['messagingSettings'].getint('MESSAGE_CHUNK_SIZE', 160) # default 160 chars
     wantAck = config['messagingSettings'].getboolean('wantAck', False) # default False
     wantAckOnDm = config['messagingSettings'].getboolean('wantAckOnDm', True) # default True — first DM chunk only
+    dm_delivery_fail_alert_threshold = config['messagingSettings'].getint('dmDeliveryFailAlertThreshold', 3)
     maxBuffer = config['messagingSettings'].getint('maxBuffer', 200) # default 200 bytes
     enableHopLogs = config['messagingSettings'].getboolean('enableHopLogs', False) # default False
     debugMetadata = config['messagingSettings'].getboolean('debugMetadata', False) # default False

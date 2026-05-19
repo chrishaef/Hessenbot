@@ -341,7 +341,17 @@ def create_app(
 
         dash = collect_dashboard(log_dir)
         alerts_html = render_admin_log_alerts_html(dash["log"])
+        dm_admin_block = ""
+        if dash.get("want_ack_on_dm") and dash.get("dm_delivery_24h") is not None:
+            from modules.dm_delivery_stats import render_dm_delivery_stats_html
+
+            dm_admin_block = f"""
+<h3 class="h6 section-title mb-3"><i class="bi bi-envelope-check me-2 text-success"></i>DM-Zustellung (24h)</h3>
+{render_dm_delivery_stats_html(dash["dm_delivery_24h"])}
+<hr class="my-4">
+"""
         host_block = f"""
+{dm_admin_block}
 <h3 class="h6 section-title mb-3"><i class="bi bi-pc-display me-2 text-success"></i>Host</h3>
 {render_host_metrics_html()}
 <hr class="my-4">
