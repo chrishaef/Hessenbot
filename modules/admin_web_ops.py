@@ -856,7 +856,7 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     if err:
         return False, err
 
-    current, read_err = fetch_local_node_settings(iface_id)
+    read_err, current = fetch_local_node_settings(iface_id)
     if read_err or not current:
         return False, read_err or "Einstellungen konnten nicht gelesen werden."
 
