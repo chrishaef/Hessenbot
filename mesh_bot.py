@@ -1075,6 +1075,20 @@ def onReceive(packet, interface):
         return
     decoded = packet.get('decoded') or {}
 
+    # Intercept NodeInfo packets to build our own unlimited persistent NodeDB,
+    # independent of the hardware device's ~250-node flash limit.
+    portnum = decoded.get('portnum', '')
+    if portnum == 'NODEINFO_APP':
+        sender = packet.get('from')
+        user = decoded.get('user') or {}
+        if sender and (user.get('longName') or user.get('shortName') or user.get('publicKey')):
+            _ndb.update_node(
+                sender,
+                long_name=user.get('longName') or None,
+                short_name=user.get('shortName') or None,
+                public_key=user.get('publicKey') or None,
+            )
+
     # extract interface details from inbound packet
     rxType = type(interface).__name__
 
