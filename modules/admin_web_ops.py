@@ -770,6 +770,19 @@ def fetch_local_node_settings(iface_id: int) -> Tuple[Optional[str], Optional[Di
 
     iface_type = getattr(st, f"interface{iface_id}_type", "?")
 
+    pos_node = my_info.get("position") or {}
+    latitude = pos_node.get("latitude")
+    longitude = pos_node.get("longitude")
+    if latitude is None:
+        latitude = st.latitudeValue
+    if longitude is None:
+        longitude = st.longitudeValue
+    altitude_m = pos_node.get("altitude")
+    try:
+        altitude_m = int(round(float(altitude_m))) if altitude_m is not None else None
+    except (TypeError, ValueError):
+        altitude_m = None
+
     return None, {
         "iface_id": iface_id,
         "iface_type": iface_type,
@@ -785,9 +798,12 @@ def fetch_local_node_settings(iface_id: int) -> Tuple[Optional[str], Optional[Di
         ),
         "node_info_broadcast_secs": int(dev.node_info_broadcast_secs),
         "position_broadcast_secs": int(pos.position_broadcast_secs),
-        "position_broadcast_smart_enabled": bool(pos.position_broadcast_smart_enabled),
-        "gps_enabled": bool(pos.gps_enabled),
-        "gps_update_interval": int(pos.gps_update_interval),
+        "fixed_position": bool(pos.fixed_position),
+        "latitude": latitude,
+        "longitude": longitude,
+        "altitude_m": altitude_m,
+        "config_latitude": st.latitudeValue,
+        "config_longitude": st.longitudeValue,
         "lora_region": _enum_name("LoRaConfig.RegionCode", lora.region, {}),
         "lora_modem_preset": _enum_name("LoRaConfig.ModemPreset", lora.modem_preset, {}),
         "lora_channel_num": int(lora.channel_num),
@@ -802,6 +818,36 @@ def _parse_nonneg_int(raw: str, field_label: str, *, minimum: int = 0) -> Tuple[
     if val < minimum:
         return None, f"{field_label}: mindestens {minimum}."
     return val, None
+
+
+def _parse_coord(
+    raw: str, field_label: str, *, minimum: float, maximum: float
+) -> Tuple[Optional[float], Optional[str]]:
+    text = (raw or "").strip().replace(",", ".")
+    if not text:
+        return None, f"{field_label}: bitte einen Wert eingeben."
+    try:
+        val = float(text)
+    except ValueError:
+        return None, f"{field_label}: ungültige Zahl."
+    if not minimum <= val <= maximum:
+        return None, f"{field_label}: Wert zwischen {minimum} und {maximum}."
+    return val, None
+
+
+def _coords_changed(current: Dict[str, Any], lat: float, lon: float, alt_m: Optional[int]) -> bool:
+    cur_lat = current.get("latitude")
+    cur_lon = current.get("longitude")
+    cur_alt = current.get("altitude_m")
+    if cur_lat is None or cur_lon is None:
+        return True
+    if abs(float(cur_lat) - lat) > 1e-6 or abs(float(cur_lon) - lon) > 1e-6:
+        return True
+    if alt_m is None:
+        return cur_alt is not None
+    if cur_alt is None:
+        return True
+    return int(cur_alt) != int(alt_m)
 
 
 def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
@@ -831,20 +877,27 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     )
     if err:
         return False, err
-    gps_interval, err = _parse_nonneg_int(
-        form.get("gps_update_interval"), "GPS-Update-Intervall", minimum=0
-    )
+
+    latitude, err = _parse_coord(form.get("latitude"), "Breitengrad", minimum=-90.0, maximum=90.0)
     if err:
         return False, err
+    longitude, err = _parse_coord(form.get("longitude"), "Längengrad", minimum=-180.0, maximum=180.0)
+    if err:
+        return False, err
+
+    alt_raw = (form.get("altitude_m") or "").strip().replace(",", ".")
+    altitude_m: Optional[int] = None
+    if alt_raw:
+        try:
+            altitude_m = int(round(float(alt_raw)))
+        except ValueError:
+            return False, "Höhe: ungültige Zahl."
 
     try:
         role = int(form.get("role", current["role"]))
         rebroadcast = int(form.get("rebroadcast_mode", current["rebroadcast_mode"]))
     except (TypeError, ValueError):
         return False, "Rolle oder Rebroadcast-Modus ungültig."
-
-    smart_pos = form.get("position_broadcast_smart_enabled") == "on"
-    gps_enabled = form.get("gps_enabled") == "on"
 
     changes: List[str] = []
 
@@ -878,14 +931,14 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     if pos_secs != int(pos.position_broadcast_secs):
         pos.position_broadcast_secs = pos_secs
         pos_changed = True
-    if smart_pos != bool(pos.position_broadcast_smart_enabled):
-        pos.position_broadcast_smart_enabled = smart_pos
+    if bool(pos.position_broadcast_smart_enabled):
+        pos.position_broadcast_smart_enabled = False
         pos_changed = True
-    if gps_enabled != bool(pos.gps_enabled):
-        pos.gps_enabled = gps_enabled
+    if bool(pos.gps_enabled):
+        pos.gps_enabled = False
         pos_changed = True
-    if gps_interval != int(pos.gps_update_interval):
-        pos.gps_update_interval = gps_interval
+    if not bool(pos.fixed_position):
+        pos.fixed_position = True
         pos_changed = True
     if pos_changed:
         try:
@@ -893,6 +946,13 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
         except Exception as e:
             return False, f"Positions-Config konnte nicht geschrieben werden: {e!s}"
         changes.append("Position")
+
+    if _coords_changed(current, latitude, longitude, altitude_m) or not current.get("fixed_position"):
+        try:
+            node.setFixedPosition(latitude, longitude, altitude_m or 0)
+        except Exception as e:
+            return False, f"Feste Position konnte nicht gesetzt werden: {e!s}"
+        changes.append("Feste Position")
 
     if not changes:
         return True, "Keine Änderungen."
@@ -932,13 +992,25 @@ def build_node_settings_html(
         )
     tabs = " ".join(tab_parts)
 
-    chk_smart = " checked" if settings["position_broadcast_smart_enabled"] else ""
-    chk_gps = " checked" if settings["gps_enabled"] else ""
+    lat_val = settings["latitude"]
+    lon_val = settings["longitude"]
+    lat_disp = "" if lat_val is None else f"{float(lat_val):.6f}".rstrip("0").rstrip(".")
+    lon_disp = "" if lon_val is None else f"{float(lon_val):.6f}".rstrip("0").rstrip(".")
+    alt_disp = "" if settings["altitude_m"] is None else str(settings["altitude_m"])
+    fixed_badge = (
+        '<span class="badge bg-success">aktiv</span>'
+        if settings["fixed_position"]
+        else '<span class="badge bg-warning text-dark">noch nicht aktiv</span>'
+    )
+    cfg_lat = settings["config_latitude"]
+    cfg_lon = settings["config_longitude"]
 
     return f"""
 <p class="small text-muted mb-2">Schnittstelle: {tabs}</p>
 <p class="small text-muted">Liest und schreibt die Konfiguration der <strong>lokal verbundenen</strong> Meshtastic-Node
   (wie <code>meshtastic --set</code>). Änderungen werden im Gerät gespeichert und gelten unabhängig vom Bot.</p>
+<p class="small text-muted">Dieser Bot hat <strong>kein GPS</strong> — es können nur <strong>feste Positionen</strong> gesetzt werden
+  (GPS am Gerät wird automatisch deaktiviert).</p>
 
 <div class="row g-3 mb-3">
   <div class="col-md-4">
@@ -1001,34 +1073,36 @@ def build_node_settings_html(
     </div>
   </div>
 
-  <h5 class="mb-3">Position / GPS</h5>
+  <h5 class="mb-3">Feste Position</h5>
+  <p class="small text-muted mb-3">Feste Position auf dem Gerät: {fixed_badge}
+    · Vorgabe aus <code>config.ini</code> [location]: {cfg_lat}, {cfg_lon}</p>
   <div class="row g-3 mb-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
+      <label class="form-label" for="ns-lat">Breitengrad</label>
+      <input class="form-control" type="text" inputmode="decimal" id="ns-lat" name="latitude" required
+             placeholder="50.4484" value="{html.escape(lat_disp)}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="ns-lon">Längengrad</label>
+      <input class="form-control" type="text" inputmode="decimal" id="ns-lon" name="longitude" required
+             placeholder="9.509" value="{html.escape(lon_disp)}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="ns-alt">Höhe (m, optional)</label>
+      <input class="form-control" type="number" id="ns-alt" name="altitude_m" step="1"
+             placeholder="z. B. 320" value="{html.escape(alt_disp)}">
+    </div>
+    <div class="col-md-3">
       <label class="form-label" for="ns-pos">Positions-Intervall (Sek.)</label>
       <input class="form-control" type="number" id="ns-pos" name="position_broadcast_secs"
              min="60" step="1" required value="{settings["position_broadcast_secs"]}">
-    </div>
-    <div class="col-md-4">
-      <label class="form-label" for="ns-gps-int">GPS-Update-Intervall (Sek.)</label>
-      <input class="form-control" type="number" id="ns-gps-int" name="gps_update_interval"
-             min="0" step="1" required value="{settings["gps_update_interval"]}">
-      <div class="form-text">0 = Firmware-Standard (oft 30 s).</div>
-    </div>
-    <div class="col-md-4 d-flex flex-column justify-content-center gap-2 pt-md-4">
-      <div class="form-check">
-        <input class="form-check-input" type="checkbox" id="ns-smart" name="position_broadcast_smart_enabled"{chk_smart}>
-        <label class="form-check-label" for="ns-smart">Smart Position Broadcast</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" type="checkbox" id="ns-gps" name="gps_enabled"{chk_gps}>
-        <label class="form-check-label" for="ns-gps">GPS aktiviert</label>
-      </div>
+      <div class="form-text">Sendeintervall der festen Position ins Mesh.</div>
     </div>
   </div>
 
   <div class="alert alert-warning small">
     Kürzere Intervalle erhöhen Funklast und Stromverbrauch. Rolle und Rebroadcast beeinflussen das Mesh-Verhalten —
-    auf öffentlichen Netzen vorsichtig ändern.
+    auf öffentlichen Netzen vorsichtig ändern. GPS bleibt am Gerät ausgeschaltet.
   </div>
 
   <button type="submit" class="btn btn-primary">Auf Gerät speichern</button>
