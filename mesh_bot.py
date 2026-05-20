@@ -15,6 +15,7 @@ from datetime import datetime
 from modules.log import logger, CustomFormatter, msgLogger, getPrettyTime
 import modules.settings as my_settings
 from modules.system import *
+import modules.nodedb as _ndb
 
 # list of commands to remove from the default list for DM only
 restrictedCommands = []
@@ -1002,6 +1003,7 @@ def handle_boot(mesh=True):
             logger.debug(f"System: Auto-Ban Enabled for {my_settings.autoBanThreshold} messages in {my_settings.autoBanTimeframe} seconds")
             load_bbsBanList()
             load_autoBanList()
+        _ndb.load_nodedb()
 
         if my_settings.log_messages_to_file:
             logger.debug("System: Logging Messages to disk")
@@ -1242,9 +1244,16 @@ def onReceive(packet, interface):
                 snr = packet.get('rxSnr', 0)
                 rssi = packet.get('rxRssi', 0)
 
-            # check if the packet has a publicKey flag use it
+            # check if the packet has a publicKey flag use it; persist in nodeDB
             if packet.get('publicKey'):
-                pkiStatus = packet.get('pkiEncrypted', False), packet.get('publicKey', 'ABC')
+                pk = packet.get('publicKey', 'ABC')
+                pkiStatus = packet.get('pkiEncrypted', False), pk
+                _ndb.update_node(message_from_id, public_key=pk)
+            else:
+                # fall back to previously cached public key for this node
+                cached_pk = _ndb.get_node_pubkey(message_from_id)
+                if cached_pk:
+                    pkiStatus = (False, cached_pk)
             
             # Use packet id for threaded replies;
             packet_id = packet.get('id', None)
