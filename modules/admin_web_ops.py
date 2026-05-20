@@ -690,3 +690,347 @@ def rebuild_scheduler_jobs() -> None:
         st.schedulerTime,
         st.schedulerInterval,
     )
+
+
+# --- Local node settings (Meshtastic device config via admin channel) ---
+
+_NODE_ROLE_LABELS: Dict[int, str] = {
+    0: "CLIENT",
+    1: "CLIENT_MUTE",
+    2: "ROUTER",
+    3: "ROUTER_CLIENT (veraltet)",
+    4: "REPEATER (veraltet)",
+    5: "TRACKER",
+    6: "SENSOR",
+    7: "TAK",
+    8: "CLIENT_HIDDEN",
+    9: "LOST_AND_FOUND",
+    10: "TAK_TRACKER",
+    11: "ROUTER_LATE",
+    12: "CLIENT_BASE",
+}
+
+_REBROADCAST_LABELS: Dict[int, str] = {
+    0: "ALL",
+    1: "ALL_SKIP_DECODING",
+    2: "LOCAL_ONLY",
+    3: "KNOWN_ONLY",
+    4: "NONE",
+    5: "CORE_PORTNUMS_ONLY",
+}
+
+
+def _local_node_for_iface(iface_id: int):
+    sm = _system_mod()
+    iface = sm.__dict__.get(f"interface{iface_id}")
+    if iface is None:
+        return None, "Interface ist nicht verbunden."
+    if not sm.__dict__.get(f"interface{iface_id}_enabled"):
+        return None, f"Interface {iface_id} ist deaktiviert."
+    if getattr(iface, "myInfo", None) is None:
+        return None, "Radio noch nicht bereit (keine Verbindung zum Gerät)."
+    return iface.localNode, None
+
+
+def _enum_name(enum_path: str, value: int, fallback: Dict[int, str]) -> str:
+    try:
+        from meshtastic.protobuf import config_pb2
+
+        obj = config_pb2.Config
+        for part in enum_path.split("."):
+            obj = getattr(obj, part)
+        return obj.Name(int(value))
+    except Exception:
+        pass
+    return fallback.get(int(value), str(value))
+
+
+def fetch_local_node_settings(iface_id: int) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Read owner + device/position config from the connected local node."""
+    from modules.system import decimal_to_hex
+
+    node, err = _local_node_for_iface(iface_id)
+    if err:
+        return err, None
+
+    sm = _system_mod()
+    iface = sm.__dict__.get(f"interface{iface_id}")
+    my_info = iface.getMyNodeInfo() or {}
+    user = my_info.get("user") or {}
+    short_name = str(user.get("shortName") or "")
+    long_name = str(user.get("longName") or "")
+    node_num = int(my_info.get("num") or sm.__dict__.get(f"myNodeNum{iface_id}", 0) or 0)
+
+    lc = node.localConfig
+    dev = lc.device
+    pos = lc.position
+    lora = lc.lora
+
+    import modules.settings as st
+
+    iface_type = getattr(st, f"interface{iface_id}_type", "?")
+
+    return None, {
+        "iface_id": iface_id,
+        "iface_type": iface_type,
+        "node_num": node_num,
+        "node_id_hex": decimal_to_hex(node_num) if node_num else "—",
+        "short_name": short_name,
+        "long_name": long_name,
+        "role": int(dev.role),
+        "role_name": _enum_name("DeviceConfig.Role", dev.role, _NODE_ROLE_LABELS),
+        "rebroadcast_mode": int(dev.rebroadcast_mode),
+        "rebroadcast_name": _enum_name(
+            "DeviceConfig.RebroadcastMode", dev.rebroadcast_mode, _REBROADCAST_LABELS
+        ),
+        "node_info_broadcast_secs": int(dev.node_info_broadcast_secs),
+        "position_broadcast_secs": int(pos.position_broadcast_secs),
+        "position_broadcast_smart_enabled": bool(pos.position_broadcast_smart_enabled),
+        "gps_enabled": bool(pos.gps_enabled),
+        "gps_update_interval": int(pos.gps_update_interval),
+        "lora_region": _enum_name("LoRaConfig.RegionCode", lora.region, {}),
+        "lora_modem_preset": _enum_name("LoRaConfig.ModemPreset", lora.modem_preset, {}),
+        "lora_channel_num": int(lora.channel_num),
+    }
+
+
+def _parse_nonneg_int(raw: str, field_label: str, *, minimum: int = 0) -> Tuple[Optional[int], Optional[str]]:
+    try:
+        val = int((raw or "").strip())
+    except ValueError:
+        return None, f"{field_label}: bitte eine ganze Zahl eingeben."
+    if val < minimum:
+        return None, f"{field_label}: mindestens {minimum}."
+    return val, None
+
+
+def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
+    """Apply form values to the connected local Meshtastic node."""
+    node, err = _local_node_for_iface(iface_id)
+    if err:
+        return False, err
+
+    current, read_err = fetch_local_node_settings(iface_id)
+    if read_err or not current:
+        return False, read_err or "Einstellungen konnten nicht gelesen werden."
+
+    short_name = (form.get("short_name") or "").strip()
+    long_name = (form.get("long_name") or "").strip()
+    if not short_name or len(short_name) > 4:
+        return False, "Kurzname: 1–4 Zeichen erforderlich."
+    if not long_name:
+        return False, "Langname darf nicht leer sein."
+
+    node_info_secs, err = _parse_nonneg_int(
+        form.get("node_info_broadcast_secs"), "NodeInfo-Intervall", minimum=60
+    )
+    if err:
+        return False, err
+    pos_secs, err = _parse_nonneg_int(
+        form.get("position_broadcast_secs"), "Positions-Intervall", minimum=60
+    )
+    if err:
+        return False, err
+    gps_interval, err = _parse_nonneg_int(
+        form.get("gps_update_interval"), "GPS-Update-Intervall", minimum=0
+    )
+    if err:
+        return False, err
+
+    try:
+        role = int(form.get("role", current["role"]))
+        rebroadcast = int(form.get("rebroadcast_mode", current["rebroadcast_mode"]))
+    except (TypeError, ValueError):
+        return False, "Rolle oder Rebroadcast-Modus ungültig."
+
+    smart_pos = form.get("position_broadcast_smart_enabled") == "on"
+    gps_enabled = form.get("gps_enabled") == "on"
+
+    changes: List[str] = []
+
+    if short_name != current["short_name"] or long_name != current["long_name"]:
+        try:
+            node.setOwner(long_name=long_name, short_name=short_name)
+        except Exception as e:
+            return False, f"Name konnte nicht gesetzt werden: {e!s}"
+        changes.append("Name")
+
+    dev = node.localConfig.device
+    dev_changed = False
+    if role != int(dev.role):
+        dev.role = role
+        dev_changed = True
+    if rebroadcast != int(dev.rebroadcast_mode):
+        dev.rebroadcast_mode = rebroadcast
+        dev_changed = True
+    if node_info_secs != int(dev.node_info_broadcast_secs):
+        dev.node_info_broadcast_secs = node_info_secs
+        dev_changed = True
+    if dev_changed:
+        try:
+            node.writeConfig("device")
+        except Exception as e:
+            return False, f"Geräte-Config konnte nicht geschrieben werden: {e!s}"
+        changes.append("Gerät")
+
+    pos = node.localConfig.position
+    pos_changed = False
+    if pos_secs != int(pos.position_broadcast_secs):
+        pos.position_broadcast_secs = pos_secs
+        pos_changed = True
+    if smart_pos != bool(pos.position_broadcast_smart_enabled):
+        pos.position_broadcast_smart_enabled = smart_pos
+        pos_changed = True
+    if gps_enabled != bool(pos.gps_enabled):
+        pos.gps_enabled = gps_enabled
+        pos_changed = True
+    if gps_interval != int(pos.gps_update_interval):
+        pos.gps_update_interval = gps_interval
+        pos_changed = True
+    if pos_changed:
+        try:
+            node.writeConfig("position")
+        except Exception as e:
+            return False, f"Positions-Config konnte nicht geschrieben werden: {e!s}"
+        changes.append("Position")
+
+    if not changes:
+        return True, "Keine Änderungen."
+    return True, f"Gespeichert auf dem Gerät: {', '.join(changes)}."
+
+
+def node_settings_role_options(selected: int) -> str:
+    opts = []
+    for val, label in sorted(_NODE_ROLE_LABELS.items()):
+        sel = " selected" if val == selected else ""
+        opts.append(f'<option value="{val}"{sel}>{html.escape(label)}</option>')
+    return "".join(opts)
+
+
+def node_settings_rebroadcast_options(selected: int) -> str:
+    opts = []
+    for val, label in sorted(_REBROADCAST_LABELS.items()):
+        sel = " selected" if val == selected else ""
+        opts.append(f'<option value="{val}"{sel}>{html.escape(label)}</option>')
+    return "".join(opts)
+
+
+def build_node_settings_html(
+    settings: Dict[str, Any],
+    *,
+    iface_id: int,
+    ifaces: List[int],
+    form_action: str,
+) -> str:
+    """HTML form for local node settings."""
+    tab_parts = []
+    for i in ifaces:
+        cls = "btn-light" if i == iface_id else "btn-outline-secondary"
+        sep = "&" if "?" in form_action else "?"
+        tab_parts.append(
+            f'<a class="btn btn-sm {cls}" href="{html.escape(form_action)}{sep}iface={i}">IF {i}</a>'
+        )
+    tabs = " ".join(tab_parts)
+
+    chk_smart = " checked" if settings["position_broadcast_smart_enabled"] else ""
+    chk_gps = " checked" if settings["gps_enabled"] else ""
+
+    return f"""
+<p class="small text-muted mb-2">Schnittstelle: {tabs}</p>
+<p class="small text-muted">Liest und schreibt die Konfiguration der <strong>lokal verbundenen</strong> Meshtastic-Node
+  (wie <code>meshtastic --set</code>). Änderungen werden im Gerät gespeichert und gelten unabhängig vom Bot.</p>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="p-3 rounded border border-secondary-subtle h-100">
+      <div class="small text-muted">Node ID</div>
+      <div><code>{html.escape(str(settings["node_num"]))}</code>
+        <code class="ms-1">{html.escape(settings["node_id_hex"])}</code></div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="p-3 rounded border border-secondary-subtle h-100">
+      <div class="small text-muted">Verbindung</div>
+      <div>{html.escape(str(settings["iface_type"]).upper())} (Interface {iface_id})</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="p-3 rounded border border-secondary-subtle h-100">
+      <div class="small text-muted">LoRa (nur Anzeige)</div>
+      <div class="small">{html.escape(settings["lora_region"])} · {html.escape(settings["lora_modem_preset"])} · Kanal {settings["lora_channel_num"]}</div>
+    </div>
+  </div>
+</div>
+
+<form method="post" class="node-settings-form">
+  <input type="hidden" name="iface_id" value="{iface_id}">
+
+  <h5 class="mt-2 mb-3">Knotenname</h5>
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <label class="form-label" for="ns-short">Kurzname (max. 4)</label>
+      <input class="form-control" id="ns-short" name="short_name" maxlength="4" required
+             value="{html.escape(settings["short_name"])}">
+    </div>
+    <div class="col-md-9">
+      <label class="form-label" for="ns-long">Langname</label>
+      <input class="form-control" id="ns-long" name="long_name" maxlength="40" required
+             value="{html.escape(settings["long_name"])}">
+    </div>
+  </div>
+
+  <h5 class="mb-3">Gerät</h5>
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <label class="form-label" for="ns-role">Rolle</label>
+      <select class="form-select" id="ns-role" name="role">
+        {node_settings_role_options(settings["role"])}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="ns-rebroadcast">Rebroadcast</label>
+      <select class="form-select" id="ns-rebroadcast" name="rebroadcast_mode">
+        {node_settings_rebroadcast_options(settings["rebroadcast_mode"])}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="ns-nodeinfo">NodeInfo-Intervall (Sek.)</label>
+      <input class="form-control" type="number" id="ns-nodeinfo" name="node_info_broadcast_secs"
+             min="60" step="1" required value="{settings["node_info_broadcast_secs"]}">
+      <div class="form-text">Wie oft NodeInfo gesendet wird (Standard oft 900 s).</div>
+    </div>
+  </div>
+
+  <h5 class="mb-3">Position / GPS</h5>
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <label class="form-label" for="ns-pos">Positions-Intervall (Sek.)</label>
+      <input class="form-control" type="number" id="ns-pos" name="position_broadcast_secs"
+             min="60" step="1" required value="{settings["position_broadcast_secs"]}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="ns-gps-int">GPS-Update-Intervall (Sek.)</label>
+      <input class="form-control" type="number" id="ns-gps-int" name="gps_update_interval"
+             min="0" step="1" required value="{settings["gps_update_interval"]}">
+      <div class="form-text">0 = Firmware-Standard (oft 30 s).</div>
+    </div>
+    <div class="col-md-4 d-flex flex-column justify-content-center gap-2 pt-md-4">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="ns-smart" name="position_broadcast_smart_enabled"{chk_smart}>
+        <label class="form-check-label" for="ns-smart">Smart Position Broadcast</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="ns-gps" name="gps_enabled"{chk_gps}>
+        <label class="form-check-label" for="ns-gps">GPS aktiviert</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-warning small">
+    Kürzere Intervalle erhöhen Funklast und Stromverbrauch. Rolle und Rebroadcast beeinflussen das Mesh-Verhalten —
+    auf öffentlichen Netzen vorsichtig ändern.
+  </div>
+
+  <button type="submit" class="btn btn-primary">Auf Gerät speichern</button>
+</form>
+"""

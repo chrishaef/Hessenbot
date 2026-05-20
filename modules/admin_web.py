@@ -746,6 +746,73 @@ def create_app(
             flash(msg, "success")
         return redirect(url_for("nodes_list", iface=iface_id))
 
+    @app.route("/node-settings", methods=["GET", "POST"])
+    @login_required
+    @limiter.limit("20 per minute", methods=["POST"])
+    def node_settings_index():
+        from modules import admin_web_ops as ops
+
+        try:
+            ifaces = ops.iter_radio_interfaces()
+        except Exception as e:
+            return (
+                _render_admin_template(
+                    """
+  <p class="alert alert-danger">System-Modul: {{ err }}</p>
+""",
+                    title="Node Settings",
+                    active_tab="nodesettings",
+                    err=str(e),
+                ),
+                500,
+            )
+
+        redirect_kw: dict = {}
+        if not ifaces:
+            body = (
+                '<p class="alert alert-info">Keine aktive Meshtastic-Schnittstelle '
+                "(Bot läuft ohne Radio oder noch nicht verbunden).</p>"
+            )
+        else:
+            try:
+                q = request.args.get("iface", type=int)
+            except Exception:
+                q = None
+            iface_id = q if q in ifaces else ifaces[0]
+            redirect_kw["iface"] = iface_id
+
+            if request.method == "POST":
+                try:
+                    post_iface = int(request.form.get("iface_id") or "0")
+                except (TypeError, ValueError):
+                    post_iface = 0
+                if post_iface in ifaces:
+                    iface_id = post_iface
+                    redirect_kw["iface"] = iface_id
+                ok, msg = ops.apply_local_node_settings(iface_id, request.form)
+                flash(msg, "success" if ok else "error")
+                return redirect(url_for("node_settings_index", **redirect_kw))
+
+            err, settings = ops.fetch_local_node_settings(iface_id)
+            if err or not settings:
+                body = f'<p class="alert alert-danger">{html_escape(err or "Unbekannter Fehler")}</p>'
+            else:
+                body = ops.build_node_settings_html(
+                    settings,
+                    iface_id=iface_id,
+                    ifaces=ifaces,
+                    form_action=url_for("node_settings_index"),
+                )
+
+        return _render_admin_template(
+            """
+  {{ body }}
+""",
+            title="Node Settings",
+            active_tab="nodesettings",
+            body=Markup(body),
+        )
+
     @app.route("/mesh-admin", methods=["GET", "POST"])
     @login_required
     def mesh_admin_index():
