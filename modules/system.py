@@ -18,6 +18,7 @@ import io # for suppressing output on watchdog
 from modules.settings import *
 from modules.log import logger, getPrettyTime, CustomFormatter
 from modules.paths import ensure_parent_dir, path_in_repo
+import modules.nodedb as _ndb
 
 
 def _mesh_leaderboard_pkl_path() -> str:
@@ -285,7 +286,13 @@ for i in range(1, 10):
             "Bot continues (web UI, watchdog); start meshtasticd or fix hostname/port."
         )
 
-# Get my node numbers for global use       
+# Populate persistent nodeDB from all interfaces that came up
+for _i in range(1, 10):
+    _iface = globals().get(f'interface{_i}')
+    if _iface is not None:
+        _ndb.populate_from_interface(_iface)
+
+# Get my node numbers for global use
 my_node_ids = [globals().get(f'myNodeNum{i}') for i in range(1, 10)]
 
 # Get the node number of the devices, check if the devices are connected meshtastic devices
@@ -505,6 +512,9 @@ def cleanup_memory():
             for k in stale:
                 del _cmd_rate_tracker[k]
 
+        # Clean up stale nodeDB entries (only when >1000 and older than 60 days)
+        _ndb.cleanup_nodedb()
+
     except Exception as e:
         logger.error(f"System: Error during memory cleanup: {e}")
 
@@ -568,20 +578,32 @@ def format_ping_qsl_response(
 
 
 def get_name_from_number(number, type='long', nodeInt=1):
-    interface = globals()[f'interface{nodeInt}']
-    name = ""
-    
-    for node in interface.nodes.values():
-        if number == node['num']:
-            if type == 'long':
-                name = node['user']['longName']
-                return name
-            elif type == 'short':
-                name = node['user']['shortName']
-                return name
-        else:
-            name =  str(decimal_to_hex(number))  # If name not found, use the ID as string
-    return name
+    interface = globals().get(f'interface{nodeInt}')
+    if interface is not None:
+        try:
+            for node in interface.nodes.values():
+                if number == node['num']:
+                    user = node.get('user') or {}
+                    long_n = user.get('longName', '')
+                    short_n = user.get('shortName', '')
+                    # opportunistically keep nodeDB warm
+                    _ndb.update_node(number,
+                                     long_name=long_n or None,
+                                     short_name=short_n or None,
+                                     public_key=user.get('publicKey') or None)
+                    return long_n if type == 'long' else short_n
+        except Exception:
+            pass
+
+    # interface missing or node not in interface.nodes — try persistent nodeDB
+    if type == 'long':
+        cached = _ndb.get_node_long_name(number)
+    else:
+        cached = _ndb.get_node_short_name(number)
+    if cached:
+        return cached
+
+    return str(decimal_to_hex(number))
 
 def get_num_from_short_name(short_name, nodeInt=1):
     # First, search the specified interface
@@ -3204,6 +3226,7 @@ async def retry_interface(nodeID):
             h, p = _tcp_host_port_for_interface(nodeID)
             host_hint = f" @ {h}:{p}"
         logger.info(f"System: Interface{nodeID} reconnected{host_hint}")
+        _ndb.populate_from_interface(globals().get(f"interface{nodeID}"))
     except Exception as e:
         logger.error(f"System: Error reopening interface{nodeID}: {e}")
         globals()[f"retry_int{nodeID}"] = True
@@ -3397,6 +3420,10 @@ def saveAllData():
         # Save auto-ban list
         if save_autoBanList():
             logger.debug("Persistence: Auto-ban list saved")
+
+        # Save persistent node DB (only writes when dirty)
+        if _ndb.save_nodedb():
+            logger.debug("Persistence: NodeDB saved")
 
         #logger.info("Persistence: Save completed")
     except Exception as e:

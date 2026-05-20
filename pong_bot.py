@@ -15,6 +15,7 @@ import random
 from modules.log import logger, CustomFormatter, msgLogger
 import modules.settings as my_settings
 from modules.system import *
+import modules.nodedb as _ndb
 
 # Global Variables
 DEBUGpacket = False # Debug print the packet rx
@@ -609,6 +610,7 @@ def handle_boot(mesh=True):
             logger.debug(f"System: Auto-Ban Enabled for {my_settings.autoBanThreshold} messages in {my_settings.autoBanTimeframe} seconds")
             load_bbsBanList()
             load_autoBanList()
+        _ndb.load_nodedb()
 
         if my_settings.log_messages_to_file:
             logger.debug("System: Logging Messages to disk")
