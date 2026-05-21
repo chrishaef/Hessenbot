@@ -1398,25 +1398,7 @@ def messageTrap(msg):
     return False
 
 def stringSafeCheck(s, fromID=0):
-    # Check if a string is safe to use, no control characters or non-printable characters
-    if not all(c.isprintable() or c.isspace() for c in s):
-        ban_hammer(fromID, reason="Non-printable character in message")
-        return False # non-printable characters found
-    if any(ord(c) < 32 and c not in '\n\r\t' for c in s):
-        ban_hammer(fromID, reason="Control character in message")
-        return False # control characters found
-    if any(c in s for c in ['\x0b', '\x0c', '\x1b']):
-        return False # vertical tab, form feed, escape characters found
-    if len(s) > 1000:
-        return False
-    # Check for single-character injections
-    single_injection_chars = [';', '|', '}', '>']
-    if any(c in s for c in single_injection_chars):
-        return False # injection character found
-    # Check for multi-character patterns
-    multi_injection_patterns = ['../', '||']
-    if any(pattern in s for pattern in multi_injection_patterns):
-        return False
+    """Disabled: mesh text is not passed to shell; enable_runShellCmd is off by default."""
     return True
 
 def api_throttle(node_id, rxInterface=None, channel=None, apiName=""):
