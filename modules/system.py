@@ -1150,6 +1150,28 @@ def dm_chunk_wants_delivery_ack(nodeid, chunk_index, want_ack_all=False, want_ac
     return bool(want_ack_on_dm) and chunk_index == 0
 
 
+def _request_nodeinfo_exchange(dest_node: int, device_id: int) -> None:
+    """Send a NODEINFO_APP request to dest_node so its public key reaches meshtasticd's NodeDB."""
+    try:
+        interface = globals().get(f'interface{device_id}')
+        if interface is None:
+            return
+        # portNum 67 = NODEINFO_APP; wantResponse=True tells the target to reply with its NodeInfo
+        interface.sendData(
+            b'',
+            destinationId=dest_node,
+            portNum=67,
+            wantAck=False,
+            wantResponse=True,
+        )
+        logger.info(
+            f"System: NodeInfo exchange triggered for Node:{dest_node} via Device:{device_id} "
+            f"(PKI_SEND_FAIL_PUBLIC_KEY — waiting for key in NodeInfo reply)"
+        )
+    except Exception as e:
+        logger.debug(f"System: NodeInfo exchange request failed for Node:{dest_node}: {e}")
+
+
 def _log_dm_delivery_result(packet, dest_node, device_id):
     """Log mesh ACK/NAK for a DM we sent with wantAck (via Meshtastic onResponse)."""
     decoded = packet.get('decoded') or {}
@@ -1173,6 +1195,8 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
                 f"System: DM delivery failed (PKI) Device:{device_id} To:{dest_name} Node:{dest_node} "
                 f"Reason:{error_reason} RequestId:{request_id} Guidance:{pki_hint}"
             )
+            if error_reason == 'PKI_SEND_FAIL_PUBLIC_KEY':
+                _request_nodeinfo_exchange(dest_node, device_id)
         else:
             logger.warning(
                 f"System: DM delivery failed Device:{device_id} To:{dest_name} Node:{dest_node} "
