@@ -1011,7 +1011,8 @@ def log_locationData_toMap(userID, location, message):
 
 def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
     from modules.system import get_node_location
-    command = message[len("map"):].strip()
+    map_idx = message.lower().index("map")
+    command = message[map_idx + len("map"):].strip()
     location = get_node_location(userID, deviceID)
     lat = location[0]
     lon = location[1]
