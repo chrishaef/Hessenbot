@@ -1195,7 +1195,7 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
                 f"System: DM delivery failed (PKI) Device:{device_id} To:{dest_name} Node:{dest_node} "
                 f"Reason:{error_reason} RequestId:{request_id} Guidance:{pki_hint}"
             )
-            if error_reason == 'PKI_SEND_FAIL_PUBLIC_KEY':
+            if error_reason in ('PKI_SEND_FAIL_PUBLIC_KEY', 'PKI_UNKNOWN_PUBKEY'):
                 _request_nodeinfo_exchange(dest_node, device_id)
         else:
             logger.warning(
@@ -2761,6 +2761,8 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                         f"RequesterShort:{get_name_from_number(requester_node, 'short', rxNode)} "
                         f"TargetNode:{target_node} RequestId:{request_id} Guidance:{pki_hint}"
                     )
+                    if error_reason == 'PKI_UNKNOWN_PUBKEY' and requester_node and requester_node != nodeID:
+                        _request_nodeinfo_exchange(requester_node, rxNode)
                 elif logMetaStats:
                     logger.info(
                         f"System: ROUTING_APP Error Device:{rxNode} Channel:{channel} Reason:{error_reason} "
