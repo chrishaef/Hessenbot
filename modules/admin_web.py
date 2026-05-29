@@ -66,9 +66,10 @@ def _messages_log_path(log_dir: str) -> str:
 
 
 def _read_messages_log_tail(log_path: str, max_lines: int = 500) -> str:
-    with open(log_path, encoding="utf-8", errors="replace") as f:
-        lines = f.readlines()
-    zeilen = reversed(lines[-max_lines:] if len(lines) > max_lines else lines)
+    from modules.web_dashboard import _tail_lines
+
+    lines = _tail_lines(log_path, max_lines)
+    zeilen = reversed(lines)
     gefiltert = []
     for z in zeilen:
         try:

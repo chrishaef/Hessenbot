@@ -265,20 +265,39 @@ def _command_list_items(entries: List[tuple], empty: str = "Keine Befehle") -> s
     return "".join(f"<li>{html_escape(line)}</li>" for line in lines)
 
 
+def _tail_lines(log_path: str, max_lines: int, *, encoding: str = "utf-8") -> List[str]:
+    """Read ~the last ``max_lines`` lines without loading the whole file.
+
+    Seeks from the end in 64 KiB blocks until enough newlines are collected, so a
+    multi-MB log doesn't get fully read into memory on every dashboard request.
+    """
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            pos = f.tell()
+            block = 65536
+            data = b""
+            while pos > 0 and data.count(b"\n") <= max_lines:
+                read_size = min(block, pos)
+                pos -= read_size
+                f.seek(pos)
+                data = f.read(read_size) + data
+    except OSError:
+        return []
+    lines = data.decode(encoding, errors="replace").splitlines(keepends=True)
+    return lines[-max_lines:]
+
+
 def _parse_messages_log_tail(
     log_path: str, nodes: _NodeDirectory, *, max_lines: int = 800
 ) -> List[Dict[str, Any]]:
     """Supplement recent messages from logs/messages.log (pipe format)."""
     if not os.path.isfile(log_path):
         return []
-    try:
-        with open(log_path, encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-    except OSError:
-        return []
+    lines = _tail_lines(log_path, max_lines)
 
     events: List[Dict[str, Any]] = []
-    for line in lines[-max_lines:]:
+    for line in lines:
         m = re.match(
             r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
             r"Device:(\d+) (Channel:\d+(?:\|[^|]+)?) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
@@ -353,23 +372,43 @@ def _empty_log_stats() -> Dict[str, Any]:
 
 _LEADERBOARD_24H_SEC = 86400
 
+# Cache parsed log stats so repeated dashboard requests (and the 5s auto-refresh
+# admin views) don't re-read and re-parse a multi-MB log every time. Keyed by log
+# path; served for up to _LOG_PARSE_TTL seconds and invalidated immediately when
+# the file shrinks (log rotation/truncation).
+_LOG_PARSE_TTL = 30.0
+_log_parse_cache: Dict[str, Dict[str, Any]] = {}
+
 
 def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
+    """Parse meshbot.log with a short-TTL cache (see _log_parse_cache)."""
+    now = time.time()
+    try:
+        size = os.path.getsize(log_path)
+    except OSError:
+        size = -1
+    cached = _log_parse_cache.get(log_path)
+    if (
+        cached is not None
+        and (now - cached["ts"]) < _LOG_PARSE_TTL
+        and size >= cached["size"]
+        and not cached["stats"].get("log_error")
+    ):
+        return cached["stats"]
+
+    stats = _parse_meshbot_log_uncached(log_path, max_lines)
+    _log_parse_cache[log_path] = {"ts": now, "size": size, "stats": stats}
+    return stats
+
+
+def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     """Parse meshbot.log (same patterns as report_generator5)."""
     stats = _empty_log_stats()
     if not os.path.isfile(log_path):
         stats["log_error"] = f"Logdatei nicht gefunden: {log_path}"
         return stats
 
-    try:
-        with open(log_path, encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-    except OSError as e:
-        stats["log_error"] = str(e)
-        return stats
-
-    if len(lines) > max_lines:
-        lines = lines[-max_lines:]
+    lines = _tail_lines(log_path, max_lines)
     stats["log_lines"] = len(lines)
 
     hourly: Dict[str, int] = defaultdict(int)
@@ -438,9 +477,9 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
             unique_users.add(user_match.group(1).strip()[:80])
 
         if "WARNING |" in line:
-            warnings.insert(0, line.strip()[:200])
+            warnings.append(line.strip()[:200])
         if "ERROR |" in line or "CRITICAL |" in line:
-            errors.insert(0, line.strip()[:200])
+            errors.append(line.strip()[:200])
 
         bbs_match = re.search(
             r"ðŸ“¡BBSdb has (\d+) messages.*?Messages waiting: (\d+)", line
@@ -557,8 +596,8 @@ def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     stats["message_types"] = message_types
     stats["hourly_activity"] = dict(hourly)
     stats["unique_users"] = list(unique_users)[-30:]
-    stats["warnings"] = warnings[:15]
-    stats["errors"] = errors[:15]
+    stats["warnings"] = warnings[-15:][::-1]
+    stats["errors"] = errors[-15:][::-1]
     stats["command_timestamps"] = command_timestamps[-40:]
     stats["message_timestamps"] = message_timestamps[-40:]
     stats["recent_messages"] = recent_messages[-40:]
@@ -819,13 +858,29 @@ def _resolve_node_label(node_id: Any) -> str:
         return str(node_id)
 
 
+# Throttle the expensive leaderboard load (pickle read + full NodeDB sync inside
+# loadLeaderboard()) so it runs at most once per TTL instead of on every request.
+_MESH_LB_TTL = 30.0
+_mesh_lb_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
+
+
 def _load_mesh_leaderboard() -> Dict[str, Any]:
+    now = time.time()
+    if _mesh_lb_cache["data"] is not None and (now - _mesh_lb_cache["ts"]) < _MESH_LB_TTL:
+        return _mesh_lb_cache["data"]
+    data = _load_mesh_leaderboard_uncached()
+    _mesh_lb_cache["data"] = data
+    _mesh_lb_cache["ts"] = now
+    return data
+
+
+def _load_mesh_leaderboard_uncached() -> Dict[str, Any]:
     """Load mesh leaderboard for the dashboard.
 
-    Uses the bot's loadLeaderboard() when available. Always merges message-count
-    aggregates from repo-root ``data/leaderboard.pkl`` when in-memory counts are
-    empty (e.g. web process had wrong CWD before system.loadLeaderboard used
-    path_in_repo).
+    Uses the bot's loadLeaderboard() when available. Only falls back to reading
+    repo-root ``data/leaderboard.pkl`` when the in-memory message-count aggregates
+    are missing (e.g. web process had wrong CWD before system.loadLeaderboard used
+    path_in_repo) — avoiding a redundant second pickle read in the common case.
     """
     lb: Dict[str, Any] = {}
     try:
@@ -837,6 +892,12 @@ def _load_mesh_leaderboard() -> Dict[str, Any]:
     except Exception:
         pass
 
+    local_mc = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
+    local_tmc = lb.get("nodeTMessageCounts") if isinstance(lb.get("nodeTMessageCounts"), dict) else {}
+    # In-memory counts present → no need to touch the pickle again.
+    if lb and local_mc and local_tmc:
+        return lb
+
     pkl = path_in_repo("data/leaderboard.pkl")
     if not os.path.isfile(pkl):
         return lb
@@ -847,12 +908,10 @@ def _load_mesh_leaderboard() -> Dict[str, Any]:
         if not isinstance(disk, dict):
             return lb
 
-        local_mc = lb.get("nodeMessageCounts") if isinstance(lb.get("nodeMessageCounts"), dict) else {}
         disk_mc = disk.get("nodeMessageCounts") if isinstance(disk.get("nodeMessageCounts"), dict) else {}
         if disk_mc and not local_mc:
             lb["nodeMessageCounts"] = disk_mc
 
-        local_tmc = lb.get("nodeTMessageCounts") if isinstance(lb.get("nodeTMessageCounts"), dict) else {}
         disk_tmc = disk.get("nodeTMessageCounts") if isinstance(disk.get("nodeTMessageCounts"), dict) else {}
         if disk_tmc and not local_tmc:
             lb["nodeTMessageCounts"] = disk_tmc
@@ -928,18 +987,36 @@ def _format_uptime(value: Any) -> str:
     return f"{secs}s"
 
 
+# Throttle the live NodeDB scan used for the 24h leaderboard.
+_NODEDB_LEADERS_TTL = 30.0
+_nodedb_leaders_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
+
+
+def _cached_nodedb_leaders(cutoff_ts: float) -> Dict[str, Any]:
+    now = time.time()
+    if (
+        _nodedb_leaders_cache["data"] is not None
+        and (now - _nodedb_leaders_cache["ts"]) < _NODEDB_LEADERS_TTL
+    ):
+        return _nodedb_leaders_cache["data"]
+    try:
+        from modules.system import compute_24h_nodedb_leaders
+
+        data = compute_24h_nodedb_leaders(cutoff_ts) or {}
+    except Exception:
+        data = {}
+    _nodedb_leaders_cache["data"] = data
+    _nodedb_leaders_cache["ts"] = now
+    return data
+
+
 def _leaderboard_web_rows(
     lb: Dict[str, Any], *, log: Optional[Dict[str, Any]] = None
 ) -> List[str]:
     """Human-readable mesh leaderboard lines (nur Einträge der letzten 24h)."""
     cutoff = _leaderboard_24h_cutoff()
     msg_24h = _leaderboard_24h_message_leader(log)
-    try:
-        from modules.system import compute_24h_nodedb_leaders
-
-        nodedb_leaders = compute_24h_nodedb_leaders(cutoff) or {}
-    except Exception:
-        nodedb_leaders = {}
+    nodedb_leaders = _cached_nodedb_leaders(cutoff)
     specs = [
         ("mostMessages", "💬 Meiste Nachrichten", lambda r: str(int(r["value"]))),
         ("mostTMessages", "📊 Meiste Telemetrie", lambda r: str(int(r["value"]))),

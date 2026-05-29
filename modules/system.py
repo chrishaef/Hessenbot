@@ -7,6 +7,7 @@ import meshtastic.ble_interface
 import time
 import json
 import asyncio
+import threading
 import urllib.request
 import random
 import re
@@ -581,17 +582,27 @@ def get_name_from_number(number, type='long', nodeInt=1):
     interface = globals().get(f'interface{nodeInt}')
     if interface is not None:
         try:
-            for node in interface.nodes.values():
-                if number == node['num']:
-                    user = node.get('user') or {}
-                    long_n = user.get('longName', '')
-                    short_n = user.get('shortName', '')
-                    # opportunistically keep nodeDB warm
-                    _ndb.update_node(number,
-                                     long_name=long_n or None,
-                                     short_name=short_n or None,
-                                     public_key=user.get('publicKey') or None)
-                    return long_n if type == 'long' else short_n
+            # nodesByNum is keyed by node number → O(1); fall back to a scan if
+            # it's missing (older lib) or the node isn't indexed yet.
+            node = None
+            nodes_by_num = getattr(interface, 'nodesByNum', None)
+            if isinstance(nodes_by_num, dict):
+                node = nodes_by_num.get(number)
+            if node is None:
+                for candidate in interface.nodes.values():
+                    if number == candidate['num']:
+                        node = candidate
+                        break
+            if node is not None:
+                user = node.get('user') or {}
+                long_n = user.get('longName', '')
+                short_n = user.get('shortName', '')
+                # opportunistically keep nodeDB warm
+                _ndb.update_node(number,
+                                 long_name=long_n or None,
+                                 short_name=short_n or None,
+                                 public_key=user.get('publicKey') or None)
+                return long_n if type == 'long' else short_n
         except Exception:
             pass
 
@@ -2704,16 +2715,20 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                 if current_time - last_alert_time < 1800:
                     return False # less than 30 minutes since last alert
                 positionMetadata[nodeID]['lastHighFlyAlert'] = current_time
-                try:
-                    if highfly_check_openskynetwork:
-                        if 'latitude' in position_data and 'longitude' in position_data and 'altitude' in position_data:
-                            flight_info = get_openskynetwork(
-                                position_data.get('latitude', 0),
-                                position_data.get('longitude', 0),
-                                node_altitude=position_data.get('altitude', 0)
-                            )
+                # OpenSky lookup is a blocking HTTP call; run the lookup and the
+                # alert send on a background thread so the packet handler returns
+                # immediately (the 30-min throttle above prevents thread spam).
+                hf_lat = position_data.get('latitude')
+                hf_lon = position_data.get('longitude')
+                hf_alt = position_data.get('altitude')
+
+                def _highfly_alert(base_msg=msg, lat=hf_lat, lon=hf_lon, alt=hf_alt):
+                    try:
+                        out_msg = base_msg
+                        if highfly_check_openskynetwork and lat is not None and lon is not None and alt is not None:
+                            flight_info = get_openskynetwork(lat, lon, node_altitude=alt)
                             if flight_info and isinstance(flight_info, dict):
-                                msg += (
+                                out_msg += (
                                     f"\n✈️Detected near:\n"
                                     f"{flight_info.get('callsign', 'N/A')} "
                                     f"Alt:{int(flight_info.get('geo_altitude', 0)) if flight_info.get('geo_altitude') else 'N/A'}m "
@@ -2721,9 +2736,11 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                                     f"Heading:{int(flight_info.get('true_track', 0)) if flight_info.get('true_track') else 'N/A'}°\n"
                                     f"From:{flight_info.get('origin_country', 'N/A')}"
                                 )
-                    send_message(msg, highfly_channel, 0, highfly_interface)
-                except Exception as e:
-                    logger.debug(f"System: Highfly: error: {e}")
+                        send_message(out_msg, highfly_channel, 0, highfly_interface)
+                    except Exception as e:
+                        logger.debug(f"System: Highfly: error: {e}")
+
+                threading.Thread(target=_highfly_alert, daemon=True).start()
             # Keep the positionMetadata dictionary at a maximum size
             if len(positionMetadata) > MAX_SEEN_NODES:
                 # Remove the oldest entry
