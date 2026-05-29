@@ -146,6 +146,17 @@ def _blitz_settings():
     )
 
 
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    p = math.pi / 180.0
+    a = (
+        0.5
+        - math.cos((lat2 - lat1) * p) / 2
+        + math.cos(lat1 * p) * math.cos(lat2 * p) * (1 - math.cos((lon2 - lon1) * p)) / 2
+    )
+    return 2 * r * math.asin(math.sqrt(max(0.0, min(1.0, a))))
+
+
 def _bbox_for_radius(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
     """west, south, east, north for DMI/Blitzortung."""
     dlat = radius_km / 111.0
