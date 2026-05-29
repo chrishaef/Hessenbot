@@ -371,14 +371,23 @@ def _get_blitz_forecast(lat_f: float, lon_f: float, hours: int = 24) -> tuple[st
     return f"Modell {hours}h: kein Gewitter-Risiko.", False
 
 
-def get_blitz(lat=0, lon=0, hours: int = 24) -> str:
-    """Live-Einschläge (DMI / optional Blitzortung) + kurze Modell-Vorhersage."""
+def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None) -> str:
+    """Live-Einschläge (DMI / optional Blitzortung) + kurze Modell-Vorhersage.
+
+    ``from_gps`` (optional): True wenn der Standort der anfragenden Station bekannt
+    ist, False wenn auf den Bot-Standort zurückgegriffen wurde. Wird in der Antwort
+    angezeigt, damit klar ist, worauf sich die Distanzen beziehen.
+    """
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
     lat_f, lon_f = coords
 
     header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "BLITZ")
+    if from_gps is True:
+        header += "\n📍 Standort bekannt"
+    elif from_gps is False:
+        header += "\n📍 Standort unbekannt – Bot-Standort"
 
     live_on, radius_km, bo_user, bo_pass = _blitz_settings()
     strikes: list[dict] = []

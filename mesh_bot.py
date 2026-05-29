@@ -413,14 +413,16 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str):
         return f"🤖 !{cmd} ist in der Konfiguration deaktiviert (wxExtraCommands)."
     from modules.wx_extra import get_blitz, get_regen, get_uv
 
+    if cmd == "blitz":
+        b_lat, b_lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+        return get_blitz(str(b_lat), str(b_lon), from_gps=from_gps)
+
     location = get_node_location(message_from_id, deviceID)
     lat, lon = str(location[0]), str(location[1])
     if cmd == "uv":
         return get_uv(lat, lon)
     if cmd == "regen":
         return get_regen(lat, lon)
-    if cmd == "blitz":
-        return get_blitz(lat, lon)
     return "Unbekannter Wetter-Befehl."
 
 
