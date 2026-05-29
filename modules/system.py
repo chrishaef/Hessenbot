@@ -2403,6 +2403,117 @@ def sync_leaderboard_from_nodedb() -> None:
         merge_leaderboard_from_mesh_map_nodes(remote, now)
 
 
+def compute_24h_nodedb_leaders(cutoff_ts: float | None = None) -> dict:
+    """Fresh 24h leaderboard records from the current NodeDB.
+
+    meshLeaderboard holds all-time records whose timestamp only refreshes when a
+    value is beaten, so they age out of a 24h window and disappear from the
+    dashboard. This scans nodes heard within the window and returns the current
+    leaders (battery, uptime, SNR, altitude, speed, temperature) with a fresh
+    timestamp, so the web dashboard always has populated, up-to-date data.
+    Message-count leaders stay log/packet-driven and are not handled here.
+    """
+    if cutoff_ts is None:
+        cutoff_ts = time.time() - 86400
+    now = time.time()
+    out: dict = {}
+
+    def _better(key, nid, value, *, lower=False):
+        cur = out.get(key)
+        if cur is None or (value < cur["value"] if lower else value > cur["value"]):
+            out[key] = {"nodeID": nid, "value": value, "timestamp": now}
+
+    for i in range(1, 10):
+        if not globals().get(f"interface{i}_enabled"):
+            continue
+        iface = globals().get(f"interface{i}")
+        if iface is None:
+            continue
+        myn = globals().get(f"myNodeNum{i}", 777)
+        nodes_by_num = getattr(iface, "nodesByNum", None)
+        if nodes_by_num:
+            node_iter = list(nodes_by_num.values())
+        else:
+            raw = getattr(iface, "nodes", None) or {}
+            node_iter = list(raw.values()) if isinstance(raw, dict) else []
+
+        for node in node_iter:
+            if not isinstance(node, dict):
+                continue
+            try:
+                nid = int(node.get("num"))
+            except (TypeError, ValueError):
+                continue
+            if not nid:
+                continue
+            try:
+                if float(node.get("lastHeard") or 0) < cutoff_ts:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            if nid != myn:
+                snr = node.get("snr")
+                if snr is not None:
+                    try:
+                        dbm = float(snr)
+                        _better("highestDBm", nid, dbm)
+                        _better("weakestDBm", nid, dbm, lower=True)
+                    except (TypeError, ValueError):
+                        pass
+
+            dm = node.get("deviceMetrics") or node.get("device_metrics")
+            if isinstance(dm, dict):
+                bl = dm.get("batteryLevel")
+                if bl is None:
+                    bl = dm.get("battery_level")
+                if bl is not None:
+                    try:
+                        battery = float(bl)
+                        if 0 < battery <= 100:
+                            _better("lowestBattery", nid, battery, lower=True)
+                    except (TypeError, ValueError):
+                        pass
+                if nid != myn:
+                    up = dm.get("uptimeSeconds")
+                    if up is None:
+                        up = dm.get("uptime_seconds")
+                    if up is not None:
+                        try:
+                            _better("longestUptime", nid, float(up))
+                        except (TypeError, ValueError):
+                            pass
+
+            env = node.get("environmentMetrics") or node.get("environment_metrics")
+            if isinstance(env, dict):
+                t = env.get("temperature")
+                if t is not None:
+                    try:
+                        tv = float(t)
+                        _better("coldestTemp", nid, tv, lower=True)
+                        _better("hottestTemp", nid, tv)
+                    except (TypeError, ValueError):
+                        pass
+
+            pos = node.get("position")
+            if isinstance(pos, dict):
+                alt = pos.get("altitude")
+                if alt is not None:
+                    try:
+                        _better("highestAltitude", nid, float(alt))
+                    except (TypeError, ValueError):
+                        pass
+                gs = pos.get("groundSpeed")
+                if gs is not None:
+                    try:
+                        sv = float(gs)
+                        if sv > 0:
+                            _better("fastestSpeed", nid, sv)
+                    except (TypeError, ValueError):
+                        pass
+    return out
+
+
 def consumeMetadata(packet, rxNode=0, channel=-1):
     global positionMetadata, localTelemetryData, meshLeaderboard
     uptime = battery = temp = iaq = nodeID = 0

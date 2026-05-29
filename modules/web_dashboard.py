@@ -907,6 +907,12 @@ def _leaderboard_web_rows(
     """Human-readable mesh leaderboard lines (nur Einträge der letzten 24h)."""
     cutoff = _leaderboard_24h_cutoff()
     msg_24h = _leaderboard_24h_message_leader(log)
+    try:
+        from modules.system import compute_24h_nodedb_leaders
+
+        nodedb_leaders = compute_24h_nodedb_leaders(cutoff) or {}
+    except Exception:
+        nodedb_leaders = {}
     specs = [
         ("mostMessages", "💬 Meiste Nachrichten", lambda r: str(int(r["value"]))),
         ("mostTMessages", "📊 Meiste Telemetrie", lambda r: str(int(r["value"]))),
@@ -923,6 +929,8 @@ def _leaderboard_web_rows(
     for key, title, fmt in specs:
         if key == "mostMessages" and msg_24h:
             rec = msg_24h
+        elif key in nodedb_leaders:
+            rec = nodedb_leaders[key]
         else:
             rec = lb.get(key)
         if not _leaderboard_record_in_window(rec, cutoff):
