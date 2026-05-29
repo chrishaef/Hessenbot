@@ -802,6 +802,7 @@ def get_mesh_node_position_info(nodeID, nodeInt=1, round_digits=2):
                 and isinstance(pos, dict)
                 and pos.get("latitude") is not None
                 and pos.get("longitude") is not None
+                and _position_is_fresh(node, pos)
             ):
                 try:
                     lat = float(pos["latitude"])
@@ -889,40 +890,85 @@ def get_node_list(nodeInt=1):
     
     return node_list
 
+# Max age for a NodeDB position packet to count as "current" (24h).
+NODE_POSITION_MAX_AGE_SEC = 86400
+
+
+def _position_is_fresh(node: dict, pos: dict, max_age_sec: int = NODE_POSITION_MAX_AGE_SEC) -> bool:
+    """True if the node's position packet is not older than max_age_sec.
+
+    Uses the position's own ``time`` field; only when the position carries no
+    timestamp does it fall back to the node's ``lastHeard``. If neither timestamp
+    is available the position is accepted (we cannot prove it is stale, and the
+    node is present in the live NodeDB).
+    """
+    ts = 0
+    if isinstance(pos, dict):
+        try:
+            ts = int(pos.get("time") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+    if ts <= 0:
+        try:
+            ts = int(node.get("lastHeard") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+    if ts <= 0:
+        return True
+    return (time.time() - ts) <= max_age_sec
+
+
+def _nodedb_fresh_position(nodeID, nodeInt, round_digits):
+    """Return (lat, lon, alt_m|None) from the live NodeDB when the node has a
+    position that is not older than 24h, else None.
+
+    Searches the preferred interface first, then other enabled interfaces. A node
+    that is found but has no usable / stale position returns None so the caller
+    falls through to the mesh map and finally the bot location.
+    """
+    for iface_num in _enabled_interface_order(nodeInt):
+        interface = globals().get(f"interface{iface_num}")
+        if interface is None or not getattr(interface, "nodes", None):
+            continue
+        for node in interface.nodes.values():
+            if nodeID != node.get("num"):
+                continue
+            pos = node.get("position")
+            if not (
+                isinstance(pos, dict)
+                and pos.get("latitude") is not None
+                and pos.get("longitude") is not None
+            ):
+                return None
+            if not _position_is_fresh(node, pos):
+                return None
+            try:
+                lat = float(pos["latitude"])
+                lon = float(pos["longitude"])
+            except (TypeError, ValueError) as e:
+                logger.warning(f"System: Error processing position for node {nodeID}: {e}")
+                return None
+            if fuzzItAll:
+                lat = round(lat, round_digits)
+                lon = round(lon, round_digits)
+            return (lat, lon, _parse_altitude_m(pos.get("altitude")))
+    return None
+
+
 def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
     """
     Returns [latitude, longitude] for a node.
-    - Always returns a fuzzed (rounded) config location as fallback.
-    - returns their actual position if available, else fuzzed config location.
+    Flow (same for all location commands): fresh (<=24h) NodeDB position →
+    mesh map snapshot → bot/config location.
     """
     _ensure_mesh_map_positions_loaded()
-    interface = globals()[f'interface{nodeInt}']
-
     fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
     config_position = [latitudeValue, longitudeValue]
 
-    # Try to find an exact location for the requested node
-    if interface.nodes:
-        for node in interface.nodes.values():
-            if nodeID == node['num']:
-                pos = node.get('position')
-                if (
-                    pos and isinstance(pos, dict)
-                    and pos.get('latitude') is not None
-                    and pos.get('longitude') is not None
-                ):
-                    try:
-                        # Got a valid position
-                        latitude = pos['latitude']
-                        longitude = pos['longitude']
-                        if fuzzItAll:
-                            latitude = round(latitude, round_digits)
-                            longitude = round(longitude, round_digits)
-                            logger.debug(f"System: Fuzzed location data for {nodeID} is {latitude}, {longitude}")
-                        logger.debug(f"System: Location data for {nodeID} is {latitude}, {longitude}")
-                        return [latitude, longitude]
-                    except Exception as e:
-                        logger.warning(f"System: Error processing position for node {nodeID}: {e}")
+    fresh = _nodedb_fresh_position(nodeID, nodeInt, round_digits)
+    if fresh:
+        logger.debug(f"System: Location data for {nodeID} is {fresh[0]}, {fresh[1]}")
+        return [fresh[0], fresh[1]]
 
     snap = mesh_map_node_positions.get(int(nodeID))
     if snap:
@@ -941,32 +987,19 @@ def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
 
 
 def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
-    """Returns [latitude, longitude, from_gps] for warning/location replies."""
+    """Returns [latitude, longitude, from_gps] for warning/location replies.
+
+    Same flow as get_node_location; from_gps is True when the location came from a
+    fresh NodeDB position or the mesh map, False when falling back to the bot
+    location.
+    """
     _ensure_mesh_map_positions_loaded()
-    interface = globals()[f'interface{nodeInt}']
     fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
     config_position = [latitudeValue, longitudeValue]
 
-    if interface.nodes:
-        for node in interface.nodes.values():
-            if nodeID == node['num']:
-                pos = node.get('position')
-                if (
-                    pos and isinstance(pos, dict)
-                    and pos.get('latitude') is not None
-                    and pos.get('longitude') is not None
-                ):
-                    try:
-                        latitude = pos['latitude']
-                        longitude = pos['longitude']
-                        if fuzzItAll:
-                            latitude = round(latitude, round_digits)
-                            longitude = round(longitude, round_digits)
-                        return [latitude, longitude, True]
-                    except Exception as e:
-                        logger.warning(
-                            f"System: Error processing position for node {nodeID}: {e}"
-                        )
+    fresh = _nodedb_fresh_position(nodeID, nodeInt, round_digits)
+    if fresh:
+        return [fresh[0], fresh[1], True]
 
     snap = mesh_map_node_positions.get(int(nodeID))
     if snap:
