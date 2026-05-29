@@ -212,7 +212,8 @@ def initNewsSources():
         if file.endswith('_news.txt'):
             source = file[:-9]  # remove _news.txt
             newsSourcesList.append(source)
-            return True
+    if newsSourcesList:
+        return True
     logger.info("FileMon: No news sources found")
     return False
 

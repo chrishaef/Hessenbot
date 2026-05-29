@@ -157,25 +157,16 @@ def store_sms(nodeID, sms):
     global sms_db
     try:
         logger.debug("System: Setting SMS for " + str(nodeID))
-        # if the nodeID has over 5 sms addresses warn and return
-        for item in sms_db:
-            if item['nodeID'] == nodeID:
-                if len(item['sms']) >= 5:
-                    logger.warning("System: 📵SMS limit reached for " + str(nodeID))
-                    return False
-        # if not in db, add it
-        if nodeID not in sms_db:
-            sms_db.append({'nodeID': nodeID, 'sms': sms})
+        # one address per node: update existing record, otherwise add a new one
+        record = next((item for item in sms_db if item['nodeID'] == nodeID), None)
+        if record is not None:
+            record['sms'] = sms
         else:
-            # if in db, update it
-            for item in sms_db:
-                if item['nodeID'] == nodeID:
-                    item['sms'].append(sms)
+            sms_db.append({'nodeID': nodeID, 'sms': sms})
 
         # save to a pickle for persistence, this is a simple db, be mindful of risk
         with open('data/sms_db.pickle', 'wb') as f:
             pickle.dump(sms_db, f)
-        f.close()
         return True
     except Exception as e:
         logger.warning("System: Failed to store SMS: " + str(e))
@@ -197,29 +188,35 @@ def handle_sms(nodeID, message):
     
     # send SMS to SMS in db. if none ask for one
     if message.lower().startswith("setsms"):
-        message = message.split(" ", 1)
-        if len(message[1]) < 5:
+        parts = message.split(" ", 1)
+        address = parts[1].strip() if len(parts) > 1 else ""
+        if len(address) < 5:
             return "?📲setsms: example@phone.co"
-        if "@" not in message[1] and "." not in message[1]:
+        if "@" not in address or "." not in address:
             return "📲Please provide a valid email address"
-        if store_sms(nodeID, message[1]):
+        if store_sms(nodeID, address):
             return "📲SMS address set 📪"
         else:
             return "⛔️Failed to set address"
         
     if message.lower().startswith("sms:"):
-        message = message.split(" ", 1)
-        if any(item['nodeID'] == nodeID for item in sms_db):
-            count = 0
-            # for all dict items maching nodeID in sms_db send sms
-            for item in sms_db:
-                if item['nodeID'] == nodeID:
-                    smsEmail = item['sms']
-                    logger.info("System: Sending SMS for " + str(nodeID) + " to " + smsEmail[:-6])
-                    if send_email(smsEmail, message[1], nodeID):
-                        count += 1
-                    else: 
-                        return "⛔️Failed to send SMS"
+        parts = message.split(" ", 1)
+        body = parts[1].strip() if len(parts) > 1 else ""
+        if not body:
+            return "📲 Bitte Text angeben: sms: <Nachricht>"
+        count = 0
+        sent_any = False
+        # for all dict items matching nodeID in sms_db send sms
+        for item in sms_db:
+            if item['nodeID'] == nodeID:
+                sent_any = True
+                smsEmail = item['sms']
+                logger.info("System: Sending SMS for " + str(nodeID) + " to " + smsEmail)
+                if send_email(smsEmail, body, nodeID):
+                    count += 1
+                else:
+                    return "⛔️Failed to send SMS"
+        if sent_any:
             return "📲SMS sent " + str(count) + " addresses 📤"
         else:
             return "📲No address set, use 📲setsms"

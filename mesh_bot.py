@@ -217,11 +217,12 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
             toNode = get_num_from_short_name(toNode, deviceID)
             if toNode and isinstance(toNode, int) and toNode != 0:
                 if my_settings.bbs_enabled:
-                    msg_result = None
                     logger.debug(f"System: Sending ping as BBS DM to @{toNode} from {get_name_from_number(message_from_id, 'short', deviceID)}")
                     msg_result = bbs_post_dm(toNode, "Ping von Hessenbot (Meshhessen)!", message_from_id)
                     # exit the function
-                    return msg_result if msg_result else logger.warning(f"System: ping @nodeID detected but no BBS to send with, enable BBS in settings.ini")
+                    if not msg_result:
+                        logger.warning("System: ping @nodeID detected but BBS DM could not be sent")
+                    return msg_result or msg
 
     elif "#" in message:
         msg = msg + " #" + message.split("#")[1]

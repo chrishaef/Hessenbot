@@ -2553,7 +2553,7 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                     meshLeaderboard['nodeMessageCounts'] = message_count
                     if message_count[nodeID] > meshLeaderboard['mostMessages']['value']:
                         meshLeaderboard['mostMessages'] = {'nodeID': nodeID, 'value': message_count[nodeID], 'timestamp': time.time()}
-            else:
+            elif packet_type == 'TELEMETRY_APP':
                 tmessage_count = meshLeaderboard.get('nodeTMessageCounts', {})
                 tmessage_count[nodeID] = tmessage_count.get(nodeID, 0) + 1
                 meshLeaderboard['nodeTMessageCounts'] = tmessage_count
@@ -3371,7 +3371,7 @@ async def handleSentinel(deviceID):
         distance = node['distance']
 
         if str(node_id) in sentryIgnoreList:
-            return
+            continue
         # Message conditions
         if distance >= sentry_radius and str(node_id) and str(node_id) in sentryWatchList:
             # Outside zone

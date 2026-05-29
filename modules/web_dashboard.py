@@ -879,10 +879,17 @@ def _leaderboard_record_in_window(rec: Any, cutoff_ts: float) -> bool:
 
 
 def _leaderboard_24h_message_leader(log: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Meiste empfangene Kanal/DM-Nachrichten in den letzten 24h (aus Log)."""
+    """Meiste empfangene Kanal/DM-Nachrichten in den letzten 24h (aus Log).
+
+    Fällt auf alle geparsten RX-Zähler zurück, falls die strikte 24h-Teilmenge
+    leer ist (z. B. wenn einzelne Zeitstempel nicht geparst werden konnten) —
+    besser als der veraltete All-Time-Wert aus leaderboard.pkl.
+    """
     if not log:
         return None
     counts = log.get("node_rx_counts_24h_by_id")
+    if not isinstance(counts, dict) or not counts:
+        counts = log.get("node_rx_counts_by_id")
     if not isinstance(counts, dict) or not counts:
         return None
     best_id = None
@@ -901,6 +908,26 @@ def _leaderboard_24h_message_leader(log: Optional[Dict[str, Any]]) -> Optional[D
     return {"nodeID": best_id, "value": best_n, "timestamp": time.time()}
 
 
+def _format_uptime(value: Any) -> str:
+    """Sekunden als kompakte Tage/Stunden/Minuten-Angabe (z. B. '3d 4h')."""
+    try:
+        secs = int(float(value))
+    except (TypeError, ValueError):
+        return "?"
+    if secs < 0:
+        return "?"
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f"{days}d {hours}h" if hours else f"{days}d"
+    if hours:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    if minutes:
+        return f"{minutes}m"
+    return f"{secs}s"
+
+
 def _leaderboard_web_rows(
     lb: Dict[str, Any], *, log: Optional[Dict[str, Any]] = None
 ) -> List[str]:
@@ -917,7 +944,7 @@ def _leaderboard_web_rows(
         ("mostMessages", "💬 Meiste Nachrichten", lambda r: str(int(r["value"]))),
         ("mostTMessages", "📊 Meiste Telemetrie", lambda r: str(int(r["value"]))),
         ("lowestBattery", "🪫 Niedrigster Akku", lambda r: f"{round(float(r['value']), 1)} %"),
-        ("longestUptime", "🕰️ Längste Laufzeit", lambda r: str(int(float(r["value"])))),
+        ("longestUptime", "🕰️ Längste Laufzeit", lambda r: _format_uptime(r["value"])),
         ("highestDBm", "📶 Bestes SNR", lambda r: f"{r['value']} dB"),
         ("weakestDBm", "📶 Schwächstes SNR", lambda r: f"{r['value']} dB"),
         ("fastestSpeed", "🚓 Höchstgeschwindigkeit", lambda r: f"{round(float(r['value']), 1)} km/h"),
@@ -1247,9 +1274,12 @@ def _want_ack_on_dm_enabled() -> bool:
 
 def collect_dashboard(log_dir: str) -> Dict[str, Any]:
     try:
-        from modules.system import refresh_channel_cache
+        # Use the cached channel list; forcing a rebuild here would do live radio
+        # I/O on every page load and compete with the packet handler. Channel
+        # config changes already force a refresh (admin save / reconnect).
+        from modules.system import build_channel_cache
 
-        refresh_channel_cache()
+        build_channel_cache()
     except Exception:
         pass
     base = log_dir if os.path.isabs(log_dir) else path_in_repo(log_dir)
