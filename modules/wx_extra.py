@@ -320,6 +320,15 @@ def _format_live_blitz(strikes: list[dict], source: str, radius_km: int) -> str:
     if n > 1:
         farthest = strikes[-1]
         line += f" Weitester: {farthest['km']:.0f} km."
+    # Letzter (zeitlich neuester) Einschlag, sofern Zeitdaten vorliegen und er
+    # nicht ohnehin schon der nächste ist.
+    timed = [s for s in strikes if s.get("age_min") is not None]
+    if timed:
+        latest = min(timed, key=lambda s: s["age_min"])
+        if latest is not nearest:
+            l_dir = latest.get("dir")
+            l_dir_s = f" {l_dir}" if l_dir else ""
+            line += f"\nLetzter: {latest['km']:.0f} km{l_dir_s}, vor {latest['age_min']} min."
     return line
 
 
