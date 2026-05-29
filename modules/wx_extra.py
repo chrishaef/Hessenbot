@@ -157,6 +157,26 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * math.asin(math.sqrt(max(0.0, min(1.0, a))))
 
 
+def _compass_dir(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
+    """8-Punkt-Himmelsrichtung von (lat1,lon1) zum Ziel (lat2,lon2)."""
+    p = math.pi / 180.0
+    dlon = (lon2 - lon1) * p
+    y = math.sin(dlon) * math.cos(lat2 * p)
+    x = math.cos(lat1 * p) * math.sin(lat2 * p) - math.sin(lat1 * p) * math.cos(lat2 * p) * math.cos(dlon)
+    deg = (math.degrees(math.atan2(y, x)) + 360) % 360
+    dirs = ("N", "NO", "O", "SO", "S", "SW", "W", "NW")
+    return dirs[int((deg + 22.5) // 45) % 8]
+
+
+def _potential_word(max_lp: float) -> str:
+    """Open-Meteo lightning_potential (J/kg) in Klartext."""
+    if max_lp >= 2.0:
+        return "hoch"
+    if max_lp >= 0.8:
+        return "erhöht"
+    return "gering"
+
+
 def _bbox_for_radius(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
     """west, south, east, north for DMI/Blitzortung."""
     dlat = radius_km / 111.0
@@ -186,7 +206,15 @@ def _strike_records_from_features(
                 age_min = max(0, int((now - obs_dt.timestamp()) / 60))
             except ValueError:
                 pass
-        out.append({"lat": float(slat), "lon": float(slon), "km": km, "age_min": age_min})
+        out.append(
+            {
+                "lat": float(slat),
+                "lon": float(slon),
+                "km": km,
+                "age_min": age_min,
+                "dir": _compass_dir(lat, lon, float(slat), float(slon)),
+            }
+        )
     out.sort(key=lambda s: s["km"])
     return out
 
@@ -217,8 +245,8 @@ def _fetch_dmi_strikes(lat: float, lon: float, radius_km: float) -> tuple[list[d
             continue
         strikes = _strike_records_from_features(features, lat, lon, radius_km)
         if strikes:
-            return strikes, f"DMI ({label})"
-    return [], "DMI (60 Min)"
+            return strikes, f"DMI, {label}"
+    return [], "DMI, 60 Min"
 
 
 def _fetch_blitzortung_strikes(
@@ -265,7 +293,15 @@ def _fetch_blitzortung_strikes(
             age_min = max(0, int((now_ns - int(row["time"])) / 1e9 / 60))
         except (KeyError, TypeError, ValueError):
             pass
-        out.append({"lat": slat, "lon": slon, "km": km, "age_min": age_min})
+        out.append(
+            {
+                "lat": slat,
+                "lon": slon,
+                "km": km,
+                "age_min": age_min,
+                "dir": _compass_dir(lat, lon, slat, slon),
+            }
+        )
     out.sort(key=lambda s: s["km"])
     return out
 
@@ -277,15 +313,17 @@ def _format_live_blitz(strikes: list[dict], source: str, radius_km: int) -> str:
     nearest = strikes[0]
     age = nearest.get("age_min")
     age_s = f", vor {age} min" if age is not None else ""
+    direction = nearest.get("dir")
+    dir_s = f" {direction}" if direction else ""
     line = f"Live ({source}): {n} Einschläge <{radius_km} km."
-    line += f"\nNächster: {nearest['km']:.0f} km{age_s}."
+    line += f"\nNächster: {nearest['km']:.0f} km{dir_s}{age_s}."
     if n > 1:
         farthest = strikes[-1]
         line += f" Weitester: {farthest['km']:.0f} km."
     return line
 
 
-def _get_blitz_forecast(lat_f: float, lon_f: float, hours: int = 24) -> str:
+def _get_blitz_forecast(lat_f: float, lon_f: float, hours: int = 24) -> tuple[str, bool]:
     hours = max(12, min(48, int(hours)))
     data = get_weather_data(
         _FORECAST_URL,
@@ -319,10 +357,9 @@ def _get_blitz_forecast(lat_f: float, lon_f: float, hours: int = 24) -> str:
         risk = f"Modell {hours}h: Risiko {storm_hours[0]}"
         if len(storm_hours) > 1:
             risk += f"–{storm_hours[-1]}"
-    else:
-        risk = f"Modell {hours}h: kein Gewitter-Risiko."
-    risk += f" (max Blitz-Pot. {max_lp:.2f})."
-    return risk
+        risk += f", Potenzial {_potential_word(max_lp)}."
+        return risk, True
+    return f"Modell {hours}h: kein Gewitter-Risiko.", False
 
 
 def get_blitz(lat=0, lon=0, hours: int = 24) -> str:
@@ -333,24 +370,30 @@ def get_blitz(lat=0, lon=0, hours: int = 24) -> str:
     lat_f, lon_f = coords
 
     header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "BLITZ")
-    parts = [header]
 
     live_on, radius_km, bo_user, bo_pass = _blitz_settings()
+    strikes: list[dict] = []
+    source = ""
     if live_on:
-        strikes: list[dict] = []
-        source = ""
         if bo_user and bo_pass:
             strikes = _fetch_blitzortung_strikes(lat_f, lon_f, radius_km, bo_user, bo_pass)
             if strikes:
                 source = "Blitzortung.org"
         if not strikes:
             strikes, source = _fetch_dmi_strikes(lat_f, lon_f, radius_km)
-        parts.append(_format_live_blitz(strikes, source, radius_km))
 
     try:
-        parts.append(_get_blitz_forecast(lat_f, lon_f, hours))
+        forecast, has_risk = _get_blitz_forecast(lat_f, lon_f, hours)
     except Exception as e:
         logger.error(f"Error fetching blitz forecast: {e}")
-        parts.append("Modell-Vorhersage nicht verfügbar.")
+        forecast, has_risk = "Modell-Vorhersage nicht verfügbar.", None
 
+    # Kompakter Ruhig-Fall: Live aktiv, keine Einschläge, kein Modell-Risiko
+    if live_on and not strikes and has_risk is False:
+        return f"{header}\nKeine Einschläge <{radius_km} km · {forecast}"
+
+    parts = [header]
+    if live_on:
+        parts.append(_format_live_blitz(strikes, source, radius_km))
+    parts.append(forecast)
     return "\n".join(parts)
