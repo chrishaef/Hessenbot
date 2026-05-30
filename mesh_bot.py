@@ -1568,19 +1568,22 @@ async def main():
         if my_settings.js8call_detection_enabled:
             tasks.append(asyncio.create_task(handleJs8callWatcher(), name="js8call_monitor"))
 
-        from modules.scheduler import run_scheduler_loop, scheduler_loop_needed, setup_all_scheduled_jobs
-        if scheduler_loop_needed():
-            setup_all_scheduled_jobs(
-                schedulerMotd,
-                MOTD,
-                schedulerMessage,
-                schedulerChannel,
-                schedulerInterface,
-                schedulerValue,
-                schedulerTime,
-                schedulerInterval,
-            )
-            tasks.append(asyncio.create_task(run_scheduler_loop(), name="scheduler"))
+        from modules.scheduler import run_scheduler_loop, setup_all_scheduled_jobs
+        # Always register jobs (setup only adds the ones whose feature is enabled)
+        # and always run the loop, so MOTD/News/Scheduler entries configured later
+        # via the web admin take effect without requiring a bot restart. An idle
+        # loop (no jobs) is a cheap no-op every second.
+        setup_all_scheduled_jobs(
+            schedulerMotd,
+            MOTD,
+            schedulerMessage,
+            schedulerChannel,
+            schedulerInterface,
+            schedulerValue,
+            schedulerTime,
+            schedulerInterval,
+        )
+        tasks.append(asyncio.create_task(run_scheduler_loop(), name="scheduler"))
         
         logger.debug(f"System: Starting {len(tasks)} async tasks")
         

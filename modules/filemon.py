@@ -2,6 +2,7 @@
 # 2024 Kelly Keeton K7MHI
 
 from modules.log import logger
+from modules.paths import path_in_repo
 from modules.settings import (
     file_monitor_file_path,
     news_file_path,
@@ -65,7 +66,10 @@ def read_news(source=None, random_line_only=False, news_block_mode=False):
     if source:
         file_path = os.path.join(NEWS_DATA_DIR, f"{source}_news.txt")
     else:
-        file_path = os.path.join(NEWS_DATA_DIR, news_file_path)
+        # Resolve the main news file relative to the repo root (same as the web
+        # admin's path_in_repo), so !readnews reads exactly the file the Web UI
+        # writes — regardless of process cwd or the configured news_file_path form.
+        file_path = path_in_repo(news_file_path)
     # Block mode takes precedence over line mode
     if news_block_mode:
         return read_file(file_path, random_line_only=False, news_block_mode=True)
@@ -77,7 +81,7 @@ def read_news(source=None, random_line_only=False, news_block_mode=False):
 def write_news(content, append=False):
     # write the news file on demand
     try:
-        file_path = os.path.join(NEWS_DATA_DIR, news_file_path)
+        file_path = path_in_repo(news_file_path)
         with open(file_path, 'a' if append else 'w', encoding='utf-8') as f:
             #f.write(content)
             logger.info(f"FileMon: Updated {file_path}")

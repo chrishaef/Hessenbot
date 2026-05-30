@@ -1040,11 +1040,9 @@ def create_app(
                 flash(f"Speichern fehlgeschlagen: {e!s}", "error")
             else:
                 flash("MOTD und Versandzeit gespeichert.", "success")
-                if enabled and not (
-                    st.scheduler_enabled or st.news_broadcast_enabled
-                ):
+                if enabled:
                     flash(
-                        "Hinweis: Zeitplan läuft nur, wenn der Bot läuft. Nach erstem Aktivieren ggf. Bot neu starten.",
+                        "Zeitplan ist aktiv und greift sofort (kein Bot-Neustart nötig), solange der Bot läuft.",
                         "info",
                     )
             return redirect(url_for("motd_edit"))
@@ -1082,7 +1080,6 @@ def create_app(
         import modules.settings as st
 
         if request.method == "POST":
-            prev_en = request.form.get("_prev_enabled") == "True"
             try:
                 enabled = request.form.get("enabled") == "on"
                 iface = int(request.form.get("interface", "1"))
@@ -1108,20 +1105,12 @@ def create_app(
 
             ops.rebuild_scheduler_jobs()
             if enabled:
-                flash("Scheduler-Einstellungen gespeichert; Jobliste wurde neu aufgebaut.", "success")
-                if not prev_en:
-                    flash(
-                        "Hinweis: Wenn der Scheduler beim Start des Bots aus war, starte den Bot neu, damit der Zeitplan wirklich ausgeführt wird.",
-                        "info",
-                    )
+                flash("Scheduler-Einstellungen gespeichert; Jobliste wurde neu aufgebaut und greift sofort.", "success")
             else:
                 flash(
                     "Allgemeiner Scheduler deaktiviert. MOTD-/News-Versand bleibt aktiv, falls dort eingeschaltet.",
                     "info",
                 )
-
-            if prev_en != enabled:
-                flash("Ein/Aus-Status geändert: bei unerwartetem Verhalten Bot einmal neu starten.", "info")
 
             return redirect(url_for("scheduler_edit"))
 
