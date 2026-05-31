@@ -68,6 +68,7 @@ class CouchDB:
         return r.json() if r.status_code == 200 else None
 
     def put(self, db: str, doc_id: str, doc: Dict) -> bool:
+        doc = dict(doc)  # never mutate the caller's dict
         existing = self.get(db, doc_id)
         if existing:
             doc["_rev"] = existing["_rev"]
@@ -156,6 +157,7 @@ class CouchDB:
 
 _client: Optional[CouchDB] = None
 _lock = threading.Lock()
+_bbs_lock = threading.Lock()   # serialises pkl reads/writes vs sync bridge
 _SYNC_INTERVAL = 60  # seconds between bridge sync cycles
 _sync_thread: Optional[threading.Thread] = None
 
@@ -312,26 +314,26 @@ def setup_slave_replication(
     creds = f"{slave_user}:{slave_pass}@"
     base = slave_couch_url.replace("://", f"://{creds}")
 
+    safe_id = slave_node_id.replace("!", "").replace(".", "_")
     for db in replicate_dbs:
         slave_url = f"{base}/{db}"
-        safe_id = slave_node_id.replace("!", "").replace(".", "_")
 
-        # Master → Slave
+        # Master → Slave  (source is local db name, not a path)
         client.setup_replication(
-            source=f"/{db}",
+            source=db,
             target=slave_url,
             rep_id=f"push_{safe_id}_{db}",
         )
         # Slave → Master
         client.setup_replication(
             source=slave_url,
-            target=f"/{db}",
+            target=db,
             rep_id=f"pull_{safe_id}_{db}",
         )
 
-    # Keys DB: filtered push only (master → slave, not reverse)
+    # Keys DB: push only master → slave
     client.setup_replication(
-        source=f"/hessenbot_keys",
+        source="hessenbot_keys",
         target=f"{base}/hessenbot_keys",
         rep_id=f"keys_{safe_id}",
     )
@@ -377,13 +379,14 @@ def _sync_bbs() -> None:
         if not os.path.exists(bbsdb_path):
             return
 
-        with open(bbsdb_path, "rb") as f:
-            local_posts: List[Dict] = pickle.load(f)
+        # _bbs_lock serialises us against any other thread writing the pkl
+        with _bbs_lock:
+            with open(bbsdb_path, "rb") as f:
+                local_posts: List[Dict] = pickle.load(f)
 
         client = _get_client()
         existing = {d.get("local_id"): d for d in client.all_docs("hessenbot_bbs")}
 
-        changed = False
         for post in local_posts:
             post_id = str(post.get("id", ""))
             if post_id and post_id not in existing:
@@ -394,18 +397,23 @@ def _sync_bbs() -> None:
 
         # Pull posts from CouchDB not in local
         local_ids = {str(p.get("id", "")) for p in local_posts}
+        remote_new = []
         for doc in client.all_docs("hessenbot_bbs"):
             local_id = str(doc.get("local_id", ""))
             if local_id and local_id not in local_ids:
-                local_posts.append({
-                    k: v for k, v in doc.items()
-                    if not k.startswith("_")
-                })
-                changed = True
+                remote_new.append({k: v for k, v in doc.items() if not k.startswith("_")})
 
-        if changed:
-            with open(bbsdb_path, "wb") as f:
-                pickle.dump(local_posts, f)
+        if remote_new:
+            with _bbs_lock:
+                # Re-read under lock so we don't clobber concurrent bot writes
+                with open(bbsdb_path, "rb") as f:
+                    local_posts = pickle.load(f)
+                existing_ids = {str(p.get("id", "")) for p in local_posts}
+                added = [p for p in remote_new if str(p.get("local_id", "")) not in existing_ids]
+                if added:
+                    local_posts.extend(added)
+                    with open(bbsdb_path, "wb") as f:
+                        pickle.dump(local_posts, f)
     except Exception as e:
         logger.debug(f"ClusterStore: BBS sync error: {e}")
 

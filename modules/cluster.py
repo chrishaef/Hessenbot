@@ -28,7 +28,7 @@ import base64
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
@@ -451,60 +451,48 @@ def decrypt_master_packet(packet: Dict[str, Any]) -> Optional[str]:
     Implementation uses the meshtastic mesh_pb2 protobuf + cryptography library.
     """
     try:
-        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        import google.protobuf.message
+        from cryptography.hazmat.primitives.asymmetric.x25519 import (
+            X25519PrivateKey,
+            X25519PublicKey,
+        )
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-        raw = packet.get("raw")
-        if raw is None:
+        # Only handle PKI-encrypted packets
+        if not packet.get("pkiEncrypted"):
+            return None
+
+        encrypted_payload = packet.get("encrypted", b"")
+        if not encrypted_payload:
             return None
 
         master_priv_bytes = config.master_private_key
         if not master_priv_bytes:
             return None
 
-        # Reconstruct private key
-        priv_key = X25519PrivateKey.from_private_bytes(master_priv_bytes)
-
-        # Extract sender public key from packet / NodeDB
         from_id = packet.get("from", 0)
         sender_pub_b64 = _get_node_public_key(from_id)
         if not sender_pub_b64:
             logger.debug(f"Cluster: no public key for sender {from_id:x}")
             return None
 
-        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
-        sender_pub_bytes = base64.b64decode(sender_pub_b64)
-        sender_pub = X25519PublicKey.from_public_bytes(sender_pub_bytes)
+        # Reconstruct keys
+        priv_key = X25519PrivateKey.from_private_bytes(master_priv_bytes)
+        sender_pub = X25519PublicKey.from_public_bytes(base64.b64decode(sender_pub_b64))
 
-        # ECDH shared secret
-        shared = priv_key.exchange(sender_pub)
+        # ECDH — raw 32-byte shared secret IS the AES-256 key (no hashing)
+        aes_key = priv_key.exchange(sender_pub)  # 32 bytes → AES-256
 
-        # Derive AES key (Meshtastic uses first 16 bytes of SHA256(shared))
-        import hashlib
-        aes_key = hashlib.sha256(shared).digest()[:16]
-
-        # Decrypt (Meshtastic PKI DM uses AES-128-CTR, nonce = packet_id || from_id)
-        # packet_id is 32-bit, from_id 32-bit, nonce padded to 16 bytes
+        # Nonce: packet_id (4 bytes LE) + 12 zero bytes = 16 bytes for AES-CTR
         packet_id = packet.get("id", 0)
-        nonce = (
-            packet_id.to_bytes(8, "little")
-            + from_id.to_bytes(8, "little")
-        )
+        nonce = packet_id.to_bytes(4, "little") + b"\x00" * 12
 
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        cipher = Cipher(
-            algorithms.AES(aes_key),
-            modes.CTR(nonce)
-        )
-        dec = cipher.decryptor()
-        encrypted_payload = raw.get("encrypted", b"")
-        plaintext = dec.update(encrypted_payload) + dec.finalize()
+        cipher = Cipher(algorithms.AES(aes_key), modes.CTR(nonce))
+        plaintext_bytes = cipher.decryptor().update(encrypted_payload)
 
-        # Parse as MeshPacket decoded
+        # Parse decrypted bytes as Meshtastic Data protobuf
         from meshtastic import mesh_pb2
         data = mesh_pb2.Data()
-        data.ParseFromString(plaintext)
+        data.ParseFromString(plaintext_bytes)
         return data.payload.decode("utf-8", errors="replace")
 
     except Exception as e:
@@ -577,7 +565,8 @@ def authorize_slave(
         "master_key_transferred": False,
     }
     if transfer_master_key:
-        record["master_key_b64"] = config.master_private_key_b64
+        # Key is stored separately in hessenbot_keys via store_master_key_for_slave()
+        # — never put the private key into the registry record itself.
         record["master_key_transferred"] = True
 
     with _lock:
@@ -629,17 +618,26 @@ def is_slave_authorized(node_id: str) -> bool:
 
 def _push_offline_delta() -> None:
     """
-    Called when a slave reconnects.
-    1. Drains the outbox (writes that happened while offline) → master REST API.
-    2. Triggers an immediate CouchDB sync bridge cycle so local pkl/SQLite
-       changes made offline are flushed to CouchDB and replicated to master.
+    Spawns a background thread so the heartbeat loop is not blocked
+    during network I/O (outbox push + immediate sync bridge cycle).
     """
+    t = threading.Thread(target=_do_push_offline_delta, daemon=True, name="cluster-resync")
+    t.start()
+
+
+def _do_push_offline_delta() -> None:
     try:
-        from modules.cluster_store import push_outbox, _sync_bbs, _sync_locations, _sync_checklist, _sync_inventory
+        from modules.cluster_store import (
+            push_outbox,
+            _sync_bbs,
+            _sync_locations,
+            _sync_checklist,
+            _sync_inventory,
+        )
         pushed = push_outbox()
         if pushed:
             logger.info(f"Cluster: pushed {pushed} outbox entry/entries to master")
-        # Immediate bridge cycle — don't wait for the 60s timer
+        # Immediate bridge cycle — don't wait for the 60 s timer
         for fn in (_sync_bbs, _sync_locations, _sync_checklist, _sync_inventory):
             try:
                 fn()

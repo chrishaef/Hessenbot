@@ -1146,9 +1146,11 @@ def onReceive(packet, interface):
                 f"Cluster: intercepted master-DM from {from_id:x} "
                 f"(standalone-active)"
             )
+            # deviceID must be the interface index (1-based), not the radio node num
+            iface_index = mesh_interface_index(interface) or 1
             response = auto_response(
                 plaintext, None, None, None, None,
-                from_id, 0, getattr(interface, 'nodeNum', 0), True
+                from_id, 0, iface_index, True
             )
             if response:
                 proxy_msg = _cluster.proxy_response(response, from_id)
@@ -1625,11 +1627,7 @@ async def main():
 
         # ── Cluster init ──────────────────────────────────────────────────────
         if my_settings.cluster_enabled:
-            def _cluster_send(msg: str, channel: int = 0) -> None:
-                send_message(msg, channel, 0, interface1)
-
-            _cluster.init(send_message_fn=_cluster_send)
-
+            # Databases must exist before cluster.init() loads the slave registry
             if my_settings.cluster_role == "master":
                 from modules.cluster_store import init_databases
                 init_databases()
@@ -1637,6 +1635,11 @@ async def main():
                 from modules.cluster_store import init_databases, start_sync_bridge
                 init_databases()
                 start_sync_bridge()
+
+            def _cluster_send(msg: str, channel: int = 0) -> None:
+                send_message(msg, channel, 0, interface1)
+
+            _cluster.init(send_message_fn=_cluster_send)
 
             logger.info(
                 f"Cluster: initialized as {my_settings.cluster_role.upper()} "
