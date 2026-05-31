@@ -50,6 +50,7 @@ ADMIN_TABS: List[Tuple[str, str, str]] = [
     ("meshadmin", "Admin", "mesh_admin_index"),
     ("motd", "MOTD", "motd_edit"),
     ("scheduler", "Scheduler", "scheduler_edit"),
+    ("channeltest", "Channel-Test", "channel_test_index"),
     ("bbs", "BBS", "bbs_index"),
     ("polls", "Umfragen", "polls_index"),
     ("settings", "Einstellungen", "settings_index"),

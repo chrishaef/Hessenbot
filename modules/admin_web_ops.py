@@ -395,6 +395,96 @@ def save_scheduler_to_config(
     st.schedulerTime = sec["time"]
 
 
+def available_channels_for_test() -> List[Dict[str, Any]]:
+    """Channels known across interfaces as [{'number': int, 'label': str}], deduped by number."""
+    sm = _system_mod()
+    seen: Dict[int, str] = {}
+    try:
+        cache = sm.build_channel_cache()
+    except Exception:
+        cache = []
+    for entry in cache or []:
+        for name, info in (entry.get("channels") or {}).items():
+            num = info.get("number")
+            if num is None:
+                continue
+            try:
+                num = int(num)
+            except (TypeError, ValueError):
+                continue
+            label = name.strip() if name and not name.startswith("Channel") else f"Kanal {num}"
+            # First non-generic name wins
+            if num not in seen or (seen[num].startswith("Kanal ") and not label.startswith("Kanal ")):
+                seen[num] = label
+    return [{"number": n, "label": seen[n]} for n in sorted(seen)]
+
+
+def save_channel_test_to_config(enabled: bool, channels: List[str]) -> None:
+    """Persist [channelTest] enabled/channels and update live settings."""
+    import modules.settings as st
+
+    clean = [str(c).strip() for c in channels if str(c).strip()]
+    if "channelTest" not in st.config:
+        st.config["channelTest"] = {}
+    st.config["channelTest"]["enabled"] = "True" if enabled else "False"
+    st.config["channelTest"]["channels"] = ",".join(clean)
+    with open(st.config_file, "w", encoding="utf-8") as fh:
+        st.config.write(fh)
+
+    st.channel_test_enabled = enabled
+    st.channel_test_channels = clean
+
+
+def build_channel_test_html(enabled: bool, selected: List[str]) -> str:
+    """Form for the Channel-Test tab: toggle + channel checkboxes (with manual fallback)."""
+    chk = " checked" if enabled else ""
+    selected_set = {str(s).strip() for s in selected if str(s).strip()}
+    avail = available_channels_for_test()
+
+    if avail:
+        boxes = []
+        for ch in avail:
+            num = str(ch["number"])
+            sel = " checked" if num in selected_set else ""
+            boxes.append(
+                f'<div class="form-check">'
+                f'<input class="form-check-input" type="checkbox" name="channels" '
+                f'value="{html.escape(num, quote=True)}" id="ct{num}"{sel}>'
+                f'<label class="form-check-label" for="ct{num}">'
+                f'{html.escape(ch["label"])} <span class="text-muted">(#{num})</span></label></div>'
+            )
+        channel_block = (
+            '<label class="form-label">Kanäle</label>'
+            '<div class="mb-2">' + "".join(boxes) + "</div>"
+        )
+    else:
+        channel_block = (
+            '<label class="form-label">Kanäle (kommagetrennte Nummern)</label>'
+            '<p class="small text-muted mb-2">Keine Kanäle vom Radio gelesen — '
+            "Nummern manuell eintragen.</p>"
+        )
+
+    manual = html.escape(",".join(sorted(selected_set, key=lambda x: (len(x), x))))
+    return f"""
+<p class="text-muted small mb-3">Bei aktivierter Funktion antwortet der Bot auf ein einfaches
+<code>test</code> / <code>Test</code> (ohne <code>!</code>) direkt im Kanal — gleiche Antwort wie
+<code>!test</code>. Gilt nur für die ausgewählten Kanäle; alle anderen Befehle bleiben unverändert
+(DM und <code>!</code>).</p>
+<form method="post">
+  <div class="form-check form-switch mb-3">
+    <input class="form-check-input" type="checkbox" name="enabled" id="ctEnabled"{chk}>
+    <label class="form-check-label" for="ctEnabled">Funktion aktiv</label>
+  </div>
+  {channel_block}
+  <label class="form-label">Zusätzliche Kanal-Nummern (optional, kommagetrennt)</label>
+  <input type="text" name="channels_manual" class="form-control mb-3" value="{manual}"
+         placeholder="z. B. 2,3">
+  <button type="submit" class="btn btn-success w-100">Speichern</button>
+</form>
+<p class="small text-muted mt-3">Einstellungen in <code>config.ini</code> → <code>[channelTest]</code>.</p>
+"""
+
+
 def runtime_file_permission_hint(path: str, *, bot_user: str = "meshbot") -> str:
     repo = path_in_repo("")
     return (

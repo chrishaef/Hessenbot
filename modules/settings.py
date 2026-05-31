@@ -22,6 +22,8 @@ msg_history = [] # message history for the store and forward feature
 bbs_ban_list = [] # list of banned users, imported from config
 bbs_admin_list = [] # list of admin users, imported from config
 repeater_channels = [] # list of channels to listen on for repeater mode, imported from config
+channel_test_enabled = False # reply in-channel to a bare "test" on selected channels
+channel_test_channels = [] # channels where the in-channel "test" reply is active
 antiSpam = True # anti-spam feature to prevent flooding public channel
 ping_enabled = True # ping feature to respond to pings, ack's etc.
 sitrep_enabled = True # sitrep feature to respond to sitreps
@@ -115,6 +117,10 @@ if 'newsBroadcast' not in config:
         'enabled': 'False', 'interface': '1', 'channel': '2',
         'mode': 'hour', 'interval': '6', 'time': '',
     }
+    config.write(open(config_file, 'w'))
+
+if 'channelTest' not in config:
+    config['channelTest'] = {'enabled': 'False', 'channels': ''}
     config.write(open(config_file, 'w'))
 
 if 'emergencyHandler' not in config:
@@ -258,6 +264,12 @@ try:
     ignoreChannels = config['general'].get('ignoreChannels', '').split(',') # ignore these channels
     ignoreDefaultChannel = config['general'].getboolean('ignoreDefaultChannel', False)
     cmdBang = config['general'].getboolean('cmdBang', False) # default off
+    # Channel "test" feature: reply in-channel (not DM) to a bare "test"/"Test"
+    # on selected channels, bypassing the cmdBang "!" requirement.
+    channel_test_enabled = config['channelTest'].getboolean('enabled', False)
+    channel_test_channels = [
+        c.strip() for c in config['channelTest'].get('channels', '').split(',') if c.strip()
+    ]
     explicitCmd = config['general'].getboolean('explicitCmd', True) # default on
     zuluTime = config['general'].getboolean('zuluTime', False) # aka 24 hour time
     log_messages_to_file = config['general'].getboolean('LogMessagesToFile', False) # default off

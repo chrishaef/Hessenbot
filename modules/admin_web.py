@@ -1704,6 +1704,48 @@ def create_app(
             active_tab="settings",
         )
 
+    @app.route("/channel-test", methods=["GET", "POST"])
+    @login_required
+    def channel_test_index():
+        from modules import admin_web_ops as ops
+        import modules.settings as st
+
+        if request.method == "POST":
+            enabled = request.form.get("enabled") == "on"
+            channels = list(request.form.getlist("channels"))
+            manual = (request.form.get("channels_manual") or "").replace(";", ",")
+            channels.extend(part for part in manual.split(",") if part.strip())
+            # dedupe, keep only digit channel numbers
+            seen = []
+            for c in channels:
+                c = c.strip()
+                if c.isdigit() and c not in seen:
+                    seen.append(c)
+            try:
+                ops.save_channel_test_to_config(enabled, seen)
+            except OSError as e:
+                if getattr(e, "errno", None) == 13:
+                    flash(ops.runtime_file_permission_hint(st.config_file), "error")
+                else:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                return redirect(url_for("channel_test_index"))
+            except Exception as e:
+                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+                return redirect(url_for("channel_test_index"))
+            if enabled and not seen:
+                flash("Funktion aktiv, aber keine Kanäle gewählt — es wird nichts beantwortet.", "info")
+            else:
+                flash("Channel-Test-Einstellungen gespeichert.", "success")
+            return redirect(url_for("channel_test_index"))
+
+        return _render_admin_template(
+            ops.build_channel_test_html(
+                st.channel_test_enabled, st.channel_test_channels
+            ),
+            title="Channel-Test",
+            active_tab="channeltest",
+        )
+
     @app.route("/umfragen")
     @login_required
     def polls_index():

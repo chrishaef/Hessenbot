@@ -295,6 +295,14 @@ qrz_hello_string = "Hessenbot (Meshhessen) — DM für mehr Infos."
 training = False
 
 # repeater module
+[channelTest]
+# Reply in-channel (not DM) to a bare "test"/"Test" without the leading "!",
+# on the selected channels only. Same response as !test. Managed in the web admin
+# (tab "Channel-Test"). All other commands keep requiring DM and/or "!".
+enabled = False
+# comma separated channel numbers, e.g. 0,2
+channels =
+
 [repeater]
 enabled = False
 # list of repeater channels ex: 2,3 which will be consumed 

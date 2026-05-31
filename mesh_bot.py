@@ -1416,7 +1416,27 @@ def onReceive(packet, interface):
                         msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | DM | " + message_log_string)
             else:
                 # message is on a channel
-                if messageTrap(message_string):
+                # Channel "test" feature: a bare "test"/"Test" (no "!") on a
+                # configured channel gets the !test reply directly in the channel,
+                # bypassing the cmdBang requirement and DM-only behaviour.
+                _bare_test = (
+                    getattr(my_settings, "channel_test_enabled", False)
+                    and message_string.strip().lower() == "test"
+                    and str(channel_number) in my_settings.channel_test_channels
+                )
+                if _bare_test and str(message_from_id) in my_settings.bbs_ban_list:
+                    logger.debug(f"System: Ignoring channel test from banned node: {get_name_from_number(message_from_id, 'short', rxNode)}")
+                elif _bare_test:
+                    logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
+                                "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
+                    if is_cmd_rate_limited(message_from_id):
+                        logger.debug(f"System: channel test rate-limited from: {get_name_from_number(message_from_id, 'short', rxNode)}")
+                    else:
+                        _test_resp = handle_ping(message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number)
+                        send_message(_test_resp, channel_number, 0, rxNode, reply_id=packet_id)
+                        if my_settings.log_messages_to_file:
+                            msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | " + message_log_string)
+                elif messageTrap(message_string):
                     # message is for us to respond to, or is it...
                     if my_settings.ignoreDefaultChannel and channel_number == my_settings.publicChannel:
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Default Channel:{channel_number}")
