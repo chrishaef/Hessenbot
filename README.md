@@ -18,14 +18,16 @@ Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS
 
 ### Mesh: Befehle & Trace
 
+Screenshots aus dem **[Meshhessen Windows Client](https://github.com/SMLunchen/mh_windowsclient)** (Community-Meshtastic-Client für Windows) bzw. der **Meshtastic-App** (Android) — jeweils per DM.
+
 ![!ping, !loc, !whois, !blitz — QSL mit 1 Hop MQTT](docs/screenshots/mesh-befehle-web.png)
 
-`!ping`, `!loc`, `!whois`, `!blitz` im Web-Admin (DM-Chat) — inkl. Hop-Anzeige bei MQTT-Gateways.
+`!ping`, `!loc`, `!whois`, `!blitz` im Meshhessen Windows Client — inkl. Hop-Anzeige bei MQTT-Gateways.
 
-| Meshtastic-App (DM) | Web-Admin (DM-Chat) |
+| Meshtastic-App (Android, DM) | Meshhessen Windows Client (DM) |
 |:---:|:---:|
 | ![!trace BS1 — Hin/Zurück, 1 Hop](docs/screenshots/trace-dm-app.png) | ![!trace SKCR — Route über GWCR, BS1](docs/screenshots/trace-dm-web.png) |
-| `!trace` + `!bbspost` im Funk-Client | `!trace` im Admin-DM-Tab |
+| `!trace` + `!bbspost` | `!trace` |
 
 ```mermaid
 flowchart LR
