@@ -1287,17 +1287,6 @@ def onReceive(packet, interface):
                 logger.warning(f"System: Ignoring TEXT_MESSAGE_APP with invalid payload type: {type(message_bytes).__name__}")
                 return
             message_log_string = message_string.replace('\r', ' ').replace('\n', ' ')
-            _decoded_early = packet.get('decoded') or {}
-            if (
-                getattr(my_settings, "packet_dedup_enabled", True)
-                and _decoded_early.get("viaMqtt")
-                and packet.get("hopStart") is not None
-                and packet.get("hopLimit") is not None
-                and packet.get("hopStart") == packet.get("hopLimit")
-            ):
-                time.sleep(0.05)
-            from modules.packet_dedup import apply_hop_enrichment
-            apply_hop_enrichment(packet)
             decoded = packet.get('decoded') or {}
             via_mqtt = decoded.get('viaMqtt', False)
             transport_mechanism = (
@@ -1349,20 +1338,37 @@ def onReceive(packet, interface):
             if packet.get('emoji'):
                 emojiSeen = packet.get('emoji', False)
 
-            # check if the packet has a hop count flag use it
+            from modules.packet_dedup import apply_hop_enrichment
+            if (
+                getattr(my_settings, "packet_dedup_enabled", True)
+                and via_mqtt
+                and packet.get("hopStart") is not None
+                and packet.get("hopLimit") is not None
+                and packet.get("hopStart") == packet.get("hopLimit")
+            ):
+                time.sleep(0.1)
+            apply_hop_enrichment(packet)
+            decoded = packet.get('decoded') or {}
+            via_mqtt = decoded.get('viaMqtt', False)
+            transport_mechanism = (
+                packet.get('transport_mechanism')
+                or packet.get('transportMechanism')
+                or decoded.get('transport_mechanism')
+                or decoded.get('transportMechanism')
+                or transport_mechanism
+            )
+
             if 'hopsAway' in packet:
                 hop_away = packet.get('hopsAway', 0)
-
             if packet.get('hopStart') is not None:
                 hop_start = packet.get('hopStart', 0)
-
             if packet.get('hopLimit') is not None:
                 hop_limit = packet.get('hopLimit', 0)
-            
-            # calculate hop count
-            hop = ""
-            hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
+            if packet.get('rxSnr') or packet.get('rxRssi'):
+                snr = packet.get('rxSnr', 0)
+                rssi = packet.get('rxRssi', 0)
 
+            hop = ""
             transport_label = None
             if via_mqtt or "mqtt" in str(transport_mechanism).lower():
                 transport_label = "MQTT"
@@ -1370,11 +1376,12 @@ def onReceive(packet, interface):
             elif "udp" in str(transport_mechanism).lower():
                 transport_label = "Gateway"
 
-            # MQTT/Gateway at meshtasticd: packet hop fields are often 0; use NodeDB distance as fallback.
-            if transport_label in ("MQTT", "Gateway") and hop_count == 0:
-                ndb_hops = mesh_hops_from_nodedb(message_from_id, rxNode)
-                if ndb_hops is not None and ndb_hops > 0:
-                    hop_count = ndb_hops
+            if transport_label in ("MQTT", "Gateway"):
+                hop_count = mesh_hops_for_mqtt_sender(
+                    message_from_id, rxNode, hop_away, hop_start, hop_limit, packet
+                )
+            else:
+                hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
 
             if (
                 hop_start == hop_limit

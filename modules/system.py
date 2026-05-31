@@ -532,8 +532,34 @@ def mesh_hops_consumed(hop_away: int, hop_start: int, hop_limit: int) -> int:
     return hop_away
 
 
-def mesh_hops_from_nodedb(node_id: int, node_int: int = 1) -> int | None:
-    """hopsAway for a node from the connected interface NodeDB, if known."""
+_TRACE_HOP_CACHE: dict[int, tuple[int, float]] = {}
+_TRACE_HOP_CACHE_TTL = 86400.0
+
+
+def record_mesh_hops_from_trace(node_id: int, hops: int) -> None:
+    """Remember mesh hop count from a successful traceroute (for ping QSL fallback)."""
+    try:
+        hops_i = int(hops)
+        node_i = int(node_id)
+    except (TypeError, ValueError):
+        return
+    if hops_i <= 0:
+        return
+    _TRACE_HOP_CACHE[node_i] = (hops_i, time.time())
+
+
+def mesh_hops_from_trace_cache(node_id: int, ttl: float = _TRACE_HOP_CACHE_TTL) -> int | None:
+    entry = _TRACE_HOP_CACHE.get(int(node_id))
+    if not entry:
+        return None
+    hops, ts = entry
+    if time.time() - ts > ttl:
+        _TRACE_HOP_CACHE.pop(int(node_id), None)
+        return None
+    return hops if hops > 0 else None
+
+
+def _interface_node(node_id: int, node_int: int = 1) -> dict | None:
     interface = globals().get(f"interface{node_int}")
     if interface is None:
         return None
@@ -549,15 +575,67 @@ def mesh_hops_from_nodedb(node_id: int, node_int: int = 1) -> int | None:
                     break
         except Exception:
             return None
+    return node or None
+
+
+def mesh_hops_from_nodedb(node_id: int, node_int: int = 1) -> int | None:
+    """hopsAway for a node from the connected interface NodeDB, if known."""
+    node = _interface_node(node_id, node_int)
     if not node:
         return None
     hops = node.get("hopsAway")
-    if hops is None:
-        return None
-    try:
-        return int(hops)
-    except (TypeError, ValueError):
-        return None
+    if hops is not None:
+        try:
+            hops_i = int(hops)
+            if hops_i > 0:
+                return hops_i
+        except (TypeError, ValueError):
+            pass
+    # noradio + MQTT: hopsAway is often 0; SNR on the node means a gateway heard them on LoRa.
+    snr = node.get("snr")
+    if snr is not None:
+        try:
+            snr_f = float(snr)
+            if snr_f not in (0.0, -128.0):
+                return 1
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def mesh_hops_for_mqtt_sender(
+    message_from_id: int,
+    node_int: int,
+    hop_away: int,
+    hop_start: int,
+    hop_limit: int,
+    packet: dict,
+) -> int:
+    """Best-effort mesh hop count when the bot receives via MQTT/Gateway (no local LoRa)."""
+    hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
+    if hop_count > 0:
+        return hop_count
+
+    ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int)
+    if ndb_hops is not None and ndb_hops > 0:
+        return ndb_hops
+
+    trace_hops = mesh_hops_from_trace_cache(message_from_id)
+    if trace_hops is not None and trace_hops > 0:
+        return trace_hops
+
+    if packet.get("relayNode") is not None:
+        return 1
+
+    if packet.get("rxSnr") or packet.get("rxRssi"):
+        try:
+            snr = float(packet.get("rxSnr") or 0)
+            if snr not in (0.0, -128.0):
+                return 1
+        except (TypeError, ValueError):
+            pass
+
+    return hop_count
 
 
 def _hop_count_label(hop_n: int | None) -> str:

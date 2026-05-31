@@ -17,6 +17,7 @@ from modules.system import (
     decimal_to_hex,
     get_name_from_number,
     send_message,
+    record_mesh_hops_from_trace,
 )
 
 trap_list_trace = ("trace",)
@@ -112,6 +113,7 @@ def format_traceroute_packet(packet: dict, node_int: int, dest_id: int) -> str:
     hop_count = max(len_towards, len_back)
     if hop_count:
         lines.append(f"{hop_count} Hop{'s' if hop_count != 1 else ''}")
+        record_mesh_hops_from_trace(dest_id, hop_count)
     elif not route and not route_back:
         lines.append("Direktverbindung (0 Hops)")
 
