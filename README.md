@@ -97,6 +97,7 @@ cp config.template config.ini
 |--------|----------------|
 | `!cmd` | Kurze Befehlsliste (aktivierte Traps) |
 | `!ping` / `!pong` / `!test` | QSL mit Ort, Hops, LoRa/MQTT |
+| `!trace` / `!trace MHH` | Traceroute zu dir bzw. Ziel-Station (Ergebnis per DM) |
 | `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
 | `!ack` | Wie Ping, Keyword ACK |
 | `!warning` | NINA/Katwarn für **deinen** Standort |

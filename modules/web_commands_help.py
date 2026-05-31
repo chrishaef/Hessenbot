@@ -86,6 +86,16 @@ def _sections() -> List[CommandSection]:
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
+                    f"{p}trace",
+                    "Traceroute zu dir — Ergebnis (Hops, SNR) per DM.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}trace MHH",
+                    "Traceroute zu einer anderen Station (Kurzname, Dezimal-ID oder !hex).",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
                     f"{p}echo",
                     "Echo-Test: Text nach dem Befehl wird zurückgesendet.",
                     enabled=lambda: getattr(st, "enableEcho", False),

@@ -39,10 +39,10 @@ _interface_reconnecting: set[int] = set()
 
 # Ping Configuration
 if ping_enabled:
-    # ping, pinging, ack, testing, test, pong
-    trap_list_ping = ("ping", "pinging", "ack", "testing", "test", "pong", "🔔", "cq","cqcq", "cqcqcq")
+    # ping, pinging, ack, testing, test, pong, trace
+    trap_list_ping = ("ping", "pinging", "ack", "testing", "test", "pong", "trace", "🔔", "cq","cqcq", "cqcqcq")
     trap_list = trap_list + trap_list_ping
-    help_message = help_message + "ping"
+    help_message = help_message + "ping, trace"
 
 # Echo Configuration
 if enableEcho:
@@ -662,7 +662,7 @@ def resolve_mesh_node_target(message, nodeInt=1, default_id=None):
     Returns (node_id, error_message). node_id is 0 if unresolved.
     """
     parts = (message or "").strip().split(maxsplit=1)
-    token = parts[1].strip() if len(parts) > 1 else ""
+    token = parts[1].strip().strip('"').strip("'") if len(parts) > 1 else ""
     if not token:
         if default_id is not None:
             try:

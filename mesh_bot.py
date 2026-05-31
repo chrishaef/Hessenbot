@@ -98,6 +98,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "sysinfo": lambda: sysinfo(message, message_from_id, deviceID, isDM),
     "test": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "testing": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
+    "trace": lambda: handle_trace(message, message_from_id, deviceID, channel_number),
     "warning": lambda: handle_warning(
         message_from_id, deviceID, channel_number, isDM
     ),
@@ -803,6 +804,22 @@ def handle_howtall(message, message_from_id, deviceID, isDM):
     if shadow is None:
         return "Bitte Schattenlänge angeben, z. B. !howtall 2"
     return measureHeight(location[0], location[1], shadow)
+
+
+def handle_trace(message, message_from_id, deviceID, channel_number):
+    """!trace — traceroute to sender or named node; result via DM."""
+    from modules.trace import start_traceroute_to_requester, trace_help_text
+
+    if "?" in (message or ""):
+        return trace_help_text()
+
+    dest_id, err = resolve_mesh_node_target(message, deviceID, default_id=message_from_id)
+    if err:
+        return err
+    if not dest_id:
+        return "Knoten nicht gefunden."
+
+    return start_traceroute_to_requester(dest_id, message_from_id, deviceID, channel_number)
 
 
 def handle_loc(message, message_from_id, deviceID, channel_number):
