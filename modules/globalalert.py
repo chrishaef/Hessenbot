@@ -1,13 +1,11 @@
 # helper functions to use location data for data outside US/north america
 # K7MHI Kelly Keeton 2024
 
-import json # pip install json
+import json
+import re
 from typing import Optional
-#from geopy.geocoders import Nominatim # pip install geopy
-#import maidenhead as mh # pip install maidenhead
-import requests # pip install requests
-import bs4 as bs # pip install beautifulsoup4
-#import xml.dom.minidom 
+import requests
+import bs4 as bs
 from modules.log import logger
 from modules.settings import (
     urlTimeoutSeconds,
@@ -17,6 +15,17 @@ from modules.settings import (
 )
 
 WARNING_NONE_MSG = "Keine Aktiven Nina oder Katwarn Meldungen"
+
+
+def _clean_html(text: str) -> str:
+    """Convert <br> variants to newlines, strip all remaining HTML tags."""
+    if not text:
+        return text
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', '', text)
+    # Collapse more than two consecutive newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 trap_list_location_de = ("dealert", "warning")
 
@@ -50,9 +59,8 @@ def _load_warning_detail(warning_id: str) -> dict:
             areas = info0.get("area") or []
             if isinstance(areas, list) and areas:
                 result["area"] = areas[0].get("areaDesc", "")
-            desc = (info0.get("description") or "").strip()
-            instr = (info0.get("instruction") or "").strip()
-            # Combine description + instruction, separated if both present
+            desc = _clean_html(str(info0.get("description") or ""))
+            instr = _clean_html(str(info0.get("instruction") or ""))
             if desc and instr:
                 result["description"] = f"{desc}\nℹ️ {instr}"
             else:
@@ -67,15 +75,19 @@ def _area_from_payload(item: dict) -> str:
     """Extract area directly from dashboard payload.data (no extra HTTP call)."""
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    return str(data.get("area") or data.get("areaDesc") or "").strip()
+    area = data.get("area") or data.get("areaDesc") or ""
+    # DWD encodes affected Gemeinden as {"type": "ZGEM", "data": "3415,..."} — not human-readable
+    if isinstance(area, dict):
+        return ""
+    return str(area).strip()
 
 
 def _description_from_payload(item: dict) -> str:
     """Extract description + instruction directly from dashboard payload.data."""
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    desc = str(data.get("description") or "").strip()
-    instr = str(data.get("instruction") or "").strip()
+    desc = _clean_html(str(data.get("description") or ""))
+    instr = _clean_html(str(data.get("instruction") or ""))
     if desc and instr:
         return f"{desc}\nℹ️ {instr}"
     return desc or instr
