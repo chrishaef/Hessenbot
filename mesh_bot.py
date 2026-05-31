@@ -1287,6 +1287,18 @@ def onReceive(packet, interface):
                 logger.warning(f"System: Ignoring TEXT_MESSAGE_APP with invalid payload type: {type(message_bytes).__name__}")
                 return
             message_log_string = message_string.replace('\r', ' ').replace('\n', ' ')
+            _decoded_early = packet.get('decoded') or {}
+            if (
+                getattr(my_settings, "packet_dedup_enabled", True)
+                and _decoded_early.get("viaMqtt")
+                and packet.get("hopStart") is not None
+                and packet.get("hopLimit") is not None
+                and packet.get("hopStart") == packet.get("hopLimit")
+            ):
+                time.sleep(0.05)
+            from modules.packet_dedup import apply_hop_enrichment
+            apply_hop_enrichment(packet)
+            decoded = packet.get('decoded') or {}
             via_mqtt = decoded.get('viaMqtt', False)
             transport_mechanism = (
                 packet.get('transport_mechanism')
@@ -1338,23 +1350,18 @@ def onReceive(packet, interface):
                 emojiSeen = packet.get('emoji', False)
 
             # check if the packet has a hop count flag use it
-            if packet.get('hopsAway'):
+            if 'hopsAway' in packet:
                 hop_away = packet.get('hopsAway', 0)
 
-            if packet.get('hopStart'):
+            if packet.get('hopStart') is not None:
                 hop_start = packet.get('hopStart', 0)
 
-            if packet.get('hopLimit'):
+            if packet.get('hopLimit') is not None:
                 hop_limit = packet.get('hopLimit', 0)
             
             # calculate hop count
             hop = ""
-            if hop_limit > 0 and hop_start >= hop_limit:
-                hop_count = hop_away + (hop_start - hop_limit)
-            elif hop_limit > 0 and hop_start < hop_limit:
-                hop_count = hop_away + (hop_limit - hop_start)
-            else:
-                hop_count = hop_away
+            hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
 
             transport_label = None
             if via_mqtt or "mqtt" in str(transport_mechanism).lower():
@@ -1362,6 +1369,12 @@ def onReceive(packet, interface):
                 via_mqtt = True
             elif "udp" in str(transport_mechanism).lower():
                 transport_label = "Gateway"
+
+            # MQTT/Gateway at meshtasticd: packet hop fields are often 0; use NodeDB distance as fallback.
+            if transport_label in ("MQTT", "Gateway") and hop_count == 0:
+                ndb_hops = mesh_hops_from_nodedb(message_from_id, rxNode)
+                if ndb_hops is not None and ndb_hops > 0:
+                    hop_count = ndb_hops
 
             if (
                 hop_start == hop_limit
@@ -1371,9 +1384,9 @@ def onReceive(packet, interface):
             ):
                 hop = "Direct"
             elif transport_label == "MQTT":
-                hop = "MQTT" if hop_count == 0 else f"{hop_count} Hops MQTT"
+                hop = f"{hop_count} Hop MQTT" if hop_count == 1 else f"{hop_count} Hops MQTT"
             elif transport_label == "Gateway":
-                hop = "Gateway" if hop_count == 0 else f"{hop_count} Hops Gateway"
+                hop = f"{hop_count} Hop Gateway" if hop_count == 1 else f"{hop_count} Hops Gateway"
             elif hop_count > 0:
                 hop = f"{hop_count} Hop" if hop_count == 1 else f"{hop_count} Hops"
             else:
@@ -1390,7 +1403,12 @@ def onReceive(packet, interface):
                 hop += f" Relay:{hex_val}"
 
             if enableHopLogs:
-                logger.debug(f"System: Packet HopDebugger: hop_away:{hop_away} hop_limit:{hop_limit} hop_start:{hop_start} calculated_hop_count:{hop_count} final_hop_value:{hop} via_mqtt:{via_mqtt} transport_mechanism:{transport_mechanism} Hostname:{rxNodeHostName}")
+                logger.info(
+                    f"System: Packet HopDebugger: hop_away:{hop_away} hop_limit:{hop_limit} "
+                    f"hop_start:{hop_start} calculated_hop_count:{hop_count} final_hop_value:{hop} "
+                    f"via_mqtt:{via_mqtt} transport_mechanism:{transport_mechanism} "
+                    f"Hostname:{rxNodeHostName} from:{message_from_id}"
+                )
 
             if help_message in message_string or welcome_message in message_string or "CMD?:" in message_string:
                 # ignore help and welcome messages

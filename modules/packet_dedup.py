@@ -11,7 +11,102 @@ from modules.log import logger
 
 _lock = threading.Lock()
 _seen: OrderedDict[str, float] = OrderedDict()
+_enrichment: Dict[str, Dict[str, Any]] = {}
 _stats = {"dropped": 0, "accepted": 0}
+
+
+def _decoded(packet: Dict[str, Any]) -> Dict[str, Any]:
+    d = packet.get("decoded")
+    return d if isinstance(d, dict) else {}
+
+
+def _transport_mechanism(packet: Dict[str, Any]) -> str:
+    decoded = _decoded(packet)
+    return str(
+        packet.get("transport_mechanism")
+        or packet.get("transportMechanism")
+        or decoded.get("transport_mechanism")
+        or decoded.get("transportMechanism")
+        or ""
+    ).lower()
+
+
+def _extract_hop_fields(packet: Dict[str, Any]) -> Dict[str, Any]:
+    decoded = _decoded(packet)
+    return {
+        "hopsAway": packet.get("hopsAway"),
+        "hopStart": packet.get("hopStart"),
+        "hopLimit": packet.get("hopLimit"),
+        "rxSnr": packet.get("rxSnr"),
+        "rxRssi": packet.get("rxRssi"),
+        "transport_mechanism": _transport_mechanism(packet),
+        "viaMqtt": decoded.get("viaMqtt"),
+    }
+
+
+def _hop_metadata_score(packet: Dict[str, Any] | Dict[str, Any]) -> int:
+    """Higher = richer routing metadata (prefer UDP/LoRa copy over bare MQTT)."""
+    if isinstance(packet, dict) and "hopStart" in packet and "hopLimit" in packet and "hopsAway" in packet:
+        fields = packet
+    else:
+        fields = _extract_hop_fields(packet)  # type: ignore[arg-type]
+
+    score = 0
+    hs = fields.get("hopStart")
+    hl = fields.get("hopLimit")
+    try:
+        if hs is not None and hl is not None and int(hl) > 0 and int(hs) > int(hl):
+            score += 1000 + (int(hs) - int(hl))
+    except (TypeError, ValueError):
+        pass
+    try:
+        ha = int(fields.get("hopsAway") or 0)
+        if ha > 0:
+            score += 100 + ha
+    except (TypeError, ValueError):
+        pass
+    if fields.get("rxSnr") or fields.get("rxRssi"):
+        score += 10
+    tm = str(fields.get("transport_mechanism") or "").lower()
+    if "udp" in tm or "lora" in tm:
+        score += 5
+    return score
+
+
+def apply_hop_enrichment(packet: Dict[str, Any]) -> None:
+    """
+    Merge hop/rx metadata from a duplicate transport (e.g. UDP after MQTT).
+    Call before reading hop fields in onReceive.
+    """
+    try:
+        key = packet_dedup_key(packet)
+    except Exception:
+        return
+
+    with _lock:
+        extra = _enrichment.pop(key, None)
+    if not extra:
+        return
+    if _hop_metadata_score(extra) <= _hop_metadata_score(packet):
+        return
+
+    for field, pkey in (
+        ("hopsAway", "hopsAway"),
+        ("hopStart", "hopStart"),
+        ("hopLimit", "hopLimit"),
+        ("rxSnr", "rxSnr"),
+        ("rxRssi", "rxRssi"),
+    ):
+        val = extra.get(field)
+        if val is not None:
+            packet[pkey] = val
+    tm = extra.get("transport_mechanism")
+    if tm:
+        packet["transport_mechanism"] = tm
+    if extra.get("viaMqtt") is not None:
+        decoded = packet.setdefault("decoded", {})
+        if isinstance(decoded, dict):
+            decoded["viaMqtt"] = extra["viaMqtt"]
 
 
 def _payload_bytes(decoded: Dict[str, Any]) -> bytes:
@@ -82,6 +177,10 @@ def should_drop_duplicate_packet(packet: Dict[str, Any]) -> bool:
     now = time.time()
     with _lock:
         if key in _seen:
+            fields = _extract_hop_fields(packet)
+            prev = _enrichment.get(key)
+            if prev is None or _hop_metadata_score(fields) > _hop_metadata_score(prev):
+                _enrichment[key] = fields
             _seen.move_to_end(key)
             _stats["dropped"] += 1
             logger.debug(f"System: Dropping duplicate packet ({key})")

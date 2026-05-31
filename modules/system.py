@@ -523,6 +523,43 @@ def decimal_to_hex(decimal_number):
     return f"!{decimal_number:08x}"
 
 
+def mesh_hops_consumed(hop_away: int, hop_start: int, hop_limit: int) -> int:
+    """Mesh hops from packet hop metadata (hop_start − hop_limit + hopsAway)."""
+    if hop_limit > 0 and hop_start >= hop_limit:
+        return hop_away + (hop_start - hop_limit)
+    if hop_limit > 0 and hop_start < hop_limit:
+        return hop_away + (hop_limit - hop_start)
+    return hop_away
+
+
+def mesh_hops_from_nodedb(node_id: int, node_int: int = 1) -> int | None:
+    """hopsAway for a node from the connected interface NodeDB, if known."""
+    interface = globals().get(f"interface{node_int}")
+    if interface is None:
+        return None
+    node = None
+    nodes_by_num = getattr(interface, "nodesByNum", None)
+    if isinstance(nodes_by_num, dict):
+        node = nodes_by_num.get(node_id)
+    if node is None:
+        try:
+            for candidate in interface.nodes.values():
+                if node_id == candidate.get("num"):
+                    node = candidate
+                    break
+        except Exception:
+            return None
+    if not node:
+        return None
+    hops = node.get("hopsAway")
+    if hops is None:
+        return None
+    try:
+        return int(hops)
+    except (TypeError, ValueError):
+        return None
+
+
 def _hop_count_label(hop_n: int | None) -> str:
     if hop_n is None:
         return "? Hops"

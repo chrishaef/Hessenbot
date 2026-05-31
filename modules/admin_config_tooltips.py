@@ -233,7 +233,7 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("messagingSettings", "wantAckOnDm"): "True: Bei DM-Antworten Bestätigung nur für das erste Teil anfordern; Log: „DM delivery confirmed/failed“.",
     ("messagingSettings", "dmDeliveryFailAlertThreshold"): "Nach so vielen DM-Zustellfehlern hintereinander an dieselbe Node: Admin-Warnung im Log.",
     ("messagingSettings", "maxBuffer"): "Max. Bytes für Puffertest/Auto-Ping-Nachrichtenlänge.",
-    ("messagingSettings", "enableHopLogs"): "True: Hop-Anzahl wird in Logs/Antworten detaillierter protokolliert.",
+    ("messagingSettings", "enableHopLogs"): "True: Hop-Metadaten pro Textnachricht als INFO-Zeile „Packet HopDebugger“ ins Log.",
     ("messagingSettings", "noisyNodeLogging"): "True: Knoten mit viel Telemetrie werden im Log gemeldet.",
     ("messagingSettings", "noisyTelemetryLimit"): "Ab wie vielen Telemetrie-Paketen ein Knoten „laut“ ist.",
     ("messagingSettings", "logMetaStats"): "True: Metadaten-Statistiken werden geloggt.",
