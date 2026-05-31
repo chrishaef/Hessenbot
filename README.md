@@ -2,9 +2,47 @@
 
 **Hessenbot** ist ein Meshtastic-Autoresponder für [Meshhessen](https://meshhessen.de) — ein Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
 
-Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden entfernt; der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
+Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, Traceroute, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden entfernt; der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
 
-![Example Use](etc/pong-bot.jpg "Example Use")
+## Screenshots
+
+### Web-Portal
+
+![Statistik-Dashboard — Metriken, Aktivität, Top-Befehle, DM-Zustellung](docs/screenshots/dashboard.png)
+
+| `/befehle` | `/nodedb` | `/faq` | `/bbs` |
+|:---:|:---:|:---:|:---:|
+| ![Befehlsliste](docs/screenshots/befehle.png) | ![NodeDB — 543 Knoten](docs/screenshots/nodedb.png) | ![FAQ & PKI-Check](docs/screenshots/faq.png) | ![BBS öffentlich & DM-Warteschlange](docs/screenshots/bbs.png) |
+
+Öffentlich unter `/`, `/befehle`, `/nodedb`, `/faq`, `/bbs` — Admin-Login unter `/admin`.
+
+### Mesh: Befehle & Trace
+
+![!ping, !loc, !whois, !blitz — QSL mit 1 Hop MQTT](docs/screenshots/mesh-befehle-web.png)
+
+`!ping`, `!loc`, `!whois`, `!blitz` im Web-Admin (DM-Chat) — inkl. Hop-Anzeige bei MQTT-Gateways.
+
+| Meshtastic-App (DM) | Web-Admin (DM-Chat) |
+|:---:|:---:|
+| ![!trace BS1 — Hin/Zurück, 1 Hop](docs/screenshots/trace-dm-app.png) | ![!trace SKCR — Route über GWCR, BS1](docs/screenshots/trace-dm-web.png) |
+| `!trace` + `!bbspost` im Funk-Client | `!trace` im Admin-DM-Tab |
+
+```mermaid
+flowchart LR
+  subgraph Mesh["Meshtastic-Mesh"]
+    Radio["Funk-Nodes"]
+    GW["MQTT-Gateway"]
+  end
+  subgraph Bot["Hessenbot"]
+    Flask["Web-Portal\n/ · /befehle · /admin"]
+    Core["mesh_bot.py\nBefehle · BBS · Wetter"]
+  end
+  MD["meshtasticd\n(TCP)"]
+  Radio <-- LoRa --> GW
+  GW <-- MQTT --> MD
+  MD <--> Core
+  Core --> Flask
+```
 
 ## Danksagung / Acknowledgements
 
@@ -47,10 +85,12 @@ cp config.template config.ini
 - **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
 - **Standort-Auflösung** (für Wetter, Warnungen, Blitz): zuerst frische NodeDB-Position (≤ 24 h), dann [Mesh-Karte](https://map.meshhessen.de), sonst Bot-Standort aus `config.ini`
 
-### Ping & DM-Zustellung
+### Ping, Trace & DM-Zustellung
 
 - **`!ping` / `!pong` / `!test` / `!ack` / `!cq`**: QSL-Antwort im Format  
   `LongName [!nodeid] QSL @ "Ort" | N Hops LoRa|MQTT`
+- **Hop-Anzeige bei MQTT-Gateways:** Für über MQTT getunnelte Pakete werden Hops aus NodeDB, Trace-Cache und Paket-Metadaten aufgelöst — nicht mehr pauschal „0 Hops MQTT“.
+- **`!trace` / `!trace MHH` / `!trace !604f8594`**: Meshtastic-Traceroute zum Bot bzw. Ziel; Ergebnis (Hin- und Rückweg) per **DM**. Globale Warteschlange (ein Trace gleichzeitig), ~65 s Abstand pro Funk-Interface.
 - **Channel-Test** (optional): Auf konfigurierten Kanälen antwortet der Bot auf ein nacktes **`test`** / **`Test`** (ohne `!`) **direkt im Kanal** — gleiche Antwort wie `!test`. Ein-/Aus-Schaltung und Kanalauswahl im Web-Admin (Tab **Channel-Test**). Alle anderen Befehle bleiben unverändert (DM und/oder `!`).
 - **`wantAckOnDm`**: Mesh-ACK auf DM-Antworten; Fehlzustellungen (inkl. PKI) werden geloggt und im Admin/Dashboard ausgewertet
 - Konfiguration: `[messagingSettings]` in `config.ini` (`wantAckOnDm`, `dmDeliveryFailAlertThreshold`)
@@ -66,7 +106,7 @@ cp config.template config.ini
 | URL | Inhalt |
 |-----|--------|
 | `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard 24h, DM-Zustellung 24h) |
-| `/befehle` | Befehlsliste |
+| `/befehle` | Befehlsliste inkl. `!trace` |
 | `/faq` | Hilfe & PKI-Check |
 | `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Einstellungen, … |
 
@@ -97,7 +137,8 @@ cp config.template config.ini
 |--------|----------------|
 | `!cmd` | Kurze Befehlsliste (aktivierte Traps) |
 | `!ping` / `!pong` / `!test` | QSL mit Ort, Hops, LoRa/MQTT |
-| `!trace` / `!trace MHH` | Traceroute zu dir bzw. Ziel-Station (Ergebnis per DM) |
+| `!trace` / `!trace MHH` | Traceroute zu dir bzw. Ziel-Station (Ergebnis per DM, Warteschlange) |
+| `!trace?` | Kurzhilfe zu `!trace` |
 | `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
 | `!ack` | Wie Ping, Keyword ACK |
 | `!warning` | NINA/Katwarn für **deinen** Standort |
