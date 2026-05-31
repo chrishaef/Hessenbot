@@ -562,6 +562,7 @@ try:
     dm_delivery_fail_alert_threshold = config['messagingSettings'].getint('dmDeliveryFailAlertThreshold', 3)
     maxBuffer = config['messagingSettings'].getint('maxBuffer', 200) # default 200 bytes
     enableHopLogs = config['messagingSettings'].getboolean('enableHopLogs', False) # default False
+    mqtt_hop_fallbacks = config['messagingSettings'].getboolean('mqttHopFallbacks', True) # tunneled RX only
     debugMetadata = config['messagingSettings'].getboolean('debugMetadata', False) # default False
     metadataFilter = config['messagingSettings'].get('metadataFilter', '').split(',') # default empty
     DEBUGpacket = config['messagingSettings'].getboolean('DEBUGpacket', False) # default False

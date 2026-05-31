@@ -234,6 +234,7 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("messagingSettings", "dmDeliveryFailAlertThreshold"): "Nach so vielen DM-Zustellfehlern hintereinander an dieselbe Node: Admin-Warnung im Log.",
     ("messagingSettings", "maxBuffer"): "Max. Bytes für Puffertest/Auto-Ping-Nachrichtenlänge.",
     ("messagingSettings", "enableHopLogs"): "True: Hop-Metadaten pro Textnachricht als INFO-Zeile „Packet HopDebugger“ ins Log.",
+    ("messagingSettings", "mqttHopFallbacks"): "True: Bei MQTT/Gateway-Empfang (ohne lokales Funk) NodeDB/Trace-Fallbacks wenn Hop-Felder leer sind. False = nur Paket-Metadaten. Serial/BLE nutzt immer Paket-Metadaten.",
     ("messagingSettings", "noisyNodeLogging"): "True: Knoten mit viel Telemetrie werden im Log gemeldet.",
     ("messagingSettings", "noisyTelemetryLimit"): "Ab wie vielen Telemetrie-Paketen ein Knoten „laut“ ist.",
     ("messagingSettings", "logMetaStats"): "True: Metadaten-Statistiken werden geloggt.",

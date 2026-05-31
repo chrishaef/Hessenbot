@@ -578,8 +578,13 @@ def _interface_node(node_id: int, node_int: int = 1) -> dict | None:
     return node or None
 
 
-def mesh_hops_from_nodedb(node_id: int, node_int: int = 1) -> int | None:
-    """hopsAway for a node from the connected interface NodeDB, if known."""
+def mesh_hops_from_nodedb(
+    node_id: int,
+    node_int: int = 1,
+    *,
+    mqtt_hints: bool = False,
+) -> int | None:
+    """hopsAway from interface NodeDB; optional SNR hint only for tunneled (MQTT) setups."""
     node = _interface_node(node_id, node_int)
     if not node:
         return None
@@ -591,6 +596,8 @@ def mesh_hops_from_nodedb(node_id: int, node_int: int = 1) -> int | None:
                 return hops_i
         except (TypeError, ValueError):
             pass
+    if not mqtt_hints:
+        return None
     # noradio + MQTT: hopsAway is often 0; SNR on the node means a gateway heard them on LoRa.
     snr = node.get("snr")
     if snr is not None:
@@ -603,6 +610,88 @@ def mesh_hops_from_nodedb(node_id: int, node_int: int = 1) -> int | None:
     return None
 
 
+_RF_INTERFACE_TYPES = frozenset({"serial", "ble", "usb"})
+
+
+def interface_has_local_rf(node_int: int = 1) -> bool:
+    """True when this interface uses a local LoRa radio (serial/BLE), not TCP/MQTT-only."""
+    t = (globals().get(f"interface{node_int}_type") or "serial").strip().lower()
+    return t in _RF_INTERFACE_TYPES
+
+
+def is_tunneled_mesh_packet(packet: dict, transport_mechanism: str) -> bool:
+    """Packet reached us via MQTT broker or LAN gateway — not direct local LoRa RX."""
+    decoded = packet.get("decoded") if isinstance(packet.get("decoded"), dict) else {}
+    tm = str(transport_mechanism or "").lower()
+    if decoded.get("viaMqtt"):
+        return True
+    if "mqtt" in tm:
+        return True
+    if "udp" in tm:
+        return True
+    return False
+
+
+def transport_label_for_packet(packet: dict, transport_mechanism: str) -> str | None:
+    """Display label for QSL hop line: MQTT, Gateway, or None (= LoRa/direct)."""
+    if not is_tunneled_mesh_packet(packet, transport_mechanism):
+        return None
+    tm = str(transport_mechanism or "").lower()
+    if "udp" in tm:
+        return "Gateway"
+    return "MQTT"
+
+
+def resolve_mesh_hop_count(
+    message_from_id: int,
+    node_int: int,
+    hop_away: int,
+    hop_start: int,
+    hop_limit: int,
+    packet: dict,
+    transport_mechanism: str,
+) -> tuple[int, str]:
+    """
+    Mesh hop count for ping/QSL display.
+
+    Local RF (serial/BLE): packet metadata only — accurate when a radio is connected.
+    Tunneled (MQTT/Gateway/TCP meshtasticd): optional fallbacks when metadata is empty.
+    """
+    hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
+    if hop_count > 0:
+        return hop_count, "packet"
+
+    tunneled = is_tunneled_mesh_packet(packet, transport_mechanism)
+    if not tunneled:
+        return hop_count, "direct-lora"
+
+    import modules.settings as st
+
+    if not getattr(st, "mqtt_hop_fallbacks", True):
+        return hop_count, "tunneled-strict"
+
+    ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=True)
+    if ndb_hops is not None and ndb_hops > 0:
+        return ndb_hops, "nodedb"
+
+    trace_hops = mesh_hops_from_trace_cache(message_from_id)
+    if trace_hops is not None and trace_hops > 0:
+        return trace_hops, "trace-cache"
+
+    if packet.get("relayNode") is not None:
+        return 1, "relay"
+
+    if packet.get("rxSnr") or packet.get("rxRssi"):
+        try:
+            snr = float(packet.get("rxSnr") or 0)
+            if snr not in (0.0, -128.0):
+                return 1, "rx-snr"
+        except (TypeError, ValueError):
+            pass
+
+    return hop_count, "tunneled-none"
+
+
 def mesh_hops_for_mqtt_sender(
     message_from_id: int,
     node_int: int,
@@ -611,30 +700,16 @@ def mesh_hops_for_mqtt_sender(
     hop_limit: int,
     packet: dict,
 ) -> int:
-    """Best-effort mesh hop count when the bot receives via MQTT/Gateway (no local LoRa)."""
-    hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
-    if hop_count > 0:
-        return hop_count
-
-    ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int)
-    if ndb_hops is not None and ndb_hops > 0:
-        return ndb_hops
-
-    trace_hops = mesh_hops_from_trace_cache(message_from_id)
-    if trace_hops is not None and trace_hops > 0:
-        return trace_hops
-
-    if packet.get("relayNode") is not None:
-        return 1
-
-    if packet.get("rxSnr") or packet.get("rxRssi"):
-        try:
-            snr = float(packet.get("rxSnr") or 0)
-            if snr not in (0.0, -128.0):
-                return 1
-        except (TypeError, ValueError):
-            pass
-
+    """Deprecated alias — use resolve_mesh_hop_count()."""
+    tm = str(
+        packet.get("transport_mechanism")
+        or packet.get("transportMechanism")
+        or (packet.get("decoded") or {}).get("transport_mechanism")
+        or ""
+    )
+    hop_count, _ = resolve_mesh_hop_count(
+        message_from_id, node_int, hop_away, hop_start, hop_limit, packet, tm
+    )
     return hop_count
 
 

@@ -474,6 +474,8 @@ dmDeliveryFailAlertThreshold = 3
 maxBuffer = 200
 #Enable Extra logging of Hop count data
 enableHopLogs = True
+# Tunneled RX (MQTT/Gateway/TCP meshtasticd): use NodeDB/trace fallbacks when hop metadata is 0. Off = packet fields only. Local serial/BLE always uses packet metadata.
+mqttHopFallbacks = True
 # Noisy Node Telemetry Logging and packet threshold
 noisyNodeLogging = False
 noisyTelemetryLimit = 5

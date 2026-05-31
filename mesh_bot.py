@@ -1339,9 +1339,10 @@ def onReceive(packet, interface):
                 emojiSeen = packet.get('emoji', False)
 
             from modules.packet_dedup import apply_hop_enrichment
+            from modules.system import is_tunneled_mesh_packet, interface_has_local_rf
             if (
                 getattr(my_settings, "packet_dedup_enabled", True)
-                and via_mqtt
+                and is_tunneled_mesh_packet(packet, transport_mechanism)
                 and packet.get("hopStart") is not None
                 and packet.get("hopLimit") is not None
                 and packet.get("hopStart") == packet.get("hopLimit")
@@ -1369,19 +1370,12 @@ def onReceive(packet, interface):
                 rssi = packet.get('rxRssi', 0)
 
             hop = ""
-            transport_label = None
-            if via_mqtt or "mqtt" in str(transport_mechanism).lower():
-                transport_label = "MQTT"
-                via_mqtt = True
-            elif "udp" in str(transport_mechanism).lower():
-                transport_label = "Gateway"
+            hop_source = "packet"
+            transport_label = transport_label_for_packet(packet, transport_mechanism)
 
-            if transport_label in ("MQTT", "Gateway"):
-                hop_count = mesh_hops_for_mqtt_sender(
-                    message_from_id, rxNode, hop_away, hop_start, hop_limit, packet
-                )
-            else:
-                hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
+            hop_count, hop_source = resolve_mesh_hop_count(
+                message_from_id, rxNode, hop_away, hop_start, hop_limit, packet, transport_mechanism
+            )
 
             if (
                 hop_start == hop_limit
@@ -1412,7 +1406,8 @@ def onReceive(packet, interface):
             if enableHopLogs:
                 logger.info(
                     f"System: Packet HopDebugger: hop_away:{hop_away} hop_limit:{hop_limit} "
-                    f"hop_start:{hop_start} calculated_hop_count:{hop_count} final_hop_value:{hop} "
+                    f"hop_start:{hop_start} calculated_hop_count:{hop_count} hop_source:{hop_source} "
+                    f"final_hop_value:{hop} local_rf:{interface_has_local_rf(rxNode)} "
                     f"via_mqtt:{via_mqtt} transport_mechanism:{transport_mechanism} "
                     f"Hostname:{rxNodeHostName} from:{message_from_id}"
                 )
