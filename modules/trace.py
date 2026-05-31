@@ -63,6 +63,42 @@ def _snr_db(raw) -> str:
     return f"{val / 4:.0f}"
 
 
+def _local_node_num(node_int: int) -> int | None:
+    import modules.system as sys
+
+    n = sys.__dict__.get(f"myNodeNum{node_int}")
+    if n is None:
+        return None
+    try:
+        return int(n)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trace_reached_dest(
+    packet: dict,
+    dest_id: int,
+    route: list,
+    route_back: list,
+    node_int: int,
+) -> bool:
+    """True if the traceroute response indicates the destination was reached."""
+    pkt_from = packet.get("from")
+    if pkt_from is not None and int(pkt_from) == int(dest_id):
+        return True
+    dest_s = int(dest_id)
+    for hop in route + route_back:
+        try:
+            if int(hop) == dest_s:
+                return True
+        except (TypeError, ValueError):
+            continue
+    my_num = _local_node_num(node_int)
+    if my_num is not None and dest_s == my_num and not route and not route_back:
+        return True
+    return False
+
+
 def format_traceroute_packet(packet: dict, node_int: int, dest_id: int) -> str:
     """Format a TRACEROUTE_APP response packet for mesh DM."""
     if not packet:
@@ -77,7 +113,8 @@ def format_traceroute_packet(packet: dict, node_int: int, dest_id: int) -> str:
     as_dict = google.protobuf.json_format.MessageToDict(route_discovery)
 
     dest_label = _node_label(dest_id, node_int)
-    lines = [f"🔍 Trace → {dest_label}"]
+    dest_s = int(dest_id)
+    my_num = _local_node_num(node_int)
 
     pkt_to = packet.get("to")
     pkt_from = packet.get("from")
@@ -86,6 +123,22 @@ def format_traceroute_packet(packet: dict, node_int: int, dest_id: int) -> str:
     snr_towards = as_dict.get("snrTowards") or []
     len_towards = len(route)
     snr_t_valid = len(snr_towards) == len_towards + 1
+
+    route_back = as_dict.get("routeBack") or []
+    snr_back = as_dict.get("snrBack") or []
+    len_back = len(route_back)
+
+    if not _trace_reached_dest(packet, dest_id, route, route_back, node_int):
+        logger.info(
+            f"Trace: invalid response dest={dest_label} from={pkt_from} to={pkt_to} "
+            f"route_len={len_towards} route_back_len={len_back} my={my_num}"
+        )
+        return (
+            f"Trace zu {dest_label}: Ziel nicht erreicht "
+            "(keine gültige Route — ggf. zu weit, offline oder MAX_RETRANSMIT)."
+        )
+
+    lines = [f"🔍 Trace → {dest_label}"]
 
     towards = _node_label(pkt_to if pkt_to is not None else dest_id, node_int)
     if route:
@@ -98,9 +151,6 @@ def format_traceroute_packet(packet: dict, node_int: int, dest_id: int) -> str:
             towards += f" → {_node_label(pkt_from, node_int)} ({snr} dB)"
     lines.append(f"Hin:  {towards}")
 
-    route_back = as_dict.get("routeBack") or []
-    snr_back = as_dict.get("snrBack") or []
-    len_back = len(route_back)
     back_valid = "hopStart" in packet and len(snr_back) == len_back + 1
 
     if back_valid and pkt_from is not None:
@@ -115,7 +165,7 @@ def format_traceroute_packet(packet: dict, node_int: int, dest_id: int) -> str:
     if hop_count:
         lines.append(f"{hop_count} Hop{'s' if hop_count != 1 else ''}")
         record_mesh_hops_from_trace(dest_id, hop_count)
-    elif not route and not route_back:
+    else:
         lines.append("Direktverbindung (0 Hops)")
 
     return "\n".join(lines)
@@ -140,7 +190,8 @@ def run_traceroute(dest_id: int, node_int: int, channel: int, hop_limit: int = _
             pass
 
     route_msg = mesh_pb2.RouteDiscovery()
-    wait_factor = min(len(interface.nodes) - 1 if interface.nodes else 0, hop_limit)
+    node_count = len(interface.nodes) if interface.nodes else 0
+    wait_factor = max(1, min(max(node_count - 1, 0), hop_limit))
 
     interface.sendData(
         route_msg,
