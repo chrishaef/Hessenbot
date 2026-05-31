@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import queue
 import threading
-import time
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict
 
 import google.protobuf.json_format
 from meshtastic import mesh_pb2, portnums_pb2
@@ -21,8 +22,21 @@ trap_list_trace = ("trace",)
 
 _UNK_SNR = -128
 _TRACE_HOP_LIMIT = 7
-_TRACE_PENDING: Dict[int, float] = {}
-_TRACE_PENDING_TTL = 120.0
+
+
+@dataclass(frozen=True)
+class _TraceJob:
+    dest_id: int
+    requester_id: int
+    node_int: int
+    channel: int
+
+
+_STATE_LOCK = threading.Lock()
+_TRACE_QUEUE: queue.Queue[_TraceJob] = queue.Queue()
+_PENDING_REQUESTERS: set[int] = set()
+_TRACE_RUNNING = False
+_DISPATCHER_STARTED = False
 
 
 def _node_label(node_num, node_int: int) -> str:
@@ -136,22 +150,48 @@ def run_traceroute(dest_id: int, node_int: int, channel: int, hop_limit: int = _
     return format_traceroute_packet(captured.get("packet"), node_int, dest_id)
 
 
-def _trace_worker(dest_id: int, requester_id: int, node_int: int, channel: int) -> None:
+def _run_trace_job(job: _TraceJob) -> None:
     try:
-        result = run_traceroute(dest_id, node_int, channel)
+        result = run_traceroute(job.dest_id, job.node_int, job.channel)
     except Exception as e:
-        logger.debug(f"Trace: failed dest={dest_id} requester={requester_id}: {e}")
+        logger.debug(f"Trace: failed dest={job.dest_id} requester={job.requester_id}: {e}")
         err = str(e).strip()
         if "Timed out" in err or "timeout" in err.lower():
-            result = f"Trace zu {_node_label(dest_id, node_int)}: Zeitüberschreitung (keine Antwort)."
+            result = f"Trace zu {_node_label(job.dest_id, job.node_int)}: Zeitüberschreitung (keine Antwort)."
         else:
             result = f"Trace fehlgeschlagen: {err[:120]}"
     try:
-        send_message(result, channel, requester_id, node_int)
+        send_message(result, job.channel, job.requester_id, job.node_int)
     except Exception as e:
         logger.error(f"Trace: DM send failed: {e}")
-    finally:
-        _TRACE_PENDING.pop(requester_id, None)
+
+
+def _trace_dispatcher_loop() -> None:
+    global _TRACE_RUNNING
+    while True:
+        job = _TRACE_QUEUE.get()
+        try:
+            with _STATE_LOCK:
+                _TRACE_RUNNING = True
+            _run_trace_job(job)
+        finally:
+            with _STATE_LOCK:
+                _TRACE_RUNNING = False
+                _PENDING_REQUESTERS.discard(job.requester_id)
+            _TRACE_QUEUE.task_done()
+
+
+def _ensure_trace_dispatcher() -> None:
+    global _DISPATCHER_STARTED
+    with _STATE_LOCK:
+        if _DISPATCHER_STARTED:
+            return
+        _DISPATCHER_STARTED = True
+        threading.Thread(
+            target=_trace_dispatcher_loop,
+            daemon=True,
+            name="trace-dispatcher",
+        ).start()
 
 
 def start_traceroute_to_requester(
@@ -161,22 +201,28 @@ def start_traceroute_to_requester(
     channel: int,
 ) -> str:
     """Queue a traceroute; result is sent via DM. Returns immediate ack text."""
-    now = time.time()
-    if requester_id in _TRACE_PENDING and (now - _TRACE_PENDING[requester_id]) < _TRACE_PENDING_TTL:
-        return "⏳ Trace läuft bereits — bitte warten, Ergebnis kommt per DM."
-
     throttled = api_throttle(requester_id, node_int, channel, apiName="trace")
     if throttled:
         return throttled if isinstance(throttled, str) else "⏱️ Bitte etwas langsamer mit !trace."
 
-    _TRACE_PENDING[requester_id] = now
     dest_label = _node_label(dest_id, node_int)
-    threading.Thread(
-        target=_trace_worker,
-        args=(dest_id, requester_id, node_int, channel),
-        daemon=True,
-    ).start()
-    return f"🔍 Trace zu {dest_label} gestartet — Ergebnis per DM."
+    job = _TraceJob(dest_id, requester_id, node_int, channel)
+
+    with _STATE_LOCK:
+        if requester_id in _PENDING_REQUESTERS:
+            return "⏳ Dein Trace steht bereits in der Warteschlange — bitte warten."
+        busy = _TRACE_RUNNING or not _TRACE_QUEUE.empty()
+        _PENDING_REQUESTERS.add(requester_id)
+
+    _TRACE_QUEUE.put(job)
+    _ensure_trace_dispatcher()
+
+    if busy:
+        return (
+            f"⏳ Trace zu {dest_label} in Warteschlange — "
+            "bitte ~60s nach Abschluss der laufenden Trace warten."
+        )
+    return f"🔍 Trace zu {dest_label} gestartet — Bitte ~30s warten."
 
 
 def trace_help_text() -> str:
