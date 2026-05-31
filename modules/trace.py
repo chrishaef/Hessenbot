@@ -25,6 +25,7 @@ trap_list_trace = ("trace",)
 _UNK_SNR = -128
 _TRACE_HOP_LIMIT = 7
 _TRACE_INTERFACE_COOLDOWN_S = 65.0
+_TRACE_RESULT_MIN_GAP_S = 5.0  # min seconds after job start before result DM (after ack)
 
 
 @dataclass(frozen=True)
@@ -171,7 +172,26 @@ def _mark_interface_trace_started(node_int: int) -> None:
         _INTERFACE_LAST_TRACE_START[node_int] = time.monotonic()
 
 
+def _send_trace_result_dm(job: _TraceJob, result: str) -> None:
+    """Send trace result via DM; split Hin/Zurück to avoid RATE_LIMIT on back-to-back DMs."""
+    import modules.settings as st
+
+    split_delay = max(float(getattr(st, "splitDelay", 0) or 0), 2.0)
+    back_idx = result.find("\nZurück:")
+    if back_idx > 0:
+        part1 = result[:back_idx].strip()
+        part2 = result[back_idx + 1 :].strip()
+        send_message(part1, job.channel, job.requester_id, job.node_int)
+        time.sleep(split_delay)
+        send_message(part2, job.channel, job.requester_id, job.node_int)
+    else:
+        send_message(result, job.channel, job.requester_id, job.node_int)
+
+
 def _run_trace_job(job: _TraceJob) -> None:
+    import modules.settings as st
+
+    job_started = time.monotonic()
     try:
         result = run_traceroute(job.dest_id, job.node_int, job.channel)
     except Exception as e:
@@ -181,8 +201,15 @@ def _run_trace_job(job: _TraceJob) -> None:
             result = f"Trace zu {_node_label(job.dest_id, job.node_int)}: Zeitüberschreitung (keine Antwort)."
         else:
             result = f"Trace fehlgeschlagen: {err[:120]}"
+    min_gap = max(
+        _TRACE_RESULT_MIN_GAP_S,
+        float(getattr(st, "responseDelay", 0.7) or 0) + 3.0,
+    )
+    elapsed = time.monotonic() - job_started
+    if elapsed < min_gap:
+        time.sleep(min_gap - elapsed)
     try:
-        send_message(result, job.channel, job.requester_id, job.node_int)
+        _send_trace_result_dm(job, result)
     except Exception as e:
         logger.error(f"Trace: DM send failed: {e}")
 

@@ -3141,7 +3141,8 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                     if error_reason == 'PKI_UNKNOWN_PUBKEY' and requester_node and requester_node != nodeID:
                         _request_nodeinfo_exchange(requester_node, rxNode)
                 elif logMetaStats:
-                    logger.info(
+                    level = logger.warning if 'RATE_LIMIT' in str(error_reason).upper() else logger.info
+                    level(
                         f"System: ROUTING_APP Error Device:{rxNode} Channel:{channel} Reason:{error_reason} "
                         f"RequesterNode:{requester_node} TargetNode:{target_node} RequestId:{request_id}"
                     )
