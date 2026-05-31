@@ -10,3 +10,5 @@ schedule
 flask>=3.0
 flask-login>=0.6.3
 Flask-Limiter>=3.5
+# cluster dependencies
+cryptography>=42.0

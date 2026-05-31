@@ -1946,6 +1946,202 @@ def create_app(
         logout_user()
         return redirect(url_for("index_dashboard"))
 
+    # ── Cluster routes ────────────────────────────────────────────────────────
+
+    @app.route("/cluster")
+    @login_required
+    def cluster_dashboard():
+        import modules.settings as st
+        import modules.cluster as cluster
+        from modules.service_health import all_status
+
+        role = st.cluster_role
+        node_name = st.cluster_node_name
+        mode = cluster.mode.value if st.cluster_enabled else "standalone"
+        slaves = cluster.get_slave_registry() if role == "master" else {}
+        services = all_status()
+
+        # Format last_seen for each slave
+        now = __import__("time").time()
+        for rec in slaves.values():
+            ls = rec.get("last_seen")
+            if ls:
+                delta = int(now - ls)
+                rec["_last_seen_str"] = f"vor {delta}s"
+            else:
+                rec["_last_seen_str"] = "noch nie"
+
+        html = f"""
+        <!DOCTYPE html><html lang="de">
+        <head><meta charset="utf-8"><title>Cluster — {node_name}</title>
+        <style>
+          body{{font-family:monospace;background:#111;color:#eee;padding:2em}}
+          h1{{color:#7df}}
+          table{{border-collapse:collapse;width:100%;margin-top:1em}}
+          th,td{{border:1px solid #444;padding:0.5em 1em;text-align:left}}
+          th{{background:#222}}
+          .ok{{color:#4f4}}
+          .warn{{color:#fa4}}
+          .err{{color:#f44}}
+          .badge{{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.85em}}
+          .badge-ok{{background:#1a3;color:#fff}}
+          .badge-warn{{background:#a60;color:#fff}}
+          .badge-err{{background:#622;color:#fff}}
+          form{{display:inline}}
+          input[type=text]{{background:#222;color:#eee;border:1px solid #555;padding:4px}}
+          button{{padding:4px 10px;cursor:pointer}}
+        </style></head>
+        <body>
+        <h1>📡 Cluster-Dashboard</h1>
+        <p><b>Rolle:</b> {role.upper()} &nbsp;|&nbsp;
+           <b>Node:</b> {node_name} &nbsp;|&nbsp;
+           <b>Modus:</b> <span class="{'ok' if mode == 'normal' else 'warn'}">{mode}</span></p>
+
+        <h2>Service-Status</h2>
+        <table><tr><th>Service</th><th>Status</th></tr>
+        {"".join(
+            f"<tr><td>{svc}</td><td class='{'ok' if ok else 'err'}'>"
+            f"{'✅ erreichbar' if ok else '❌ nicht erreichbar'}</td></tr>"
+            for svc, ok in services.items()
+        )}
+        </table>
+        """
+
+        if role == "master":
+            html += f"""
+        <h2>Slaves ({len(slaves)})</h2>
+        <table>
+          <tr><th>Name</th><th>Node-ID</th><th>Autorisiert</th>
+              <th>Modus</th><th>Zuletzt gesehen</th>
+              <th>Key transferiert</th><th>Aktionen</th></tr>
+        {"".join(f'''
+          <tr>
+            <td>{r.get('name','—')}</td>
+            <td><code>{nid}</code></td>
+            <td>{'✅' if r.get('authorized') else '❌'}</td>
+            <td>{r.get('mode','?')}</td>
+            <td>{r.get('_last_seen_str','—')}</td>
+            <td>{'✅' if r.get('master_key_transferred') else '—'}</td>
+            <td>
+              {"" if r.get('authorized') else f'<form action="/cluster/authorize" method="post"><input type="hidden" name="node_id" value="{nid}"><button>Autorisieren</button></form>'}
+              {"" if not r.get('authorized') else f'<form action="/cluster/deauthorize" method="post"><input type="hidden" name="node_id" value="{nid}"><button class=\\'btn-warn\\'>Sperren</button></form>'}
+              {f'<form action="/cluster/transfer-key" method="post"><input type="hidden" name="node_id" value="{nid}"><button>Key senden</button></form>' if r.get('authorized') and not r.get('master_key_transferred') else ''}
+            </td>
+          </tr>''' for nid, r in slaves.items())}
+        </table>
+
+        <h2>Slave hinzufügen</h2>
+        <form action="/cluster/authorize" method="post">
+          Node-ID: <input type="text" name="node_id" placeholder="!aabbccdd" size="12">
+          &nbsp; Name: <input type="text" name="name" placeholder="Hessenbot FFM" size="20">
+          &nbsp; <button type="submit">Autorisieren</button>
+        </form>
+        """
+
+        html += """
+        <p style="margin-top:2em"><a href="/" style="color:#7df">← Dashboard</a></p>
+        </body></html>
+        """
+        return html
+
+    @app.route("/cluster/authorize", methods=["POST"])
+    @login_required
+    def cluster_authorize():
+        import modules.cluster as cluster
+        node_id = request.form.get("node_id", "").strip()
+        name = request.form.get("name", node_id)
+        if node_id:
+            cluster.authorize_slave(node_id, name)
+            flash(f"Slave '{name}' ({node_id}) autorisiert.", "success")
+        return redirect(url_for("cluster_dashboard"))
+
+    @app.route("/cluster/deauthorize", methods=["POST"])
+    @login_required
+    def cluster_deauthorize():
+        import modules.cluster as cluster
+        node_id = request.form.get("node_id", "").strip()
+        if node_id:
+            cluster.deauthorize_slave(node_id)
+            flash(f"Slave {node_id} gesperrt.", "success")
+        return redirect(url_for("cluster_dashboard"))
+
+    @app.route("/cluster/transfer-key", methods=["POST"])
+    @login_required
+    def cluster_transfer_key():
+        import modules.cluster as cluster
+        import modules.settings as st
+        node_id = request.form.get("node_id", "").strip()
+        if node_id and st.cluster_master_private_key_b64:
+            from modules.cluster_store import store_master_key_for_slave
+            ok = store_master_key_for_slave(node_id, st.cluster_master_private_key_b64)
+            cluster.authorize_slave(
+                node_id,
+                cluster.get_slave_registry().get(node_id, {}).get("name", node_id),
+                transfer_master_key=True,
+            )
+            flash(
+                f"Master-Key für {node_id} in CouchDB hinterlegt — "
+                f"wird bei nächster Replikation übertragen.",
+                "success" if ok else "error",
+            )
+        return redirect(url_for("cluster_dashboard"))
+
+    @app.route("/cluster/ping")
+    def cluster_ping():
+        """Heartbeat endpoint — slaves poll this. No login required (token-checked)."""
+        import modules.settings as st
+        token = request.headers.get("X-Cluster-Token", "")
+        if st.cluster_api_token and token != st.cluster_api_token:
+            return {"error": "unauthorized"}, 403
+
+        # Report MQTT status (from settings — the MQTT interface connection state)
+        mqtt_ok = True
+        try:
+            iface = __import__("modules.settings", fromlist=["interface1"]).interface1
+            mqtt_ok = iface is not None
+        except Exception:
+            mqtt_ok = False
+
+        return {
+            "status": "ok",
+            "role": st.cluster_role,
+            "node": st.cluster_node_name,
+            "mqtt_ok": mqtt_ok,
+            "ts": __import__("time").time(),
+        }
+
+    @app.route("/cluster/sync/push", methods=["POST"])
+    def cluster_sync_push():
+        """Master receives offline-delta push from a slave."""
+        import modules.settings as st
+        token = request.headers.get("X-Cluster-Token", "")
+        if st.cluster_api_token and token != st.cluster_api_token:
+            return {"error": "unauthorized"}, 403
+
+        entry = request.get_json(silent=True) or {}
+        db_name = entry.get("db", "")
+        operation = entry.get("operation", "upsert")
+        doc = entry.get("doc", {})
+
+        if not db_name or not doc:
+            return {"error": "invalid payload"}, 400
+
+        try:
+            from modules.cluster_store import _get_client
+            client = _get_client()
+            if operation == "delete":
+                doc_id = doc.get("_id", "")
+                ok = client.delete(db_name, doc_id) if doc_id else False
+            else:
+                doc_id = doc.get("_id") or client.post(db_name, doc)
+                ok = bool(doc_id)
+            return {"ok": ok}
+        except Exception as e:
+            logger.error(f"Cluster: sync push error: {e}")
+            return {"error": str(e)}, 500
+
+    # ── End cluster routes ────────────────────────────────────────────────────
+
     return app
 
 

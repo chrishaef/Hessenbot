@@ -16,6 +16,7 @@ from modules.log import logger, CustomFormatter, msgLogger, getPrettyTime
 import modules.settings as my_settings
 from modules.system import *
 import modules.nodedb as _ndb
+import modules.cluster as _cluster
 
 # list of commands to remove from the default list for DM only
 restrictedCommands = []
@@ -1133,6 +1134,28 @@ def onReceive(packet, interface):
         return
     decoded = packet.get('decoded') or {}
 
+    # ── Cluster: intercept DMs addressed to master node ──────────────────────
+    # Active only when this slave is in STANDALONE_ACTIVE mode and holds the
+    # master's private key.  The slave decrypts the message, processes it
+    # locally, and responds FROM ITS OWN identity (no impersonation).
+    if _cluster.should_intercept(packet):
+        plaintext = _cluster.decrypt_master_packet(packet)
+        if plaintext:
+            from_id = packet.get('from', 0)
+            logger.info(
+                f"Cluster: intercepted master-DM from {from_id:x} "
+                f"(standalone-active)"
+            )
+            response = auto_response(
+                plaintext, None, None, None, None,
+                from_id, 0, getattr(interface, 'nodeNum', 0), True
+            )
+            if response:
+                proxy_msg = _cluster.proxy_response(response, from_id)
+                send_message(proxy_msg, 0, from_id, interface)
+        return  # do not process further — packet was for master
+    # ─────────────────────────────────────────────────────────────────────────
+
     # Intercept NodeInfo packets to build our own unlimited persistent NodeDB,
     # independent of the hardware device's ~250-node flash limit.
     portnum = decoded.get('portnum', '')
@@ -1599,6 +1622,28 @@ async def main():
     
     try:
         handle_boot()
+
+        # ── Cluster init ──────────────────────────────────────────────────────
+        if my_settings.cluster_enabled:
+            def _cluster_send(msg: str, channel: int = 0) -> None:
+                send_message(msg, channel, 0, interface1)
+
+            _cluster.init(send_message_fn=_cluster_send)
+
+            if my_settings.cluster_role == "master":
+                from modules.cluster_store import init_databases
+                init_databases()
+            elif my_settings.cluster_role == "slave":
+                from modules.cluster_store import init_databases, start_sync_bridge
+                init_databases()
+                start_sync_bridge()
+
+            logger.info(
+                f"Cluster: initialized as {my_settings.cluster_role.upper()} "
+                f"— '{my_settings.cluster_node_name}'"
+            )
+        # ─────────────────────────────────────────────────────────────────────
+
         if my_settings.web_admin_enabled:
             from modules.admin_web import start_admin_web_background
             start_admin_web_background()

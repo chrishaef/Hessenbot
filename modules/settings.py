@@ -586,3 +586,50 @@ except Exception as e:
     print("System: Check the config.ini against config.template file for missing sections or values.")
     print("System: Exiting...")
     exit(1)
+
+# ---------------------------------------------------------------------------
+# Cluster configuration — all from environment variables.
+# config.ini is NOT used for cluster settings so the same image/binary
+# can be deployed in any role by changing only the .env file.
+# ---------------------------------------------------------------------------
+cluster_role = os.environ.get("HESSENBOT_ROLE", "standalone").lower()
+cluster_enabled = cluster_role in ("master", "slave")
+
+cluster_node_name     = os.environ.get("HESSENBOT_NODE_NAME", "Hessenbot")
+cluster_master_url    = os.environ.get("HESSENBOT_MASTER_URL", "")
+cluster_master_api_port  = int(os.environ.get("HESSENBOT_MASTER_API_PORT", "8421"))
+cluster_master_couch_port = int(os.environ.get("HESSENBOT_MASTER_COUCH_PORT", "5984"))
+cluster_master_user   = os.environ.get("HESSENBOT_MASTER_USER", "")
+cluster_master_pass   = os.environ.get("HESSENBOT_MASTER_PASS", "")
+cluster_api_token     = os.environ.get("HESSENBOT_API_TOKEN", "")
+
+_raw_master_node_id = os.environ.get("HESSENBOT_MASTER_NODE_ID", "0").strip()
+if _raw_master_node_id.startswith("!"):
+    cluster_master_node_id = int(_raw_master_node_id[1:], 16)
+elif _raw_master_node_id.startswith("0x"):
+    cluster_master_node_id = int(_raw_master_node_id, 16)
+else:
+    cluster_master_node_id = int(_raw_master_node_id) if _raw_master_node_id else 0
+
+cluster_master_private_key_b64 = os.environ.get("HESSENBOT_MASTER_PRIVATE_KEY", "")
+
+cluster_couch_url  = os.environ.get("COUCHDB_URL", "http://localhost:5984")
+cluster_couch_user = os.environ.get("COUCHDB_USER", "admin")
+cluster_couch_pass = os.environ.get("COUCHDB_PASS", "admin")
+
+cluster_heartbeat_interval = int(os.environ.get("HESSENBOT_HEARTBEAT_INTERVAL", "30"))
+cluster_failover_threshold = int(os.environ.get("HESSENBOT_FAILOVER_THRESHOLD", "3"))
+cluster_standalone_announce_channel = int(
+    os.environ.get("HESSENBOT_STANDALONE_ANNOUNCE_CHANNEL", "2")
+)
+cluster_key_announce_interval = int(os.environ.get("HESSENBOT_KEY_ANNOUNCE_INTERVAL", "3600"))
+cluster_service_check_ttl     = int(os.environ.get("HESSENBOT_SERVICE_CHECK_TTL", "60"))
+
+cluster_mqtt_broker_url    = os.environ.get("HESSENBOT_MQTT_BROKER_URL", "")
+cluster_mqtt_check_enabled = os.environ.get(
+    "HESSENBOT_MQTT_CHECK", "false"
+).lower() in ("1", "true", "yes")
+    print(f"System: Error reading config file: {e}")
+    print("System: Check the config.ini against config.template file for missing sections or values.")
+    print("System: Exiting...")
+    exit(1)

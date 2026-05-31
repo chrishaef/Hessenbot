@@ -1,0 +1,66 @@
+version: "3.9"
+
+# ============================================================
+# Hessenbot SLAVE Stack
+# Standort: z.B. FFM / KS / DA — beliebig erweiterbar
+# ============================================================
+# Starten:  docker compose -f docker-compose.slave.yml --env-file .env.slave up -d
+# Stoppen:  docker compose -f docker-compose.slave.yml down
+# Logs:     docker compose -f docker-compose.slave.yml logs -f hessenbot
+# ============================================================
+
+services:
+
+  # ── CouchDB (lokale Replica — synchronisiert mit Master) ─────────────────
+  couchdb:
+    image: couchdb:3.3
+    container_name: hessenbot-slave-couchdb
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: "${COUCHDB_USER}"
+      COUCHDB_PASSWORD: "${COUCHDB_PASS}"
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+      - ./etc/couchdb/local.ini:/opt/couchdb/etc/local.d/local.ini:ro
+    # CouchDB ist lokal; kein Port-Expose nach außen
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5984/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Hessenbot Slave ───────────────────────────────────────────────────────
+  hessenbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "hessenbot-slave-${HESSENBOT_NODE_NAME:-slave}"
+    restart: unless-stopped
+    depends_on:
+      couchdb:
+        condition: service_healthy
+    env_file: .env.slave
+    environment:
+      HESSENBOT_ROLE: "slave"
+      COUCHDB_URL: "http://couchdb:5984"
+    volumes:
+      - ./config.ini:/app/config.ini:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      # Web-Admin — lokale Verwaltung am Standort
+      - "${WEB_ADMIN_BIND:-127.0.0.1}:${WEB_ADMIN_PORT:-8420}:8420"
+    devices:
+      # Meshtastic Radio via USB serial
+      - "${MESHTASTIC_SERIAL_DEVICE:-/dev/ttyACM0}:/dev/ttyACM0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  couchdb_data:
+    driver: local

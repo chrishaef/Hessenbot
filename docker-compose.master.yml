@@ -1,0 +1,70 @@
+version: "3.9"
+
+# ============================================================
+# Hessenbot MASTER Stack
+# Bunker-RZ / feste IP
+# ============================================================
+# Starten:  docker compose -f docker-compose.master.yml --env-file .env.master up -d
+# Stoppen:  docker compose -f docker-compose.master.yml down
+# Logs:     docker compose -f docker-compose.master.yml logs -f hessenbot
+# ============================================================
+
+services:
+
+  # ── CouchDB (primäre Datenbank, Replikationsquelle für Slaves) ────────────
+  couchdb:
+    image: couchdb:3.3
+    container_name: hessenbot-master-couchdb
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: "${COUCHDB_USER}"
+      COUCHDB_PASSWORD: "${COUCHDB_PASS}"
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+      - ./etc/couchdb/local.ini:/opt/couchdb/etc/local.d/local.ini:ro
+    ports:
+      - "${COUCHDB_BIND:-127.0.0.1}:${HESSENBOT_MASTER_COUCH_PORT:-5984}:5984"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5984/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Hessenbot Master ──────────────────────────────────────────────────────
+  hessenbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hessenbot-master
+    restart: unless-stopped
+    depends_on:
+      couchdb:
+        condition: service_healthy
+    env_file: .env.master
+    environment:
+      HESSENBOT_ROLE: "master"
+      COUCHDB_URL: "http://couchdb:5984"
+      # Override COUCHDB_USER/PASS from .env.master if needed
+    volumes:
+      - ./config.ini:/app/config.ini:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      # Cluster REST API (slaves connect here)
+      - "0.0.0.0:${HESSENBOT_MASTER_API_PORT:-8421}:8421"
+      # Web-Admin (nur lokal oder hinter Reverse-Proxy)
+      - "${WEB_ADMIN_BIND:-127.0.0.1}:${WEB_ADMIN_PORT:-8420}:8420"
+    devices:
+      # Meshtastic Radio via USB serial — passe den Pfad an
+      - "${MESHTASTIC_SERIAL_DEVICE:-/dev/ttyACM0}:/dev/ttyACM0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  couchdb_data:
+    driver: local
