@@ -2,7 +2,7 @@
 
 **Hessenbot** ist ein Meshtastic-Autoresponder für [Meshhessen](https://meshhessen.de) — ein Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
 
-Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang), bietet BBS, Wetter, NINA/Katwarn-Warnungen, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden entfernt; der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
+Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden entfernt; der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
 
 ![Example Use](etc/pong-bot.jpg "Example Use")
 
@@ -42,25 +42,41 @@ cp config.template config.ini
 
 - Betrieb im regionalen Kanal **1**; `defaultChannel` (oft 0 = ShortSlow) wird typischerweise **nicht** bedient (`ignoreDefaultChannel = True` in `config.template`)
 - **NINA / Katwarn / DWD** über [warnung.bund.de](https://warnung.bund.de): `!warning`, `!dealert`, optional Broadcast
-- **Wetter** über **Open-Meteo** (`!wx`, `!wxc`, `!uv`, `!blitz`, …)
+- **Wetter** über **Open-Meteo**: `!wx`, `!wxc`, `!uv`, `!regen`, `!blitz`
+- **METAR** (`!metar`, optional ICAO): nächstgelegener Flughafen
 - **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
+- **Standort-Auflösung** (für Wetter, Warnungen, Blitz): zuerst frische NodeDB-Position (≤ 24 h), dann [Mesh-Karte](https://map.meshhessen.de), sonst Bot-Standort aus `config.ini`
 
 ### Ping & DM-Zustellung
 
 - **`!ping` / `!pong` / `!test` / `!ack` / `!cq`**: QSL-Antwort im Format  
   `LongName [!nodeid] QSL @ "Ort" | N Hops LoRa|MQTT`
+- **Channel-Test** (optional): Auf konfigurierten Kanälen antwortet der Bot auf ein nacktes **`test`** / **`Test`** (ohne `!`) **direkt im Kanal** — gleiche Antwort wie `!test`. Ein-/Aus-Schaltung und Kanalauswahl im Web-Admin (Tab **Channel-Test**). Alle anderen Befehle bleiben unverändert (DM und/oder `!`).
 - **`wantAckOnDm`**: Mesh-ACK auf DM-Antworten; Fehlzustellungen (inkl. PKI) werden geloggt und im Admin/Dashboard ausgewertet
 - Konfiguration: `[messagingSettings]` in `config.ini` (`wantAckOnDm`, `dmDeliveryFailAlertThreshold`)
+
+### Blitz (`!blitz`)
+
+- Live-Einschläge (DMI, optional Blitzortung.org) + kurze Modell-Vorhersage (Open-Meteo)
+- Ausgabe: Anzahl Einschläge, **Nächster**, **Weitester** und **Letzter** (zeitlich neuester) mit Distanz und Himmelsrichtung
+- Standort der anfragenden Station; in der Antwort wird angezeigt, ob der Standort bekannt ist oder der Bot-Standort genutzt wird
 
 ### Web-UI (Flask)
 
 | URL | Inhalt |
 |-----|--------|
-| `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard, DM-Zustellung 24h) |
+| `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard 24h, DM-Zustellung 24h) |
 | `/befehle` | Befehlsliste |
 | `/faq` | Hilfe & PKI-Check |
-| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, NodeDB, Einstellungen, … |
+| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Einstellungen, … |
 
+**Öffentliches Dashboard:** Metriken, Aktivitätscharts, Leaderboard (24-Stunden-Ansicht), BBS, NodeDB — ohne interne Log-Warnungen/Fehler-Kacheln.
+
+**Admin-Bereich** (Tabs): Übersicht, DM, News, Messages, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, BBS, Umfragen, Einstellungen, Banliste, Logs.
+
+- **MOTD** und **News**: Text bearbeiten plus automatischer Versand (Rhythmus, Kanal, Interface) — unabhängig vom allgemeinen Scheduler
+- **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …)
+- **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot)
 - Einheitliche **Top-Navigation** (Statistik, Befehle, BBS, NodeDB, FAQ) in öffentlichem und Admin-Bereich
 - Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template))
 
@@ -70,9 +86,10 @@ cp config.template config.ini
 - **BBS** (Posten, Lesen, DM, Link zwischen Bots)
 - **LLM** (Ollama / OpenWebUI, optional)
 - **Solar / HF** (`!solar`, `!hfcond`, `!sun`, `!moon`, `!howtall`)
-- Scheduler, File-Monitor, Sentry-Nähe, QRZ-Begrüßung, Inventar/Checklist (optional)
+- Scheduler, File-Monitor (`!readnews`), Sentry-Nähe, QRZ-Begrüßung, Inventar/Checklist (optional)
 - Multi-Interface (bis zu 9 Radios), Nachrichten-Chunking (160 Zeichen)
 - **Store & Forward**: `!messages` — letzte Nachrichten von Kanal 1 (`messagesChannel`, `messagesLimit` in `[general]`)
+- **Umfragen** (`!poll`, Web-Admin)
 
 ## Wichtige Mesh-Befehle (Auswahl)
 
@@ -80,16 +97,21 @@ cp config.template config.ini
 |--------|----------------|
 | `!cmd` | Kurze Befehlsliste (aktivierte Traps) |
 | `!ping` / `!pong` / `!test` | QSL mit Ort, Hops, LoRa/MQTT |
+| `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
 | `!ack` | Wie Ping, Keyword ACK |
-| `!warning` | NINA/Katwarn für **deinen** Standort (GPS der Node) |
+| `!warning` | NINA/Katwarn für **deinen** Standort |
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
 | `!wx` / `!wxc` | Wetter (Open-Meteo) |
+| `!uv` / `!regen` / `!blitz` | UV-Index, Regenradar, Blitz (Live + Vorhersage) |
+| `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |
 | `!whereami` | Ortsname (Geocoding) + Höhe falls übertragen |
 | `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |
 | `!howfar` / `!howfar reset` | Zurückgelegte Strecke seit letztem Aufruf |
 | `!howtall <Schatten>` | Höhe per Sonnenwinkel (Schattenlänge in m/ft) |
 | `!messages` | Letzte Nachrichten von Kanal 1 (ohne Bot-Befehle) |
+| `!readnews` | News aus `data/news.txt` (oder `{quelle}_news.txt`) |
 | `!bbslist`, `!bbspost`, … | Bulletin Board |
+| `!poll` | Umfragen |
 
 Voraussetzungen in `config.ini` (Auszug):
 
@@ -99,6 +121,7 @@ defaultChannel = 0
 ignoreDefaultChannel = True
 messagesChannel = 1
 messagesLimit = 5
+cmdBang = True
 
 [location]
 enabled = True
@@ -109,11 +132,25 @@ UseMeteoWxAPI = True
 wantAckOnDm = True
 dmDeliveryFailAlertThreshold = 3
 
+[channelTest]
+enabled = False
+channels =
+
+[motdBroadcast]
+enabled = False
+
+[newsBroadcast]
+enabled = False
+
+[fileMon]
+enable_read_news = True
+news_file_path = data/news.txt
+
 [webAdmin]
 enabled = True
 ```
 
-`cmdBang = True` — Befehle beginnen mit `!`.
+`cmdBang = True` — normale Befehle beginnen mit `!`. Ausnahme: **Channel-Test** (siehe oben).
 
 ## Was in diesem Fork **nicht** mehr enthalten ist
 
