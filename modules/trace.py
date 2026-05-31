@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -22,6 +23,7 @@ trap_list_trace = ("trace",)
 
 _UNK_SNR = -128
 _TRACE_HOP_LIMIT = 7
+_TRACE_INTERFACE_COOLDOWN_S = 65.0
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ _TRACE_QUEUE: queue.Queue[_TraceJob] = queue.Queue()
 _PENDING_REQUESTERS: set[int] = set()
 _TRACE_RUNNING = False
 _DISPATCHER_STARTED = False
+_INTERFACE_LAST_TRACE_START: Dict[int, float] = {}
 
 
 def _node_label(node_num, node_int: int) -> str:
@@ -150,6 +153,22 @@ def run_traceroute(dest_id: int, node_int: int, channel: int, hop_limit: int = _
     return format_traceroute_packet(captured.get("packet"), node_int, dest_id)
 
 
+def _wait_interface_cooldown(node_int: int) -> None:
+    """Block until this interface may trigger the next traceroute (65s minimum interval)."""
+    while True:
+        with _STATE_LOCK:
+            last = _INTERFACE_LAST_TRACE_START.get(node_int, 0.0)
+            remaining = _TRACE_INTERFACE_COOLDOWN_S - (time.monotonic() - last)
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, 1.0))
+
+
+def _mark_interface_trace_started(node_int: int) -> None:
+    with _STATE_LOCK:
+        _INTERFACE_LAST_TRACE_START[node_int] = time.monotonic()
+
+
 def _run_trace_job(job: _TraceJob) -> None:
     try:
         result = run_traceroute(job.dest_id, job.node_int, job.channel)
@@ -171,8 +190,10 @@ def _trace_dispatcher_loop() -> None:
     while True:
         job = _TRACE_QUEUE.get()
         try:
+            _wait_interface_cooldown(job.node_int)
             with _STATE_LOCK:
                 _TRACE_RUNNING = True
+            _mark_interface_trace_started(job.node_int)
             _run_trace_job(job)
         finally:
             with _STATE_LOCK:
@@ -220,7 +241,7 @@ def start_traceroute_to_requester(
     if busy:
         return (
             f"⏳ Trace zu {dest_label} in Warteschlange — "
-            "bitte ~60s nach Abschluss der laufenden Trace warten."
+            "bitte ~65s nach Abschluss der laufenden Trace warten."
         )
     return f"🔍 Trace zu {dest_label} gestartet — Bitte ~30s warten."
 
