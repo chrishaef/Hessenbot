@@ -269,6 +269,22 @@ def _poll_message_args(message: str) -> list[str]:
     return parts
 
 
+def _parse_poll_number(parts: list[str], index: int = 0) -> tuple[int | None, int]:
+    """Parse poll/option number; accepts ``Nr 1`` / ``Nr.1`` help-style input."""
+    from modules.system import parse_user_number
+
+    if index >= len(parts):
+        return None, index
+    combined = parse_user_number(parts[index])
+    if combined is not None:
+        return combined, index + 1
+    if parts[index].lower().startswith("nr") and index + 1 < len(parts):
+        combined = parse_user_number(" ".join(parts[index : index + 2]))
+        if combined is not None:
+            return combined, index + 2
+    return None, index
+
+
 def handle_poll_command(message: str, node_id: int, is_dm: bool = False) -> str:
     if not message:
         return polls_help_text()
@@ -286,17 +302,15 @@ def handle_poll_command(message: str, node_id: int, is_dm: bool = False) -> str:
     if sub in ("liste", "list", "all"):
         return format_poll_list(active_only=False)
 
-    try:
-        poll_id = int(parts[0])
-    except ValueError:
+    poll_id, next_i = _parse_poll_number(parts, 0)
+    if poll_id is None:
         return polls_help_text()
 
-    if len(parts) == 1:
+    if next_i >= len(parts):
         return format_poll_detail(poll_id, node_id=node_id)
 
-    try:
-        option = int(parts[1])
-    except ValueError:
+    option, _ = _parse_poll_number(parts, next_i)
+    if option is None:
         return f"Option als Zahl 1–N. Beispiel: poll {poll_id} 1"
 
     return cast_vote(poll_id, option, node_id)

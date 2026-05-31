@@ -548,14 +548,18 @@ def handle_bbspost(message, message_from_id, deviceID):
 
 def handle_bbsread(message):
     if "#" in message and not "example:" in message:
-        messageID = int(message.split("#")[1])
+        messageID = parse_user_number(message.split("#", 1)[1])
+        if messageID is None:
+            return "Bitte Nachrichtennummer: bbsread #14"
         return bbs_read_message(messageID)
     elif not "example:" in message:
         return "Bitte Nummer: bbsread #14"
 
 def handle_bbsdelete(message, message_from_id):
     if "#" in message and not "example:" in message:
-        messageID = int(message.split("#")[1])
+        messageID = parse_user_number(message.split("#", 1)[1])
+        if messageID is None:
+            return "Bitte Nachrichtennummer: bbsdelete #14"
         return bbs_delete_message(messageID, message_from_id)
     elif not "example:" in message:
         return "Bitte Nummer: bbsdelete #14"

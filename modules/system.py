@@ -686,6 +686,32 @@ def resolve_mesh_node_target(message, nodeInt=1, default_id=None):
     return 0, f"Knoten '{token}' nicht in der NodeDB."
 
 
+def parse_user_number(text: str) -> int | None:
+    """Parse a numeric ID from user text, tolerating help-style prefixes like ``Nr`` / ``Nr.``.
+
+    Examples: ``14``, ``Nr 1``, ``Nr. 1``, ``#14`` → ``14``. Returns ``None`` if not parseable.
+    """
+    s = (text or "").strip()
+    if not s:
+        return None
+    if s.startswith("#"):
+        s = s[1:].strip()
+    lower = s.lower()
+    if lower.startswith("nr."):
+        s = s[3:].strip()
+    elif lower.startswith("nr"):
+        rest = s[2:].lstrip(".: \t")
+        if rest:
+            s = rest
+        else:
+            return None
+    token = s.split()[0] if s.split() else s
+    try:
+        return int(token)
+    except ValueError:
+        return None
+
+
 def _ensure_mesh_map_positions_loaded() -> None:
     """If mesh map URL is enabled and we have no snapshot yet, fetch once (uses HTTP cache)."""
     if not globals().get("leaderboard_mesh_map_enabled"):
@@ -3609,13 +3635,16 @@ def exit_handler():
     # Close the interface and save all data
     logger.debug(f"System: Closing Autoresponder")
     try:
-        logger.debug(f"System: Closing Interface1")
-        interface1.close()
+        if interface1 is not None:
+            logger.debug(f"System: Closing Interface1")
+            interface1.close()
         if multiple_interface:
             for i in range(2, 10):
                 if globals().get(f'interface{i}_enabled'):
-                    logger.debug(f"System: Closing Interface{i}")
-                    globals()[f'interface{i}'].close()
+                    iface = globals().get(f'interface{i}')
+                    if iface is not None:
+                        logger.debug(f"System: Closing Interface{i}")
+                        iface.close()
     except Exception as e:
         logger.error(f"System: closing: {e}")
 
