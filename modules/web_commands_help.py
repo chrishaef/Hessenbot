@@ -87,12 +87,22 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}trace",
-                    "Traceroute zu dir — Ergebnis (Hops, SNR) per DM.",
+                    "Meshtastic-Traceroute zu dir. Kurze Bestätigung sofort, Route (Hops, SNR) per DM.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
                     f"{p}trace MHH",
-                    "Traceroute zu einer anderen Station (Kurzname, Dezimal-ID oder !hex).",
+                    "Traceroute zur Station mit Kurznamen (z. B. MHH). Ergebnis per DM.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}trace !604f8594",
+                    "Traceroute per Hex-Node-ID (! + 8 Hex-Zeichen). Ergebnis per DM.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}trace?",
+                    "Kurzhilfe zu trace.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(

@@ -182,6 +182,6 @@ def start_traceroute_to_requester(
 def trace_help_text() -> str:
     return (
         "🔍 !trace — Traceroute zu dir (Ergebnis per DM).\n"
-        "!trace <Kurzname> — z. B. !trace MHH\n"
-        "!trace !a1b2c3d4 — Ziel per Hex-ID"
+        "!trace MHH — Traceroute zu Kurzname MHH\n"
+        "!trace !604f8594 — Traceroute per Hex-Node-ID"
     )
