@@ -362,6 +362,8 @@ def _sync_bridge_loop() -> None:
         try:
             _sync_bbs()
             _sync_locations()
+            _sync_checklist()
+            _sync_inventory()
         except Exception as e:
             logger.error(f"ClusterStore: sync bridge error: {e}")
         time.sleep(_SYNC_INTERVAL)
@@ -471,6 +473,171 @@ def _sync_locations() -> None:
             logger.debug(f"ClusterStore: locations: pulled {inserted} remote entries")
     except Exception as e:
         logger.debug(f"ClusterStore: locations sync error: {e}")
+
+
+def _sync_sqlite_table(
+    db_path: str,
+    couch_db: str,
+    table: str,
+    pk_col: str,
+    columns: List[str],
+    insert_sql: str,
+) -> None:
+    """Generic SQLite ↔ CouchDB sync for simple tables."""
+    if not os.path.exists(db_path):
+        return
+    client = _get_client()
+    existing_couch = {
+        str(d.get(pk_col, "")): d
+        for d in client.all_docs(couch_db)
+        if d.get(pk_col) is not None
+    }
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM {table}")
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    local_pks = set()
+    for row in rows:
+        pk = str(row.get(pk_col, ""))
+        local_pks.add(pk)
+        if pk and pk not in existing_couch:
+            doc = dict(row)
+            doc["origin_node"] = _my_node_id()
+            client.post(couch_db, doc)
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    inserted = 0
+    for doc in client.all_docs(couch_db):
+        pk = str(doc.get(pk_col, ""))
+        if pk and pk not in local_pks:
+            try:
+                values = tuple(doc.get(col) for col in columns)
+                cur.execute(insert_sql, values)
+                inserted += 1
+            except Exception:
+                pass
+    conn.commit()
+    conn.close()
+    if inserted:
+        logger.debug(f"ClusterStore: {table}: pulled {inserted} remote entries")
+
+
+def _sync_checklist() -> None:
+    try:
+        import modules.settings as st
+        db_path = getattr(st, "checklist_db", "data/checklist.db")
+        _sync_sqlite_table(
+            db_path,
+            "hessenbot_checklist",
+            "checklist_items",
+            "id",
+            ["id", "checklist_name", "node_id", "checked_in", "timestamp", "comment"],
+            "INSERT OR IGNORE INTO checklist_items "
+            "(id, checklist_name, node_id, checked_in, timestamp, comment) "
+            "VALUES (?,?,?,?,?,?)",
+        )
+    except Exception as e:
+        logger.debug(f"ClusterStore: checklist sync error: {e}")
+
+
+def _sync_inventory() -> None:
+    try:
+        import modules.settings as st
+        db_path = getattr(st, "inventory_db", "data/inventory.db")
+        _sync_sqlite_table(
+            db_path,
+            "hessenbot_inventory",
+            "items",
+            "id",
+            ["id", "name", "quantity", "price", "owner", "description"],
+            "INSERT OR IGNORE INTO items "
+            "(id, name, quantity, price, owner, description) VALUES (?,?,?,?,?,?)",
+        )
+    except Exception as e:
+        logger.debug(f"ClusterStore: inventory sync error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# DB Adapter — chooses local vs CouchDB based on cluster role
+# ---------------------------------------------------------------------------
+# Usage in bot modules (opt-in):
+#   from modules.cluster_store import db_write, db_read_all
+#   db_write("bbs", {"id": "123", "text": "Hello"})
+#
+# In STANDALONE mode: writes go to local storage only (no-op in CouchDB).
+# In MASTER/SLAVE mode: writes go to local storage AND CouchDB immediately
+#   (no waiting for the 60s sync bridge cycle).
+# On reconnect: offline outbox is drained automatically (cluster.py).
+
+def _is_clustered() -> bool:
+    try:
+        import modules.settings as st
+        return getattr(st, "cluster_enabled", False)
+    except Exception:
+        return False
+
+
+def db_write(collection: str, doc: Dict, offline_buffer: bool = True) -> bool:
+    """
+    Write a document to CouchDB immediately (cluster mode only).
+    In standalone mode this is a no-op — existing code handles local storage.
+    If CouchDB is unreachable and offline_buffer=True, the write is queued
+    in the outbox for push on reconnect.
+    """
+    if not _is_clustered():
+        return False
+
+    couch_db = f"hessenbot_{collection}"
+    try:
+        client = _get_client()
+        doc_id = doc.get("_id") or doc.get("id")
+        if doc_id:
+            return client.put(couch_db, str(doc_id), doc)
+        else:
+            return bool(client.post(couch_db, doc))
+    except Exception as e:
+        logger.debug(f"ClusterStore: db_write failed ({collection}): {e}")
+        if offline_buffer:
+            try:
+                outbox_append(couch_db, "upsert", doc)
+            except Exception:
+                pass
+        return False
+
+
+def db_read_all(collection: str) -> List[Dict]:
+    """
+    Read all documents from CouchDB (cluster mode).
+    Falls back to empty list in standalone mode (caller uses local storage).
+    """
+    if not _is_clustered():
+        return []
+    try:
+        client = _get_client()
+        return client.all_docs(f"hessenbot_{collection}")
+    except Exception as e:
+        logger.debug(f"ClusterStore: db_read_all failed ({collection}): {e}")
+        return []
+
+
+def db_delete(collection: str, doc_id: str) -> bool:
+    """Delete a document from CouchDB (cluster mode only)."""
+    if not _is_clustered():
+        return False
+    try:
+        client = _get_client()
+        ok = client.delete(f"hessenbot_{collection}", doc_id)
+        if not ok:
+            outbox_append(f"hessenbot_{collection}", "delete", {"_id": doc_id})
+        return ok
+    except Exception as e:
+        logger.debug(f"ClusterStore: db_delete failed ({collection}/{doc_id}): {e}")
+        return False
 
 
 def _my_node_id() -> str:

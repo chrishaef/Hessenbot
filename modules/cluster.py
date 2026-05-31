@@ -628,12 +628,24 @@ def is_slave_authorized(node_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _push_offline_delta() -> None:
-    """Called when a slave reconnects. Pushes locally accumulated changes."""
+    """
+    Called when a slave reconnects.
+    1. Drains the outbox (writes that happened while offline) → master REST API.
+    2. Triggers an immediate CouchDB sync bridge cycle so local pkl/SQLite
+       changes made offline are flushed to CouchDB and replicated to master.
+    """
     try:
-        from modules.cluster_store import push_outbox
+        from modules.cluster_store import push_outbox, _sync_bbs, _sync_locations, _sync_checklist, _sync_inventory
         pushed = push_outbox()
         if pushed:
-            logger.info(f"Cluster: pushed {pushed} offline change(s) to master")
+            logger.info(f"Cluster: pushed {pushed} outbox entry/entries to master")
+        # Immediate bridge cycle — don't wait for the 60s timer
+        for fn in (_sync_bbs, _sync_locations, _sync_checklist, _sync_inventory):
+            try:
+                fn()
+            except Exception as e:
+                logger.debug(f"Cluster: resync bridge step failed: {e}")
+        logger.info("Cluster: resync complete after reconnect")
     except Exception as e:
         logger.warning(f"Cluster: offline delta push failed: {e}")
 

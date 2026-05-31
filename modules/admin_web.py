@@ -2034,7 +2034,10 @@ def create_app(
         <form action="/cluster/authorize" method="post">
           Node-ID: <input type="text" name="node_id" placeholder="!aabbccdd" size="12">
           &nbsp; Name: <input type="text" name="name" placeholder="Hessenbot FFM" size="20">
-          &nbsp; <button type="submit">Autorisieren</button>
+          &nbsp; CouchDB-URL: <input type="text" name="couch_url" placeholder="http://slave-ffm:5984" size="28">
+          &nbsp; User: <input type="text" name="couch_user" value="admin" size="8">
+          &nbsp; Pass: <input type="password" name="couch_pass" size="12">
+          &nbsp; <button type="submit">Autorisieren + Replikation starten</button>
         </form>
         """
 
@@ -2048,11 +2051,36 @@ def create_app(
     @login_required
     def cluster_authorize():
         import modules.cluster as cluster
+        import modules.settings as st
         node_id = request.form.get("node_id", "").strip()
         name = request.form.get("name", node_id)
+        slave_couch_url = request.form.get("couch_url", "").strip()
+        slave_couch_user = request.form.get("couch_user", "admin").strip()
+        slave_couch_pass = request.form.get("couch_pass", "").strip()
         if node_id:
             cluster.authorize_slave(node_id, name)
-            flash(f"Slave '{name}' ({node_id}) autorisiert.", "success")
+            # Start CouchDB replication immediately if slave CouchDB URL provided
+            if slave_couch_url:
+                try:
+                    from modules.cluster_store import setup_slave_replication
+                    setup_slave_replication(
+                        slave_couch_url, slave_couch_user, slave_couch_pass, node_id
+                    )
+                    flash(
+                        f"Slave '{name}' ({node_id}) autorisiert + Replikation gestartet.",
+                        "success",
+                    )
+                except Exception as e:
+                    flash(
+                        f"Slave '{name}' autorisiert, Replikation fehlgeschlagen: {e}",
+                        "error",
+                    )
+            else:
+                flash(
+                    f"Slave '{name}' ({node_id}) autorisiert. "
+                    f"Replikation: CouchDB-URL des Slaves im Formular angeben.",
+                    "success",
+                )
         return redirect(url_for("cluster_dashboard"))
 
     @app.route("/cluster/deauthorize", methods=["POST"])
