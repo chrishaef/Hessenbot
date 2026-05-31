@@ -1566,8 +1566,6 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
             f"{rt['interfaces_active']} Radio(s)",
             "text-success",
         ),
-        _metric_card("Warnungen", str(len(log["warnings"])), "Log"),
-        _metric_card("Fehler", str(len(log["errors"])), "Log"),
     ]
 
     recent_cmds_html = _command_list_items(log["command_timestamps"][-12:])
