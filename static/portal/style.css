@@ -1220,10 +1220,15 @@ pre.admin-pre {
 }
 
 .mesh-chat-dest-list {
+  display: none;
   font-size: 0.82rem;
   line-height: 1.35;
   max-height: 11rem;
   overflow-y: auto;
+}
+
+.mesh-chat-dest-list.is-open {
+  display: block;
 }
 
 .mesh-chat-dest-list option {

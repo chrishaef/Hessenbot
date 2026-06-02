@@ -643,7 +643,7 @@ def create_app(
             placeholder="Name, ShortName, !hex oder #Nummer …" autocomplete="off" spellcheck="false">
           <span class="input-group-text mesh-chat-dest-count" id="mesh-chat-dest-count" title="Treffer"></span>
         </div>
-        <select id="mesh-chat-dest" class="form-select form-select-sm mesh-chat-dest-list" size="6" required></select>
+        <select id="mesh-chat-dest" class="form-select form-select-sm mesh-chat-dest-list" size="6"></select>
       </div>
     </div>"""
 
@@ -724,7 +724,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=3"></script>
+<script src="/static/portal/mesh-chat.js?v=4"></script>
 """
         return _render_admin_template(
             inner,

@@ -21,6 +21,7 @@
   let msgCount = 0;
   let lastDateKey = "";
   let allNodes = [];
+  let selectedDest = "";
   const DEST_MATCH_LIMIT = 200;
 
   function setStatus(msg, isErr) {
@@ -237,11 +238,24 @@
     destCount.title = visible + " Treffer von " + total;
   }
 
+  function setDestListOpen(open) {
+    if (!destSelect) return;
+    destSelect.classList.toggle("is-open", !!open);
+  }
+
   function renderDestOptions() {
     if (!destSelect || cfg.kind !== "dm") return;
     const query = destSearch ? destSearch.value.trim().toLowerCase() : "";
-    const prev = destSelect.value;
+    const prev = selectedDest || destSelect.value;
     destSelect.innerHTML = "";
+
+    if (!query) {
+      setDestListOpen(false);
+      updateDestCount(0, allNodes.length, "");
+      return;
+    }
+
+    setDestListOpen(true);
 
     if (!allNodes.length) {
       const opt = document.createElement("option");
@@ -249,15 +263,6 @@
       opt.textContent = "Keine Knoten in NodeDB";
       destSelect.appendChild(opt);
       updateDestCount(0, 0, query);
-      return;
-    }
-
-    if (!query) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "↑ Suchen: z. B. MHH, !a1b2c3d4 oder 1234567890";
-      destSelect.appendChild(opt);
-      updateDestCount(0, allNodes.length, "");
       return;
     }
 
@@ -295,8 +300,10 @@
       return n.num === prev;
     })) {
       destSelect.value = prev;
+      selectedDest = prev;
     } else if (matched.length === 1) {
       destSelect.value = matched[0].num;
+      selectedDest = matched[0].num;
     }
 
     updateDestCount(matched.length, allNodes.length, query);
@@ -331,12 +338,13 @@
       body.set("channel", String(cfg.sendChannel != null ? cfg.sendChannel : 1));
       body.set("interface", ifaceSelect ? ifaceSelect.value : String(cfg.interface));
       if (cfg.kind === "dm") {
-        if (!destSelect || !destSelect.value) {
+        const dest = selectedDest || (destSelect && destSelect.value);
+        if (!dest) {
           setStatus("Bitte Empfänger wählen.", true);
           if (sendBtn) sendBtn.disabled = false;
           return;
         }
-        body.set("dest_node", destSelect.value);
+        body.set("dest_node", dest);
       }
       fetch(cfg.apiSend, {
         method: "POST",
@@ -372,6 +380,7 @@
   if (ifaceSelect) {
     ifaceSelect.addEventListener("change", function () {
       if (destSearch) destSearch.value = "";
+      selectedDest = "";
       loadNodes();
     });
   }
@@ -379,6 +388,12 @@
   if (destSearch) {
     destSearch.addEventListener("input", renderDestOptions);
     destSearch.addEventListener("search", renderDestOptions);
+  }
+
+  if (destSelect) {
+    destSelect.addEventListener("change", function () {
+      if (destSelect.value) selectedDest = destSelect.value;
+    });
   }
 
   if (input) {
