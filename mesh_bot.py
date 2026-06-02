@@ -1339,17 +1339,13 @@ def onReceive(packet, interface):
             if packet.get('emoji'):
                 emojiSeen = packet.get('emoji', False)
 
-            from modules.packet_dedup import apply_hop_enrichment
+            from modules.packet_dedup import wait_for_hop_enrichment
             from modules.system import is_tunneled_mesh_packet, interface_has_local_rf
             if (
                 getattr(my_settings, "packet_dedup_enabled", True)
                 and is_tunneled_mesh_packet(packet, transport_mechanism)
-                and packet.get("hopStart") is not None
-                and packet.get("hopLimit") is not None
-                and packet.get("hopStart") == packet.get("hopLimit")
             ):
-                time.sleep(0.1)
-            apply_hop_enrichment(packet)
+                wait_for_hop_enrichment(packet)
             decoded = packet.get('decoded') or {}
             via_mqtt = decoded.get('viaMqtt', False)
             transport_mechanism = (

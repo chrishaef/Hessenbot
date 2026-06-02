@@ -5,14 +5,17 @@ import hashlib
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from modules.log import logger
 
 _lock = threading.Lock()
 _seen: OrderedDict[str, float] = OrderedDict()
 _enrichment: Dict[str, Dict[str, Any]] = {}
-_stats = {"dropped": 0, "accepted": 0}
+_stats = {"dropped": 0, "accepted": 0, "hop_enriched_wait": 0}
+
+# Score threshold: below this, hopStart/hopLimit/hopsAway are likely empty (MQTT-first copy).
+_RICH_HOP_SCORE = 100
 
 
 def _decoded(packet: Dict[str, Any]) -> Dict[str, Any]:
@@ -44,13 +47,8 @@ def _extract_hop_fields(packet: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _hop_metadata_score(packet: Dict[str, Any] | Dict[str, Any]) -> int:
+def _hop_metadata_score(fields: Dict[str, Any]) -> int:
     """Higher = richer routing metadata (prefer UDP/LoRa copy over bare MQTT)."""
-    if isinstance(packet, dict) and "hopStart" in packet and "hopLimit" in packet and "hopsAway" in packet:
-        fields = packet
-    else:
-        fields = _extract_hop_fields(packet)  # type: ignore[arg-type]
-
     score = 0
     hs = fields.get("hopStart")
     hl = fields.get("hopLimit")
@@ -73,23 +71,16 @@ def _hop_metadata_score(packet: Dict[str, Any] | Dict[str, Any]) -> int:
     return score
 
 
-def apply_hop_enrichment(packet: Dict[str, Any]) -> None:
-    """
-    Merge hop/rx metadata from a duplicate transport (e.g. UDP after MQTT).
-    Call before reading hop fields in onReceive.
-    """
-    try:
-        key = packet_dedup_key(packet)
-    except Exception:
-        return
+def _hop_wait_seconds() -> float:
+    import modules.settings as st
 
-    with _lock:
-        extra = _enrichment.pop(key, None)
-    if not extra:
-        return
-    if _hop_metadata_score(extra) <= _hop_metadata_score(packet):
-        return
+    ms = int(getattr(st, "packet_dedup_hop_wait_ms", 200))
+    return max(0.0, min(1000.0, ms)) / 1000.0
 
+
+def _merge_hop_fields(packet: Dict[str, Any], extra: Dict[str, Any]) -> bool:
+    if _hop_metadata_score(extra) <= _hop_metadata_score(_extract_hop_fields(packet)):
+        return False
     for field, pkey in (
         ("hopsAway", "hopsAway"),
         ("hopStart", "hopStart"),
@@ -107,6 +98,69 @@ def apply_hop_enrichment(packet: Dict[str, Any]) -> None:
         decoded = packet.setdefault("decoded", {})
         if isinstance(decoded, dict):
             decoded["viaMqtt"] = extra["viaMqtt"]
+    return True
+
+
+def apply_hop_enrichment(packet: Dict[str, Any]) -> bool:
+    """
+    Merge hop/rx metadata from a duplicate transport (e.g. UDP after MQTT).
+    Call before reading hop fields in onReceive.
+    """
+    try:
+        key = packet_dedup_key(packet)
+    except Exception:
+        return False
+
+    with _lock:
+        extra = _enrichment.pop(key, None)
+    if not extra:
+        return False
+    return _merge_hop_fields(packet, extra)
+
+
+def wait_for_hop_enrichment(packet: Dict[str, Any]) -> bool:
+    """
+    Wait briefly for a duplicate copy with richer hop metadata (UDP after MQTT).
+    Returns True if hop fields were merged from a duplicate.
+    """
+    enabled, _, _ = _settings()
+    if not enabled:
+        return False
+
+    wait_s = _hop_wait_seconds()
+    try:
+        key = packet_dedup_key(packet)
+    except Exception:
+        return apply_hop_enrichment(packet)
+
+    initial = _hop_metadata_score(_extract_hop_fields(packet))
+    if initial >= _RICH_HOP_SCORE:
+        return apply_hop_enrichment(packet)
+
+    if wait_s <= 0:
+        return apply_hop_enrichment(packet)
+
+    deadline = time.monotonic() + wait_s
+    merged = False
+    while time.monotonic() < deadline:
+        with _lock:
+            extra = _enrichment.get(key)
+            if extra and _hop_metadata_score(extra) > initial:
+                merged = _merge_hop_fields(packet, _enrichment.pop(key))
+                break
+        time.sleep(0.02)
+
+    if not merged:
+        merged = apply_hop_enrichment(packet)
+
+    if merged:
+        with _lock:
+            _stats["hop_enriched_wait"] += 1
+        logger.debug(
+            f"System: Hop metadata enriched after wait "
+            f"(score {initial} -> {_hop_metadata_score(_extract_hop_fields(packet))})"
+        )
+    return merged
 
 
 def _payload_bytes(decoded: Dict[str, Any]) -> bytes:

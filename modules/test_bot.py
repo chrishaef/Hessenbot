@@ -62,8 +62,10 @@ class TestBot(unittest.TestCase):
         from modules import packet_dedup
 
         packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
         packet_dedup._stats["dropped"] = 0
         packet_dedup._stats["accepted"] = 0
+        packet_dedup._stats["hop_enriched_wait"] = 0
         pkt = {
             "from": 1234567890,
             "id": 42,
@@ -75,6 +77,79 @@ class TestBot(unittest.TestCase):
         pkt2 = dict(pkt)
         pkt2["id"] = 43
         self.assertFalse(packet_dedup.should_drop_duplicate_packet(pkt2))
+
+    def test_wait_for_hop_enrichment_merges_late_udp(self):
+        import threading
+        import time
+
+        import modules.settings as st
+        from modules import packet_dedup
+
+        st.packet_dedup_hop_wait_ms = 200
+        packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
+        packet_dedup._stats["dropped"] = 0
+        packet_dedup._stats["accepted"] = 0
+        packet_dedup._stats["hop_enriched_wait"] = 0
+
+        mqtt_pkt = {
+            "from": 1,
+            "id": 99,
+            "to": 2,
+            "hopStart": 3,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!ping", "viaMqtt": True},
+            "transport_mechanism": "mqtt",
+        }
+        udp_pkt = {
+            "from": 1,
+            "id": 99,
+            "to": 2,
+            "hopStart": 5,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "rxSnr": 12.0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!ping", "viaMqtt": False},
+            "transport_mechanism": "udp",
+        }
+        self.assertFalse(packet_dedup.should_drop_duplicate_packet(mqtt_pkt))
+
+        def late_udp():
+            time.sleep(0.05)
+            packet_dedup.should_drop_duplicate_packet(udp_pkt)
+
+        t = threading.Thread(target=late_udp)
+        t.start()
+        merged = packet_dedup.wait_for_hop_enrichment(mqtt_pkt)
+        t.join()
+
+        self.assertTrue(merged)
+        self.assertEqual(mqtt_pkt["hopStart"], 5)
+        self.assertEqual(mqtt_pkt["rxSnr"], 12.0)
+
+    def test_wait_skipped_when_hop_metadata_rich(self):
+        import time
+
+        import modules.settings as st
+        from modules import packet_dedup
+
+        st.packet_dedup_hop_wait_ms = 200
+        packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
+
+        pkt = {
+            "from": 2,
+            "id": 100,
+            "to": 3,
+            "hopStart": 5,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!ping"},
+        }
+        t0 = time.time()
+        self.assertFalse(packet_dedup.wait_for_hop_enrichment(pkt))
+        self.assertLess(time.time() - t0, 0.05)
 
     def test_faq_pki_log_scan(self):
         import os

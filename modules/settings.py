@@ -259,6 +259,7 @@ try:
     packet_dedup_enabled = config['general'].getboolean('packetDedupEnabled', True)
     packet_dedup_ttl_seconds = config['general'].getint('packetDedupTtlSeconds', 300)
     packet_dedup_max_entries = config['general'].getint('packetDedupMaxEntries', 8192)
+    packet_dedup_hop_wait_ms = config['general'].getint('packetDedupHopWaitMs', 200)
     useDMForResponse = config['general'].getboolean('respond_by_dm_only', True)
     publicChannel = config['general'].getint('defaultChannel', 0) # the meshtastic public channel
     ignoreChannels = config['general'].get('ignoreChannels', '').split(',') # ignore these channels

@@ -30,6 +30,8 @@ packetDedupEnabled = True
 packetDedupTtlSeconds = 300
 # Max entries in the dedup cache (oldest expire first)
 packetDedupMaxEntries = 8192
+# Wait for richer duplicate (e.g. UDP after MQTT) before hop count / !ping reply (milliseconds)
+packetDedupHopWaitMs = 200
 # if False will respond on all channels but the default channel
 respond_by_dm_only = True
 # Allows auto-ping feature in a channel, False forces to 1 ping only
