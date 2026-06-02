@@ -22,7 +22,10 @@
   let lastDateKey = "";
   let allNodes = [];
   let selectedDest = "";
+  let lastFullPollAt = 0;
+  let lastPollDayKey = "";
   const DEST_MATCH_LIMIT = 200;
+  const FULL_REFRESH_MS = 5 * 60 * 1000;
 
   function setStatus(msg, isErr) {
     if (!statusEl) return;
@@ -154,12 +157,27 @@
     }
   }
 
+  function todayKey() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + day;
+  }
+
+  function needsFullRefresh() {
+    const day = todayKey();
+    if (day !== lastPollDayKey) return true;
+    return Date.now() - lastFullPollAt > FULL_REFRESH_MS;
+  }
+
   function appendMessages(messages, replace) {
     if (!feed) return;
     if (replace) {
       feed.innerHTML = "";
       known.clear();
       lastDateKey = "";
+      lastIso = "";
     }
     if (!messages || !messages.length) {
       if (replace) updateCount(0);
@@ -190,6 +208,11 @@
     } else if (replace) {
       updateCount(0);
     }
+
+    if (replace) {
+      lastFullPollAt = Date.now();
+      lastPollDayKey = todayKey();
+    }
   }
 
   function buildQuery(initial) {
@@ -202,6 +225,9 @@
   }
 
   function poll(initial) {
+    if (!initial && needsFullRefresh()) {
+      initial = true;
+    }
     const url = cfg.apiMessages + "?" + buildQuery(!!initial);
     fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) {

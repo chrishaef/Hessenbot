@@ -82,6 +82,31 @@ class TestBot(unittest.TestCase):
         self.assertIn("!ping", hint)
         self.assertIn("!cmd", hint)
 
+    def test_collect_messages_reads_rotated_meshbot_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        line_y = (
+            "2026-05-30 23:56:03,123 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "ReceivedChannel: gestern abends From: Chris\n"
+        )
+        line_t = (
+            "2026-05-31 12:42:00,456 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "Ignoring Message: heute mittag From: Pete\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log.2026-05-30"), "w", encoding="utf-8") as f:
+                f.write(line_y)
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(line_t)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=80)
+        self.assertIsNone(err)
+        texts = [m.get("text", "") for m in msgs]
+        self.assertIn("gestern abends", texts)
+        self.assertIn("heute mittag", texts)
+        self.assertEqual(msgs[-1].get("text"), "heute mittag")
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 

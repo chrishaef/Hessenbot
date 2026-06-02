@@ -8,13 +8,13 @@ import html
 import os
 import re
 import threading
+import glob
 from collections import deque
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.web_dashboard import (
     _NodeDirectory,
-    _parse_messages_log_tail,
     _strip_ansi,
     _tail_lines,
 )
@@ -164,6 +164,67 @@ def _merge_events(
     return [by_key[k] for k in order]
 
 
+def _resolve_rotated_log_paths(
+    log_dir: str, basename: str, *, max_backups: int = 1
+) -> List[str]:
+    """Current log plus the most recent rotated backup (midnight rotation)."""
+    base = os.path.realpath(log_dir)
+    paths: List[str] = []
+    primary = os.path.join(base, basename)
+    if os.path.isfile(primary):
+        paths.append(primary)
+    backups = sorted(
+        (p for p in glob.glob(os.path.join(base, f"{basename}.*")) if os.path.isfile(p)),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    for path in backups[:max_backups]:
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _tail_merged_log_paths(paths: List[str], max_lines: int) -> List[str]:
+    """Tail lines from rotated logs in chronological order (oldest file first)."""
+    if not paths:
+        return []
+    if len(paths) == 1:
+        return _tail_lines(paths[0], max_lines)
+    per_file = max(max_lines // len(paths), 400)
+    merged: List[str] = []
+    for path in reversed(paths):
+        merged.extend(_tail_lines(path, per_file))
+    if len(merged) > max_lines:
+        merged = merged[-max_lines:]
+    return merged
+
+
+def _parse_meshbot_tail(log_dir: str, nodes: _NodeDirectory, *, max_lines: int = 2500) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    paths = _resolve_rotated_log_paths(log_dir, "meshbot.log")
+    for line in _tail_merged_log_paths(paths, max_lines):
+        plain = _strip_ansi(line)
+        ts = _parse_ts(line)
+        if not ts:
+            continue
+        ev = _parse_meshbot_line(plain, ts, nodes)
+        if ev:
+            events.append(ev)
+    return events
+
+
+def _parse_messages_logs_tail(
+    log_dir: str, nodes: _NodeDirectory, *, max_lines: int = 1000
+) -> List[Dict[str, Any]]:
+    from modules.web_dashboard import _parse_messages_log_lines
+
+    paths = _resolve_rotated_log_paths(log_dir, "messages.log")
+    if not paths:
+        return []
+    lines = _tail_merged_log_paths(paths, max_lines)
+    return _parse_messages_log_lines(lines, nodes)
+
+
 def collect_messages(
     log_dir: str,
     *,
@@ -177,24 +238,10 @@ def collect_messages(
     kind: 'channel' | 'dm' | None (all)
     """
     meshbot_path = os.path.join(os.path.realpath(log_dir), "meshbot.log")
-    msg_log_path = os.path.join(os.path.realpath(log_dir), "messages.log")
 
     nodes = _NodeDirectory()
-    meshbot_events: List[Dict[str, Any]] = []
-
-    if os.path.isfile(meshbot_path):
-        for line in _tail_lines(meshbot_path, 2000):
-            plain = _strip_ansi(line)
-            ts = _parse_ts(line)
-            if not ts:
-                continue
-            ev = _parse_meshbot_line(plain, ts, nodes)
-            if ev:
-                meshbot_events.append(ev)
-
-    msg_log_events: List[Dict[str, Any]] = []
-    if os.path.isfile(msg_log_path):
-        msg_log_events = _parse_messages_log_tail(msg_log_path, nodes, max_lines=800)
+    meshbot_events = _parse_meshbot_tail(log_dir, nodes)
+    msg_log_events = _parse_messages_logs_tail(log_dir, nodes)
 
     merged = _merge_events(meshbot_events, msg_log_events)
 

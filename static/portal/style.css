@@ -1185,12 +1185,30 @@ pre.admin-pre {
   align-items: end;
 }
 
-.mesh-chat-shell:has(.mesh-chat-field--dest) .mesh-chat-compose-bar {
-  grid-template-columns: minmax(5.5rem, 7rem) 1fr auto;
+.mesh-chat-shell--dm .mesh-chat-compose-bar {
+  grid-template-columns: minmax(5.5rem, 7rem) minmax(14rem, 22rem) 1fr auto;
+  grid-template-areas:
+    "iface dest . ."
+    "message message message send";
+}
+
+.mesh-chat-shell--dm .mesh-chat-field--iface {
+  grid-area: iface;
 }
 
 .mesh-chat-shell--dm .mesh-chat-field--dest {
-  grid-column: 1 / -1;
+  grid-area: dest;
+  max-width: 22rem;
+  justify-self: start;
+}
+
+.mesh-chat-shell--dm .mesh-chat-field--grow {
+  grid-area: message;
+}
+
+.mesh-chat-shell--dm .mesh-chat-field--send {
+  grid-area: send;
+  justify-self: end;
 }
 
 .mesh-chat-dest-picker {
@@ -1273,6 +1291,8 @@ pre.admin-pre {
   justify-content: center;
   gap: 0.35rem;
   min-height: 2.75rem;
+  width: auto;
+  min-width: 2.75rem;
   padding-inline: 1rem;
   white-space: nowrap;
 }
@@ -1483,8 +1503,22 @@ pre.admin-pre {
 
 @media (max-width: 768px) {
   .mesh-chat-compose-bar,
-  .mesh-chat-shell:has(.mesh-chat-field--dest) .mesh-chat-compose-bar {
+  .mesh-chat-shell--dm .mesh-chat-compose-bar {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "dest"
+      "iface"
+      "message"
+      "send";
+  }
+
+  .mesh-chat-shell--dm .mesh-chat-field--dest {
+    max-width: none;
+    justify-self: stretch;
+  }
+
+  .mesh-chat-shell--dm .mesh-chat-field--send {
+    justify-self: stretch;
   }
 
   .mesh-chat-send-btn {

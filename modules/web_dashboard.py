@@ -288,14 +288,10 @@ def _tail_lines(log_path: str, max_lines: int, *, encoding: str = "utf-8") -> Li
     return lines[-max_lines:]
 
 
-def _parse_messages_log_tail(
-    log_path: str, nodes: _NodeDirectory, *, max_lines: int = 800
+def _parse_messages_log_lines(
+    lines: List[str], nodes: _NodeDirectory
 ) -> List[Dict[str, Any]]:
-    """Supplement recent messages from logs/messages.log (pipe format)."""
-    if not os.path.isfile(log_path):
-        return []
-    lines = _tail_lines(log_path, max_lines)
-
+    """Parse messages.log lines (pipe format)."""
     events: List[Dict[str, Any]] = []
     for line in lines:
         m = re.match(
@@ -337,6 +333,16 @@ def _parse_messages_log_tail(
             }
         )
     return events
+
+
+def _parse_messages_log_tail(
+    log_path: str, nodes: _NodeDirectory, *, max_lines: int = 800
+) -> List[Dict[str, Any]]:
+    """Supplement recent messages from logs/messages.log (pipe format)."""
+    if not os.path.isfile(log_path):
+        return []
+    lines = _tail_lines(log_path, max_lines)
+    return _parse_messages_log_lines(lines, nodes)
 
 
 def _empty_log_stats() -> Dict[str, Any]:
