@@ -27,8 +27,9 @@
 
   function updateCount(n) {
     msgCount = n;
-    if (!countEl) return;
-    countEl.textContent = n === 1 ? "1 Nachricht" : n + " Nachrichten";
+    if (countEl) {
+      countEl.textContent = n === 1 ? "1 Nachricht" : n + " Nachrichten";
+    }
     if (emptyEl) emptyEl.hidden = n > 0;
     if (feed) feed.hidden = n === 0;
   }
@@ -76,8 +77,8 @@
     const text = (m.text || "").trim();
     const time = m.time_short || "";
 
-    let badge = out ? "Gesendet" : "Empfangen";
-    let badgeClass = out ? "mesh-msg-badge--out" : "mesh-msg-badge--in";
+    const badge = out ? "Gesendet" : "Empfangen";
+    const badgeClass = out ? "mesh-msg-badge--out" : "mesh-msg-badge--in";
     let who = "";
     if (out) {
       who = kind === "dm" ? peer.long || peer.short || "DM" : "Web-Admin";
@@ -98,27 +99,44 @@
     article.className = "mesh-msg " + (out ? "mesh-msg--out" : "mesh-msg--in");
     article.dataset.mid = m.mid || "";
 
-    article.innerHTML =
-      '<div class="mesh-msg-head">' +
-      '<span class="mesh-msg-badge ' +
-      badgeClass +
-      '">' +
-      escapeHtml(badge) +
-      "</span>" +
-      '<span class="mesh-msg-who">' +
-      escapeHtml(who) +
-      "</span>" +
-      (peer.long && !out && peer.short
-        ? '<span class="mesh-msg-who-sub">' + escapeHtml(peer.long) + "</span>"
-        : "") +
-      '<time class="mesh-msg-time">' +
-      escapeHtml(time) +
-      "</time>" +
-      "</div>" +
-      '<div class="mesh-msg-body">' +
-      escapeHtml(text || "—") +
-      "</div>" +
-      (tag ? '<div class="mesh-msg-tag">' + escapeHtml(tag) + "</div>" : "");
+    const head = document.createElement("div");
+    head.className = "mesh-msg-head";
+
+    const badgeEl = document.createElement("span");
+    badgeEl.className = "mesh-msg-badge " + badgeClass;
+    badgeEl.textContent = badge;
+
+    const whoEl = document.createElement("span");
+    whoEl.className = "mesh-msg-who";
+    whoEl.textContent = who;
+
+    const timeEl = document.createElement("time");
+    timeEl.className = "mesh-msg-time";
+    timeEl.textContent = time;
+
+    head.appendChild(badgeEl);
+    head.appendChild(whoEl);
+    if (peer.long && !out && peer.short && peer.long !== peer.short) {
+      const subEl = document.createElement("span");
+      subEl.className = "mesh-msg-who-sub";
+      subEl.textContent = peer.long;
+      head.appendChild(subEl);
+    }
+    head.appendChild(timeEl);
+
+    const body = document.createElement("div");
+    body.className = "mesh-msg-body";
+    body.textContent = text || "—";
+
+    article.appendChild(head);
+    article.appendChild(body);
+
+    if (tag) {
+      const tagEl = document.createElement("div");
+      tagEl.className = "mesh-msg-tag";
+      tagEl.textContent = tag;
+      article.appendChild(tagEl);
+    }
 
     return article;
   }
@@ -137,7 +155,6 @@
       feed.innerHTML = "";
       known.clear();
       lastDateKey = "";
-      updateCount(0);
     }
     if (!messages || !messages.length) {
       if (replace) updateCount(0);
@@ -145,9 +162,11 @@
     }
 
     let added = 0;
-    messages.forEach(function (m) {
-      if (!m.mid || known.has(m.mid)) return;
-      known.add(m.mid);
+    messages.forEach(function (m, idx) {
+      const mid = m.mid || "idx-" + idx + "-" + (m.time || "") + "-" + (m.text || "").slice(0, 40);
+      if (known.has(mid)) return;
+      known.add(mid);
+      m.mid = mid;
 
       const dk = dateKey(m.time);
       if (dk && dk !== lastDateKey) {

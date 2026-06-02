@@ -1280,14 +1280,16 @@ pre.admin-pre {
 .mesh-chat-feed {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.5rem;
   max-height: min(58vh, 520px);
+  min-height: 12rem;
   overflow-y: auto;
-  padding: 0.5rem;
+  padding: 0.65rem;
   background: var(--card-bg-muted);
   border: 1px solid var(--card-border);
   border-radius: 10px;
   -webkit-overflow-scrolling: touch;
+  color: var(--text-primary);
 }
 
 .mesh-chat-feed[hidden] {
@@ -1339,31 +1341,25 @@ pre.admin-pre {
 }
 
 .mesh-msg {
-  display: grid;
-  grid-template-columns: 3px 1fr;
-  gap: 0;
+  display: block;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  overflow: hidden;
+  border-left: 3px solid var(--green-dark, #198754);
+  padding: 0.55rem 0.75rem;
+  color: var(--text-primary);
 }
 
-.mesh-msg::before {
-  content: "";
-  background: var(--bs-success, #198754);
-}
-
-.mesh-msg--out::before {
-  background: #4d9fff;
+.mesh-msg--out {
+  border-left-color: #4d9fff;
 }
 
 .mesh-msg-head {
-  grid-column: 2;
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 0.6rem;
-  padding: 0.45rem 0.65rem 0.15rem;
+  align-items: center;
+  gap: 0.4rem 0.65rem;
+  margin-bottom: 0.35rem;
 }
 
 .mesh-msg-badge {
@@ -1372,63 +1368,71 @@ pre.admin-pre {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 0.12rem 0.45rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  line-height: 1.3;
+  line-height: 1.35;
+  flex-shrink: 0;
 }
 
 .mesh-msg-badge--in {
-  background: rgba(25, 135, 84, 0.18);
-  color: #75d99a;
+  background: rgba(25, 135, 84, 0.22);
+  color: #8ee4b4;
 }
 
 .mesh-msg-badge--out {
-  background: rgba(77, 159, 255, 0.18);
-  color: #8ec5ff;
+  background: rgba(77, 159, 255, 0.22);
+  color: #a8d4ff;
 }
 
 .mesh-msg-who {
   font-weight: 600;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   color: var(--text-primary);
 }
 
 .mesh-msg-who-sub {
   flex: 1 1 100%;
-  font-size: 0.75rem;
-  color: var(--text-muted, #6c757d);
-  margin-top: -0.15rem;
-  padding-left: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #adb5bd);
+  line-height: 1.3;
 }
 
 .mesh-msg-time {
   margin-left: auto;
-  font-size: 0.72rem;
-  color: var(--text-muted, #6c757d);
+  font-size: 0.75rem;
+  color: var(--text-secondary, #adb5bd);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .mesh-msg-body {
-  grid-column: 2;
-  padding: 0.15rem 0.65rem 0.5rem;
-  font-size: 0.92rem;
-  line-height: 1.45;
+  font-size: 0.93rem;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-primary);
 }
 
 .mesh-msg-tag {
-  grid-column: 2;
-  padding: 0 0.65rem 0.45rem;
-  font-size: 0.68rem;
-  color: var(--text-muted, #6c757d);
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary, #adb5bd);
 }
 
 .mesh-msg-tag::before {
   content: "# ";
-  opacity: 0.6;
+  opacity: 0.65;
+}
+
+[data-bs-theme="dark"] .mesh-msg {
+  background: #2b3035;
+  border-color: #3d4449;
+  color: #f0f2f4;
+}
+
+[data-bs-theme="dark"] .mesh-msg-body,
+[data-bs-theme="dark"] .mesh-msg-who {
+  color: #f0f2f4;
 }
 
 @media (max-width: 768px) {

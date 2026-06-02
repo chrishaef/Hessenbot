@@ -133,15 +133,19 @@ def _merge_events(
     order: List[str] = []
 
     def add(ev: Dict[str, Any]) -> None:
-        key = _message_key(ev)
-        if key in by_key:
+        base_key = _message_key(ev)
+        key = base_key
+        suffix = 0
+        while key in by_key:
             existing = by_key[key]
             if not existing.get("text") and ev.get("text"):
                 existing["text"] = ev["text"]
-            for field in ("short", "long", "hex", "id", "channel_label"):
-                if not existing.get(field) and ev.get(field):
-                    existing[field] = ev[field]
-            return
+                for field in ("short", "long", "hex", "id", "channel_label"):
+                    if not existing.get(field) and ev.get(field):
+                        existing[field] = ev[field]
+                return
+            suffix += 1
+            key = f"{base_key}:{suffix}"
         ev = dict(ev)
         ev["mid"] = key
         by_key[key] = ev
