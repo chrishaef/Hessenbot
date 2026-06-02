@@ -53,27 +53,21 @@ Bot neu starten. Im Log erscheint u. a.:
 
 Kurzer Einstieg: CPU/RAM/Platte des Hosts, zusammengefasste **WARN/ERROR**-Zeilen aus den Logs, Link zur öffentlichen Statistik.
 
-### DM & News
+### Mesh-DM (`/dm`)
 
-| Tab | Pfad | Funktion |
-|-----|------|----------|
-| **DM** | `/dm` | Textdatei für die Bot-Direktnachricht / Alert-Text (`[fileMon]` → `file_path`, z. B. `alert.txt`) |
-| **News** | `/news` | News-Datei für File-Monitor / `readnews` (`news_file_path`) |
+Live-Ansicht der **Direktnachrichten** (ein-/ausgehend), Auto-Refresh ca. 3 s. Nachrichten an Knoten aus der NodeDB senden.
 
-Beide Seiten: Textarea, **Speichern** schreibt direkt auf die Datei (der laufende Bot nutzt sie je nach Modul).
+Alert-Text für den File-Monitor: Link **Alert-Text bearbeiten** auf der Seite (`/alert-text`).
 
-### Messages (`/live/messages`)
+### Kanal (`/live/messages`)
 
-Live-Ansicht von **`messages.log`** (letzte Zeilen, Auto-Refresh ca. 5 s).
+Live-Feed für **Kanal 1** (#1MeshHessen, `messagesChannel` in config.ini) — empfangene und gesendete Nachrichten, Senden direkt aus dem Admin.
 
-Voraussetzung in `config.ini`:
+Basis: `meshbot.log` (`SyslogToFile = True`). Optional `LogMessagesToFile = True` für vollständigere Texte in `messages.log`.
 
-```ini
-[general]
-LogMessagesToFile = True
-```
+### News (`/news`)
 
-Ohne diese Option zeigt die Seite einen Hinweis zur Aktivierung.
+News-Datei für File-Monitor / `readnews` (`news_file_path`). Textarea, **Speichern** schreibt direkt auf die Datei.
 
 ### NodeDB (`/nodes`)
 

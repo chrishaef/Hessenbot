@@ -20,6 +20,7 @@ from flask import (
     Flask,
     flash,
     get_flashed_messages,
+    jsonify,
     redirect,
     render_template_string,
     request,
@@ -366,7 +367,7 @@ def create_app(
             host_block
             + """
 <p class="text-muted small mb-0">
-  DM, News, Messages, NodeDB, MOTD, Scheduler, BBS, Einstellungen, Banliste und Logs erreichst du über die Tabs oben.
+  DM, Kanal, News, NodeDB, MOTD, Scheduler, BBS, Einstellungen, Banliste und Logs erreichst du über die Tabs oben.
 </p>
 <p class="text-center mt-4 mb-0">
   <a href="{{ url_for('index_dashboard') }}" class="btn btn-sm btn-link text-muted">
@@ -435,15 +436,20 @@ def create_app(
             inhalt=inhalt,
         )
 
-    @app.route("/dm", methods=["GET", "POST"])
+    @app.route("/alert-text", methods=["GET", "POST"])
     @login_required
-    def edit_dm():
+    def edit_alert_text():
         return _render_text_file_editor(
             "direktnachricht",
-            active_tab="dm",
-            page_title="DM",
-            file_hint="Direktnachricht des Bots (Alert-Text).",
+            active_tab="settings",
+            page_title="Alert-Text",
+            file_hint="Text für File-Monitor (data/alert.txt) — nicht für Mesh-DMs.",
         )
+
+    @app.route("/dm")
+    @login_required
+    def edit_dm():
+        return _render_mesh_chat_page(kind="dm", active_tab="dm", title="Mesh-DM")
 
     @app.route("/news", methods=["GET", "POST"])
     @login_required
@@ -532,7 +538,7 @@ def create_app(
     @login_required
     def edit(dateiname):
         if dateiname == "direktnachricht":
-            return redirect(url_for("edit_dm"))
+            return redirect(url_for("edit_alert_text"))
         if dateiname == "news":
             return redirect(url_for("edit_news"))
         return "Ungültiger Dateiname.", 404
@@ -592,53 +598,189 @@ def create_app(
             active_tab="logs",
         )
 
+    def _render_mesh_chat_page(*, kind: str, active_tab: str, title: str):
+        from modules import admin_mesh_chat as chat
+        import modules.settings as st
+
+        channel = chat.default_mesh_channel()
+        iface = chat.default_mesh_interface()
+        ifaces = []
+        try:
+            from modules import admin_web_ops as ops
+
+            ifaces = ops.iter_radio_interfaces()
+        except Exception:
+            pass
+        if not ifaces:
+            ifaces = [iface]
+
+        try:
+            from modules.system import format_channel_label
+
+            ch_label = format_channel_label(channel, iface)
+        except Exception:
+            ch_label = f"Kanal {channel}"
+
+        iface_opts = "".join(
+            f'<option value="{i}"{" selected" if i == iface else ""}>Interface {i}</option>'
+            for i in ifaces
+        )
+
+        if kind == "channel":
+            subtitle = f"Live-Feed und Senden auf {html_escape(ch_label)} (Kanal {channel})"
+            dest_block = ""
+        else:
+            subtitle = "Live-Direktnachrichten — empfangen und an Knoten senden"
+            dest_block = """
+<div class="mb-3">
+  <label class="form-label small text-muted" for="mesh-chat-dest">Empfänger (NodeDB)</label>
+  <select id="mesh-chat-dest" class="form-select form-select-sm" required></select>
+</div>"""
+
+        alert_link = (
+            f'<p class="small text-muted mb-3">'
+            f'File-Monitor Alert-Text: <a href="{url_for("edit_alert_text")}">Alert-Text bearbeiten</a></p>'
+            if kind == "dm"
+            else ""
+        )
+
+        log_hint = ""
+        if not st.syslog_to_file:
+            log_hint = (
+                '<div class="alert alert-warning py-2 small">'
+                "Für den Live-Feed <code>SyslogToFile = True</code> in config.ini setzen."
+                "</div>"
+            )
+        elif not st.log_messages_to_file:
+            log_hint = (
+                '<div class="alert alert-info py-2 small">'
+                "Tipp: <code>LogMessagesToFile = True</code> ergänzt den Feed um saubere Nachrichtenprotokolle."
+                "</div>"
+            )
+
+        cfg_json = {
+            "kind": kind,
+            "filterChannel": channel if kind == "channel" else None,
+            "sendChannel": channel,
+            "interface": iface,
+            "apiMessages": url_for("api_mesh_messages"),
+            "apiSend": url_for("api_mesh_send"),
+            "apiNodes": url_for("api_mesh_nodes"),
+            "pollMs": 3000,
+        }
+        import json
+
+        inner = f"""
+<p class="text-muted small mb-2">{html_escape(subtitle)}</p>
+{alert_link}
+{log_hint}
+<div class="row g-2 align-items-end mb-3 mesh-chat-toolbar">
+  <div class="col-auto">
+    <label class="form-label small text-muted mb-0" for="mesh-chat-iface">Radio</label>
+    <select id="mesh-chat-iface" class="form-select form-select-sm">{iface_opts}</select>
+  </div>
+  <div class="col-auto ms-auto">
+    <span id="mesh-chat-status" class="small text-muted">Lade …</span>
+  </div>
+</div>
+<div id="mesh-chat-feed" class="mesh-chat-feed mb-3" aria-live="polite"></div>
+<form id="mesh-chat-form" class="mesh-chat-compose">
+  {dest_block}
+  <div class="mb-2">
+    <label class="form-label small text-muted" for="mesh-chat-input">Nachricht</label>
+    <textarea id="mesh-chat-input" class="form-control font-monospace" rows="3" maxlength="500"
+      placeholder="Text an das Mesh senden …" required></textarea>
+  </div>
+  <button type="submit" id="mesh-chat-send" class="btn btn-success">
+    <i class="bi bi-send me-1"></i>Senden
+  </button>
+</form>
+<script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
+<script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
+<script src="/static/portal/mesh-chat.js"></script>
+"""
+        return _render_admin_template(
+            inner,
+            title=title,
+            active_tab=active_tab,
+        )
+
+    @app.route("/api/admin/mesh/messages")
+    @login_required
+    def api_mesh_messages():
+        from modules import admin_mesh_chat as chat
+
+        kind = request.args.get("kind") or None
+        channel = request.args.get("channel", type=int)
+        limit = min(request.args.get("limit", 100, type=int), 200)
+        after = request.args.get("after") or None
+
+        messages, err = chat.collect_messages(
+            log_dir,
+            kind=kind,
+            channel=channel,
+            limit=limit,
+            after_iso=after,
+        )
+        out = []
+        for m in messages:
+            out.append(
+                {
+                    "mid": m.get("mid"),
+                    "time": m.get("time"),
+                    "time_short": m.get("time_short"),
+                    "dir": m.get("dir"),
+                    "kind": m.get("kind"),
+                    "channel": m.get("channel"),
+                    "channel_label": m.get("channel_label"),
+                    "text": m.get("text", ""),
+                    "peer": chat.peer_label(m),
+                }
+            )
+        return jsonify({"messages": out, "error": err})
+
+    @app.route("/api/admin/mesh/send", methods=["POST"])
+    @login_required
+    @limiter.limit("15 per minute")
+    def api_mesh_send():
+        from modules import admin_mesh_chat as chat
+
+        text = request.form.get("text", "")
+        channel = request.form.get("channel", chat.default_mesh_channel(), type=int)
+        interface = request.form.get("interface", chat.default_mesh_interface(), type=int)
+        dest_node = request.form.get("dest_node", 0, type=int)
+
+        if request.form.get("kind") == "dm" or dest_node:
+            dest_node = dest_node or 0
+            if not dest_node:
+                return jsonify({"ok": False, "message": "Bitte Empfänger wählen."}), 400
+        else:
+            dest_node = 0
+
+        ok, msg = chat.send_mesh_message(
+            text,
+            channel=channel,
+            interface=interface,
+            dest_node=dest_node,
+        )
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+    @app.route("/api/admin/mesh/nodes")
+    @login_required
+    def api_mesh_nodes():
+        from modules import admin_mesh_chat as chat
+
+        iface = request.args.get("iface", chat.default_mesh_interface(), type=int)
+        err, nodes = chat.list_send_targets(iface)
+        return jsonify({"nodes": nodes, "error": err})
+
     @app.route("/live/messages")
     @login_required
     def live_messages():
-        import modules.settings as st
-
-        log_path = _messages_log_path(log_dir)
-        hint = (
-            f'<p class="small text-muted">Repo: <code>{html_escape(repo_root())}</code> · '
-            f'Log: <code>{html_escape(log_path)}</code></p>'
-        )
-        if not st.log_messages_to_file:
-            inhalt = (
-                "Nachrichten-Log ist deaktiviert.\n\n"
-                "In config.ini unter [general] setzen:\n"
-                "  LogMessagesToFile = True\n\n"
-                "Bot neu starten. Die Datei liegt dann unter logs/messages.log."
-            )
-        elif not os.path.isfile(log_path):
-            inhalt = (
-                f"Datei nicht gefunden:\n{log_path}\n\n"
-                "Nach dem Aktivieren von LogMessagesToFile ein paar Mesh-Nachrichten senden, "
-                "damit die Datei angelegt wird."
-            )
-        else:
-            try:
-                inhalt = _read_messages_log_tail(log_path)
-                if not inhalt.strip():
-                    inhalt = "(Datei ist leer — noch keine Nachrichten protokolliert.)"
-            except PermissionError:
-                inhalt = (
-                    f"Keine Leserechte für:\n{log_path}\n\n"
-                    f"Rechte setzen, z. B.:\n"
-                    f"  sudo ./etc/set-permissions.sh <service-user> {repo_root()}"
-                )
-            except OSError as e:
-                inhalt = f"Fehler beim Öffnen:\n{log_path}\n\n{e}"
-
-        return _render_admin_template(
-            f"""
-<div class="admin-log-view">
-<meta http-equiv="refresh" content="5">
-  {hint}
-  <pre class="admin-pre">{html_escape(inhalt)}</pre>
-</div>
-""",
-            title="Messages",
+        return _render_mesh_chat_page(
+            kind="channel",
             active_tab="messages",
+            title="Kanal-Nachrichten",
         )
 
     @app.route("/nodes")

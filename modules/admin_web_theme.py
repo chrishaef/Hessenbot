@@ -42,9 +42,9 @@ PORTAL_ASSETS = """
 
 ADMIN_TABS: List[Tuple[str, str, str]] = [
     ("home", "Übersicht", "choose"),
-    ("dm", "DM", "edit_dm"),
+    ("dm", "Mesh-DM", "edit_dm"),
     ("news", "News", "edit_news"),
-    ("messages", "Messages", "live_messages"),
+    ("messages", "Kanal", "live_messages"),
     ("nodes", "NodeDB", "nodes_list"),
     ("nodesettings", "Node Settings", "node_settings_index"),
     ("meshadmin", "Admin", "mesh_admin_index"),

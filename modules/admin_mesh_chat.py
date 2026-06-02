@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""Live mesh message feed and send helpers for the web admin."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import threading
+from collections import deque
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from modules.web_dashboard import (
+    _NodeDirectory,
+    _parse_messages_log_tail,
+    _strip_ansi,
+    _tail_lines,
+)
+
+_RING: deque = deque(maxlen=300)
+_RING_LOCK = threading.Lock()
+_SEND_LOCK = threading.Lock()
+
+_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+")
+
+
+def _message_key(event: Dict[str, Any]) -> str:
+    raw = "|".join(
+        str(event.get(k, ""))
+        for k in ("time", "dir", "kind", "channel", "id", "text", "device")
+    )
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def record_optimistic(event: Dict[str, Any]) -> None:
+    """Append a just-sent message so the UI updates before the log line appears."""
+    event = dict(event)
+    event.setdefault("mid", _message_key(event))
+    with _RING_LOCK:
+        _RING.append(event)
+
+
+def _parse_ts(line: str) -> Optional[datetime]:
+    m = _TS_RE.match(line)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _parse_meshbot_line(
+    plain: str, timestamp: datetime, nodes: _NodeDirectory
+) -> Optional[Dict[str, Any]]:
+    from modules.web_dashboard import _parse_channel_from_log
+
+    dev_m = re.search(r"Device:(\d+)", plain)
+    device = int(dev_m.group(1)) if dev_m else 1
+    channel, channel_label = _parse_channel_from_log(plain, device)
+    base: Dict[str, Any] = {
+        "time": timestamp.isoformat(),
+        "time_short": timestamp.strftime("%H:%M:%S"),
+        "device": device,
+        "channel": channel,
+        "channel_label": channel_label,
+        "text": "",
+    }
+
+    ns = re.search(r"NodeID:(\d+)\s+ShortName:(\S+)", plain)
+    if ns:
+        nodes.register(int(ns.group(1)), short=ns.group(2))
+
+    if "Sending DM:" in plain or "Sending Multi-Chunk DM:" in plain:
+        to_m = re.search(r"\sTo:\s*(.+?)$", plain)
+        peer = nodes.resolve(to_m.group(1)) if to_m else {}
+        text_m = re.search(
+            r"Sending(?: Multi-Chunk)? DM:\s*(.+?)\s+To:",
+            plain,
+        )
+        text = text_m.group(1).strip() if text_m else ""
+        return {**base, "dir": "out", "kind": "dm", "text": text, **peer}
+
+    if "SendingChannel:" in plain or "Sending Multi-Chunk Message:" in plain:
+        text_m = re.search(
+            r"Sending(?: Multi-Chunk)?(?: Message)?:\s*(.+?)(?:\s+Chunker|\s*$)",
+            plain,
+        )
+        if not text_m:
+            text_m = re.search(r"SendingChannel:\s*(.+)$", plain)
+        text = text_m.group(1).strip() if text_m else ""
+        return {
+            **base,
+            "dir": "out",
+            "kind": "channel",
+            "text": text,
+            "id": "",
+            "hex": "",
+            "short": "",
+            "long": "",
+        }
+
+    if "Received DM:" in plain or "Ignoring DM:" in plain:
+        from_m = re.search(r"From:\s*(.+?)$", plain)
+        peer = nodes.resolve(from_m.group(1)) if from_m else {}
+        text_m = re.search(
+            r"(?:Received|Ignoring) DM:\s*(.+?)\s+From:",
+            plain,
+        )
+        text = text_m.group(1).strip() if text_m else ""
+        return {**base, "dir": "in", "kind": "dm", "text": text, **peer}
+
+    if "ReceivedChannel:" in plain or "Ignoring Message:" in plain:
+        from_m = re.search(r"From:\s*(.+?)$", plain)
+        peer = nodes.resolve(from_m.group(1)) if from_m else {}
+        if "ReceivedChannel:" in plain:
+            text_m = re.search(r"ReceivedChannel:\s*(.+?)\s+From:", plain)
+        else:
+            text_m = re.search(r"Ignoring Message:\s*(.+?)\s+From:", plain)
+        text = text_m.group(1).strip() if text_m else ""
+        return {**base, "dir": "in", "kind": "channel", "text": text, **peer}
+
+    return None
+
+
+def _merge_events(
+    meshbot_events: List[Dict[str, Any]],
+    msg_log_events: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Prefer messages.log text for incoming when timestamps align."""
+    by_key: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+
+    def add(ev: Dict[str, Any]) -> None:
+        key = _message_key(ev)
+        if key in by_key:
+            existing = by_key[key]
+            if not existing.get("text") and ev.get("text"):
+                existing["text"] = ev["text"]
+            for field in ("short", "long", "hex", "id", "channel_label"):
+                if not existing.get(field) and ev.get(field):
+                    existing[field] = ev[field]
+            return
+        ev = dict(ev)
+        ev["mid"] = key
+        by_key[key] = ev
+        order.append(key)
+
+    for ev in meshbot_events:
+        add(ev)
+    for ev in msg_log_events:
+        add(ev)
+
+    with _RING_LOCK:
+        for ev in _RING:
+            add(ev)
+
+    return [by_key[k] for k in order]
+
+
+def collect_messages(
+    log_dir: str,
+    *,
+    kind: Optional[str] = None,
+    channel: Optional[int] = None,
+    limit: int = 100,
+    after_iso: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Return recent mesh messages from meshbot.log (+ messages.log when enabled).
+    kind: 'channel' | 'dm' | None (all)
+    """
+    meshbot_path = os.path.join(os.path.realpath(log_dir), "meshbot.log")
+    msg_log_path = os.path.join(os.path.realpath(log_dir), "messages.log")
+
+    nodes = _NodeDirectory()
+    meshbot_events: List[Dict[str, Any]] = []
+
+    if os.path.isfile(meshbot_path):
+        for line in _tail_lines(meshbot_path, 2000):
+            plain = _strip_ansi(line)
+            ts = _parse_ts(line)
+            if not ts:
+                continue
+            ev = _parse_meshbot_line(plain, ts, nodes)
+            if ev:
+                meshbot_events.append(ev)
+
+    msg_log_events: List[Dict[str, Any]] = []
+    if os.path.isfile(msg_log_path):
+        msg_log_events = _parse_messages_log_tail(msg_log_path, nodes, max_lines=800)
+
+    merged = _merge_events(meshbot_events, msg_log_events)
+
+    if after_iso:
+        merged = [m for m in merged if m.get("time", "") > after_iso]
+
+    if kind:
+        merged = [m for m in merged if m.get("kind") == kind]
+
+    if channel is not None:
+        filtered = []
+        for m in merged:
+            if m.get("kind") == "dm":
+                filtered.append(m)
+            elif m.get("channel") == channel:
+                filtered.append(m)
+        merged = filtered
+
+    merged.sort(key=lambda x: x.get("time", ""))
+    if len(merged) > limit:
+        merged = merged[-limit:]
+
+    err = None
+    if not os.path.isfile(meshbot_path):
+        err = "meshbot.log nicht gefunden — SyslogToFile in config.ini aktivieren."
+
+    return merged, err
+
+
+def default_mesh_channel() -> int:
+    import modules.settings as st
+
+    return int(getattr(st, "messages_channel", 1))
+
+
+def default_mesh_interface() -> int:
+    from modules import admin_web_ops as ops
+
+    ifaces = ops.iter_radio_interfaces()
+    return ifaces[0] if ifaces else 1
+
+
+def list_send_targets(iface_id: int) -> Tuple[Optional[str], List[Dict[str, str]]]:
+    from modules import admin_web_ops as ops
+
+    err, rows = ops.list_node_rows(iface_id)
+    if err:
+        return err, []
+    out = []
+    for r in rows:
+        if r.get("is_self"):
+            continue
+        label = f"{r.get('shortName') or '?'} · {r.get('longName') or '?'}"
+        out.append(
+            {
+                "num": str(r["num"]),
+                "node_id": r.get("node_id") or "",
+                "label": label,
+            }
+        )
+    out.sort(key=lambda x: x["label"].lower())
+    return None, out
+
+
+def send_mesh_message(
+    text: str,
+    *,
+    channel: int,
+    interface: int,
+    dest_node: int = 0,
+) -> Tuple[bool, str]:
+    text = (text or "").strip()
+    if not text:
+        return False, "Nachricht ist leer."
+    if len(text) > 500:
+        return False, "Maximal 500 Zeichen."
+
+    from modules import admin_web_ops as ops
+
+    ifaces = ops.iter_radio_interfaces()
+    if interface not in ifaces:
+        return False, f"Interface {interface} ist nicht verbunden."
+
+    import modules.system as sm
+
+    if dest_node:
+        try:
+            dest_node = int(dest_node)
+        except (TypeError, ValueError):
+            return False, "Ungültige Ziel-Node-ID."
+
+    with _SEND_LOCK:
+        ok = sm.send_message(text, channel, dest_node, interface)
+
+    if ok:
+        kind = "dm" if dest_node else "channel"
+        from modules.system import format_channel_label
+
+        ch_label = format_channel_label(channel, interface) if not dest_node else "DM"
+        record_optimistic(
+            {
+                "time": datetime.now().isoformat(timespec="seconds"),
+                "time_short": datetime.now().strftime("%H:%M:%S"),
+                "dir": "out",
+                "kind": kind,
+                "channel": channel,
+                "channel_label": ch_label,
+                "device": interface,
+                "text": text,
+                "id": str(dest_node) if dest_node else "",
+                "short": "Web-Admin",
+                "long": "Hessenbot Web-Admin",
+            }
+        )
+        return True, "Nachricht gesendet."
+    return False, "Senden fehlgeschlagen — siehe meshbot.log."
+
+
+def peer_label(entry: Dict[str, Any]) -> str:
+    short = entry.get("short") or ""
+    long_name = entry.get("long") or ""
+    hex_id = entry.get("hex") or ""
+    node_id = entry.get("id") or ""
+    if entry.get("dir") == "out" and entry.get("short") == "Web-Admin":
+        return "Web-Admin"
+    if short and long_name:
+        return f"{short} · {long_name}"
+    if long_name:
+        return long_name
+    if hex_id:
+        return hex_id
+    if node_id:
+        return f"#{node_id}"
+    if entry.get("kind") == "channel" and entry.get("dir") == "out":
+        return entry.get("channel_label") or "Kanal"
+    return "?"
