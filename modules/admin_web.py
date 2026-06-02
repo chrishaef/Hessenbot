@@ -627,19 +627,21 @@ def create_app(
         )
 
         if kind == "channel":
-            subtitle = f"Live-Feed und Senden auf {html_escape(ch_label)} (Kanal {channel})"
-            dest_block = ""
+            subtitle = f"Kanal {channel} · {ch_label}"
         else:
-            subtitle = "Live-Direktnachrichten — empfangen und an Knoten senden"
-            dest_block = """
-<div class="mb-3">
-  <label class="form-label small text-muted" for="mesh-chat-dest">Empfänger (NodeDB)</label>
-  <select id="mesh-chat-dest" class="form-select form-select-sm" required></select>
-</div>"""
+            subtitle = "Direktnachrichten · empfangen & senden"
+
+        dest_row = ""
+        if kind == "dm":
+            dest_row = """
+    <div class="mesh-chat-field mesh-chat-field--dest">
+      <label class="mesh-chat-label" for="mesh-chat-dest">An</label>
+      <select id="mesh-chat-dest" class="form-select form-select-sm" required></select>
+    </div>"""
 
         alert_link = (
-            f'<p class="small text-muted mb-3">'
-            f'File-Monitor Alert-Text: <a href="{url_for("edit_alert_text")}">Alert-Text bearbeiten</a></p>'
+            f'<p class="mesh-chat-footnote mb-0">'
+            f'Alert-Text (File-Monitor): <a href="{url_for("edit_alert_text")}">bearbeiten</a></p>'
             if kind == "dm"
             else ""
         )
@@ -647,15 +649,17 @@ def create_app(
         log_hint = ""
         if not st.syslog_to_file:
             log_hint = (
-                '<div class="alert alert-warning py-2 small">'
-                "Für den Live-Feed <code>SyslogToFile = True</code> in config.ini setzen."
+                '<div class="alert alert-warning py-2 small mb-0">'
+                "Live-Feed benötigt <code>SyslogToFile = True</code> in config.ini."
                 "</div>"
             )
         elif not st.log_messages_to_file:
             log_hint = (
-                '<div class="alert alert-info py-2 small">'
-                "Tipp: <code>LogMessagesToFile = True</code> ergänzt den Feed um saubere Nachrichtenprotokolle."
-                "</div>"
+                '<details class="mesh-chat-hint">'
+                '<summary class="small text-muted">Optional: vollständigere Texte</summary>'
+                '<p class="small text-muted mb-0">'
+                "<code>LogMessagesToFile = True</code> unter [general] ergänzt."
+                "</p></details>"
             )
 
         cfg_json = {
@@ -663,6 +667,7 @@ def create_app(
             "filterChannel": channel if kind == "channel" else None,
             "sendChannel": channel,
             "interface": iface,
+            "channelLabel": ch_label,
             "apiMessages": url_for("api_mesh_messages"),
             "apiSend": url_for("api_mesh_send"),
             "apiNodes": url_for("api_mesh_nodes"),
@@ -671,30 +676,44 @@ def create_app(
         import json
 
         inner = f"""
-<p class="text-muted small mb-2">{html_escape(subtitle)}</p>
-{alert_link}
-{log_hint}
-<div class="row g-2 align-items-end mb-3 mesh-chat-toolbar">
-  <div class="col-auto">
-    <label class="form-label small text-muted mb-0" for="mesh-chat-iface">Radio</label>
-    <select id="mesh-chat-iface" class="form-select form-select-sm">{iface_opts}</select>
+<div class="mesh-chat-shell">
+  <p class="mesh-chat-subtitle">{html_escape(subtitle)}</p>
+  {log_hint}
+  <form id="mesh-chat-form" class="mesh-chat-compose">
+    <div class="mesh-chat-compose-bar">
+      <div class="mesh-chat-field mesh-chat-field--iface">
+        <label class="mesh-chat-label" for="mesh-chat-iface">Radio</label>
+        <select id="mesh-chat-iface" class="form-select form-select-sm">{iface_opts}</select>
+      </div>
+      {dest_row}
+      <div class="mesh-chat-field mesh-chat-field--grow">
+        <label class="mesh-chat-label" for="mesh-chat-input">Nachricht</label>
+        <textarea id="mesh-chat-input" class="form-control mesh-chat-input" rows="2" maxlength="500"
+          placeholder="Text eingeben …" required></textarea>
+      </div>
+      <div class="mesh-chat-field mesh-chat-field--send">
+        <span class="mesh-chat-label mesh-chat-label--hidden" aria-hidden="true">&nbsp;</span>
+        <button type="submit" id="mesh-chat-send" class="btn btn-success mesh-chat-send-btn">
+          <i class="bi bi-send-fill"></i><span class="mesh-chat-send-label">Senden</span>
+        </button>
+      </div>
+    </div>
+    <div class="mesh-chat-compose-meta">
+      <span id="mesh-chat-status" class="mesh-chat-status">Lade …</span>
+      {alert_link}
+    </div>
+  </form>
+
+  <div class="mesh-chat-feed-head">
+    <span class="mesh-chat-feed-title"><i class="bi bi-chat-left-text me-1"></i>Verlauf</span>
+    <span id="mesh-chat-count" class="mesh-chat-count">0 Nachrichten</span>
   </div>
-  <div class="col-auto ms-auto">
-    <span id="mesh-chat-status" class="small text-muted">Lade …</span>
+  <div id="mesh-chat-feed" class="mesh-chat-feed" aria-live="polite"></div>
+  <div id="mesh-chat-empty" class="mesh-chat-empty" hidden>
+    <i class="bi bi-inbox"></i>
+    <p>Noch keine Nachrichten — Feed aktualisiert sich alle 3&nbsp;s.</p>
   </div>
 </div>
-<div id="mesh-chat-feed" class="mesh-chat-feed mb-3" aria-live="polite"></div>
-<form id="mesh-chat-form" class="mesh-chat-compose">
-  {dest_block}
-  <div class="mb-2">
-    <label class="form-label small text-muted" for="mesh-chat-input">Nachricht</label>
-    <textarea id="mesh-chat-input" class="form-control font-monospace" rows="3" maxlength="500"
-      placeholder="Text an das Mesh senden …" required></textarea>
-  </div>
-  <button type="submit" id="mesh-chat-send" class="btn btn-success">
-    <i class="bi bi-send me-1"></i>Senden
-  </button>
-</form>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
 <script src="/static/portal/mesh-chat.js"></script>

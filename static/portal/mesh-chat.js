@@ -5,6 +5,8 @@
   if (!cfg) return;
 
   const feed = document.getElementById("mesh-chat-feed");
+  const emptyEl = document.getElementById("mesh-chat-empty");
+  const countEl = document.getElementById("mesh-chat-count");
   const form = document.getElementById("mesh-chat-form");
   const input = document.getElementById("mesh-chat-input");
   const statusEl = document.getElementById("mesh-chat-status");
@@ -14,13 +16,21 @@
 
   let lastIso = "";
   let known = new Set();
-  let polling = true;
+  let msgCount = 0;
+  let lastDateKey = "";
 
   function setStatus(msg, isErr) {
     if (!statusEl) return;
     statusEl.textContent = msg;
-    statusEl.classList.toggle("text-danger", !!isErr);
-    statusEl.classList.toggle("text-muted", !isErr);
+    statusEl.classList.toggle("mesh-chat-status--err", !!isErr);
+  }
+
+  function updateCount(n) {
+    msgCount = n;
+    if (!countEl) return;
+    countEl.textContent = n === 1 ? "1 Nachricht" : n + " Nachrichten";
+    if (emptyEl) emptyEl.hidden = n > 0;
+    if (feed) feed.hidden = n === 0;
   }
 
   function escapeHtml(s) {
@@ -31,64 +41,131 @@
       .replace(/"/g, "&quot;");
   }
 
-  function renderBubble(m) {
+  function splitPeer(peer) {
+    const p = (peer || "?").trim();
+    const parts = p.split(" · ");
+    if (parts.length >= 2) {
+      return { short: parts[0], long: parts.slice(1).join(" · ") };
+    }
+    return { short: p, long: "" };
+  }
+
+  function dateKey(iso) {
+    if (!iso) return "";
+    return iso.slice(0, 10);
+  }
+
+  function formatDateLabel(key) {
+    if (!key) return "";
+    const parts = key.split("-");
+    if (parts.length !== 3) return key;
+    return parts[2] + "." + parts[1] + "." + parts[0];
+  }
+
+  function renderDateDivider(key) {
+    const div = document.createElement("div");
+    div.className = "mesh-msg-day";
+    div.innerHTML = "<span>" + escapeHtml(formatDateLabel(key)) + "</span>";
+    return div;
+  }
+
+  function renderMessage(m) {
     const out = m.dir === "out";
     const kind = m.kind || "channel";
-    const peer = m.peer || "?";
-    const text = m.text || "";
+    const peer = splitPeer(m.peer);
+    const text = (m.text || "").trim();
     const time = m.time_short || "";
-    const metaParts = [time];
-    if (kind === "channel" && m.channel_label) {
-      metaParts.push(m.channel_label);
-    } else if (kind === "dm") {
-      metaParts.push("DM");
-    }
+
+    let badge = out ? "Gesendet" : "Empfangen";
+    let badgeClass = out ? "mesh-msg-badge--out" : "mesh-msg-badge--in";
+    let who = "";
     if (out) {
-      metaParts.push("→ gesendet");
+      who = kind === "dm" ? peer.long || peer.short || "DM" : "Web-Admin";
     } else {
-      metaParts.push("← " + peer);
+      who = peer.short || peer.long || "?";
     }
-    const meta = metaParts.join(" · ");
-    const cls = out ? "mesh-chat-bubble mesh-chat-bubble--out" : "mesh-chat-bubble mesh-chat-bubble--in";
-    const div = document.createElement("div");
-    div.className = "mesh-chat-row " + (out ? "mesh-chat-row--out" : "mesh-chat-row--in");
-    div.dataset.mid = m.mid || "";
-    div.innerHTML =
-      '<div class="' +
-      cls +
+
+    let tag = "";
+    if (kind === "dm") {
+      tag = "DM";
+    } else if (m.channel_label) {
+      tag = m.channel_label;
+    } else if (cfg.channelLabel) {
+      tag = cfg.channelLabel;
+    }
+
+    const article = document.createElement("article");
+    article.className = "mesh-msg " + (out ? "mesh-msg--out" : "mesh-msg--in");
+    article.dataset.mid = m.mid || "";
+
+    article.innerHTML =
+      '<div class="mesh-msg-head">' +
+      '<span class="mesh-msg-badge ' +
+      badgeClass +
       '">' +
-      '<div class="mesh-chat-text">' +
+      escapeHtml(badge) +
+      "</span>" +
+      '<span class="mesh-msg-who">' +
+      escapeHtml(who) +
+      "</span>" +
+      (peer.long && !out && peer.short
+        ? '<span class="mesh-msg-who-sub">' + escapeHtml(peer.long) + "</span>"
+        : "") +
+      '<time class="mesh-msg-time">' +
+      escapeHtml(time) +
+      "</time>" +
+      "</div>" +
+      '<div class="mesh-msg-body">' +
       escapeHtml(text || "—") +
       "</div>" +
-      '<div class="mesh-chat-meta">' +
-      escapeHtml(meta) +
-      "</div></div>";
-    return div;
+      (tag ? '<div class="mesh-msg-tag">' + escapeHtml(tag) + "</div>" : "");
+
+    return article;
   }
 
   function scrollFeed(force) {
     if (!feed) return;
-    const nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+    const nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 100;
     if (force || nearBottom) {
       feed.scrollTop = feed.scrollHeight;
     }
   }
 
   function appendMessages(messages, replace) {
-    if (!feed || !messages || !messages.length) return;
+    if (!feed) return;
     if (replace) {
       feed.innerHTML = "";
       known.clear();
+      lastDateKey = "";
+      updateCount(0);
     }
-    let added = false;
+    if (!messages || !messages.length) {
+      if (replace) updateCount(0);
+      return;
+    }
+
+    let added = 0;
     messages.forEach(function (m) {
       if (!m.mid || known.has(m.mid)) return;
       known.add(m.mid);
-      feed.appendChild(renderBubble(m));
-      added = true;
+
+      const dk = dateKey(m.time);
+      if (dk && dk !== lastDateKey) {
+        feed.appendChild(renderDateDivider(dk));
+        lastDateKey = dk;
+      }
+
+      feed.appendChild(renderMessage(m));
+      added++;
       if (m.time && m.time > lastIso) lastIso = m.time;
     });
-    if (added) scrollFeed(false);
+
+    if (added) {
+      updateCount(known.size);
+      scrollFeed(replace);
+    } else if (replace) {
+      updateCount(0);
+    }
   }
 
   function buildQuery(initial) {
@@ -101,7 +178,6 @@
   }
 
   function poll(initial) {
-    if (!polling) return;
     const url = cfg.apiMessages + "?" + buildQuery(!!initial);
     fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) {
@@ -131,7 +207,7 @@
         (data.nodes || []).forEach(function (n) {
           const opt = document.createElement("option");
           opt.value = n.num;
-          opt.textContent = n.label + " (#" + n.num + ")";
+          opt.textContent = n.label;
           destSelect.appendChild(opt);
         });
         if (!destSelect.options.length) {
@@ -195,6 +271,15 @@
 
   if (ifaceSelect) {
     ifaceSelect.addEventListener("change", loadNodes);
+  }
+
+  if (input) {
+    input.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        form.requestSubmit();
+      }
+    });
   }
 
   poll(true);
