@@ -1622,6 +1622,22 @@ def decode_raw_bytes(raw_bytes):
         logger.debug(f"System: Error decoding raw bytes: {e} bytes: {raw_bytes}")
         return ""
 
+def detect_missing_cmd_bang(msg: str):
+    """If cmdBang is on: first word matches a trap but message has no leading !."""
+    if not cmdBang:
+        return None
+    text = (msg or "").strip()
+    if not text or text.startswith("!"):
+        return None
+    first = text.split()[0]
+    token = first[:-1] if first.endswith("?") else first
+    token_lower = token.lower()
+    for t in trap_list:
+        if t.lower() == token_lower:
+            return token
+    return None
+
+
 def messageTrap(msg):
     # Check if the message contains a trap word, this is the first filter for listning to messages
     # after this the message is passed to the command_handler in the bot.py which is switch case filter for applying word to function

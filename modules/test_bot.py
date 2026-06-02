@@ -58,6 +58,30 @@ class TestBot(unittest.TestCase):
         self.assertFalse(dm_chunk_wants_delivery_ack(12345, 1, want_ack_on_dm=True))
         self.assertFalse(dm_chunk_wants_delivery_ack(12345, 0, want_ack_on_dm=False))
 
+    def test_detect_missing_cmd_bang(self):
+        from unittest.mock import patch
+        from modules.system import detect_missing_cmd_bang
+
+        traps = ("ping", "wx", "cmd", "bbspost")
+        with patch("modules.system.cmdBang", True), patch("modules.system.trap_list", traps):
+            self.assertEqual(detect_missing_cmd_bang("ping"), "ping")
+            self.assertEqual(detect_missing_cmd_bang("wx"), "wx")
+            self.assertEqual(detect_missing_cmd_bang("cmd?"), "cmd")
+            self.assertEqual(detect_missing_cmd_bang("Ping"), "Ping")
+            self.assertIsNone(detect_missing_cmd_bang("!ping"))
+            self.assertIsNone(detect_missing_cmd_bang("!wx test"))
+            self.assertIsNone(detect_missing_cmd_bang("hallo"))
+            self.assertIsNone(detect_missing_cmd_bang(""))
+        with patch("modules.system.cmdBang", False), patch("modules.system.trap_list", traps):
+            self.assertIsNone(detect_missing_cmd_bang("ping"))
+
+    def test_missing_cmd_bang_hint_text(self):
+        from modules.locale_de import missing_cmd_bang_hint
+
+        hint = missing_cmd_bang_hint("ping")
+        self.assertIn("!ping", hint)
+        self.assertIn("!cmd", hint)
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 

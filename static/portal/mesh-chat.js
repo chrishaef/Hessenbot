@@ -11,6 +11,8 @@
   const input = document.getElementById("mesh-chat-input");
   const statusEl = document.getElementById("mesh-chat-status");
   const destSelect = document.getElementById("mesh-chat-dest");
+  const destSearch = document.getElementById("mesh-chat-dest-search");
+  const destCount = document.getElementById("mesh-chat-dest-count");
   const ifaceSelect = document.getElementById("mesh-chat-iface");
   const sendBtn = document.getElementById("mesh-chat-send");
 
@@ -18,6 +20,8 @@
   let known = new Set();
   let msgCount = 0;
   let lastDateKey = "";
+  let allNodes = [];
+  const DEST_MATCH_LIMIT = 200;
 
   function setStatus(msg, isErr) {
     if (!statusEl) return;
@@ -213,6 +217,91 @@
       });
   }
 
+  function nodeHay(n) {
+    if (n.search) return n.search;
+    return (n.label + " " + n.num + " " + (n.node_id || "") + " " + (n.short || "") + " " + (n.long || "")).toLowerCase();
+  }
+
+  function updateDestCount(visible, total, query) {
+    if (!destCount) return;
+    if (!total) {
+      destCount.textContent = "—";
+      return;
+    }
+    if (!query) {
+      destCount.textContent = String(total);
+      destCount.title = total + " Knoten — Suche eingeben";
+      return;
+    }
+    destCount.textContent = visible + " / " + total;
+    destCount.title = visible + " Treffer von " + total;
+  }
+
+  function renderDestOptions() {
+    if (!destSelect || cfg.kind !== "dm") return;
+    const query = destSearch ? destSearch.value.trim().toLowerCase() : "";
+    const prev = destSelect.value;
+    destSelect.innerHTML = "";
+
+    if (!allNodes.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "Keine Knoten in NodeDB";
+      destSelect.appendChild(opt);
+      updateDestCount(0, 0, query);
+      return;
+    }
+
+    if (!query) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "↑ Suchen: z. B. MHH, !a1b2c3d4 oder 1234567890";
+      destSelect.appendChild(opt);
+      updateDestCount(0, allNodes.length, "");
+      return;
+    }
+
+    const allMatched = allNodes.filter(function (n) {
+      return nodeHay(n).indexOf(query) !== -1;
+    });
+    const matched = allMatched.slice(0, DEST_MATCH_LIMIT);
+
+    if (!matched.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "Kein Treffer — Suchbegriff anpassen";
+      destSelect.appendChild(opt);
+      updateDestCount(0, allNodes.length, query);
+      return;
+    }
+
+    matched.forEach(function (n) {
+      const opt = document.createElement("option");
+      opt.value = n.num;
+      const idHint = n.node_id ? " · " + n.node_id : "";
+      opt.textContent = n.label + " (#" + n.num + idHint + ")";
+      destSelect.appendChild(opt);
+    });
+
+    if (allMatched.length > DEST_MATCH_LIMIT) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.disabled = true;
+      opt.textContent = "… " + (allMatched.length - DEST_MATCH_LIMIT) + " weitere — Suche verfeinern";
+      destSelect.appendChild(opt);
+    }
+
+    if (prev && matched.some(function (n) {
+      return n.num === prev;
+    })) {
+      destSelect.value = prev;
+    } else if (matched.length === 1) {
+      destSelect.value = matched[0].num;
+    }
+
+    updateDestCount(matched.length, allNodes.length, query);
+  }
+
   function loadNodes() {
     if (!destSelect || cfg.kind !== "dm") return;
     fetch(cfg.apiNodes + "?iface=" + encodeURIComponent(ifaceSelect ? ifaceSelect.value : cfg.interface), {
@@ -222,21 +311,13 @@
         return r.json();
       })
       .then(function (data) {
-        destSelect.innerHTML = "";
-        (data.nodes || []).forEach(function (n) {
-          const opt = document.createElement("option");
-          opt.value = n.num;
-          opt.textContent = n.label;
-          destSelect.appendChild(opt);
-        });
-        if (!destSelect.options.length) {
-          const opt = document.createElement("option");
-          opt.value = "";
-          opt.textContent = "Keine Knoten in NodeDB";
-          destSelect.appendChild(opt);
-        }
+        allNodes = data.nodes || [];
+        renderDestOptions();
       })
-      .catch(function () {});
+      .catch(function () {
+        allNodes = [];
+        renderDestOptions();
+      });
   }
 
   if (form) {
@@ -289,7 +370,15 @@
   }
 
   if (ifaceSelect) {
-    ifaceSelect.addEventListener("change", loadNodes);
+    ifaceSelect.addEventListener("change", function () {
+      if (destSearch) destSearch.value = "";
+      loadNodes();
+    });
+  }
+
+  if (destSearch) {
+    destSearch.addEventListener("input", renderDestOptions);
+    destSearch.addEventListener("search", renderDestOptions);
   }
 
   if (input) {

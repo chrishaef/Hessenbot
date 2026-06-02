@@ -1186,7 +1186,48 @@ pre.admin-pre {
 }
 
 .mesh-chat-shell:has(.mesh-chat-field--dest) .mesh-chat-compose-bar {
-  grid-template-columns: minmax(5.5rem, 7rem) minmax(8rem, 14rem) 1fr auto;
+  grid-template-columns: minmax(5.5rem, 7rem) 1fr auto;
+}
+
+.mesh-chat-shell--dm .mesh-chat-field--dest {
+  grid-column: 1 / -1;
+}
+
+.mesh-chat-dest-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.mesh-chat-dest-search .input-group-text {
+  background: var(--card-bg-muted);
+  border-color: var(--card-border);
+  color: var(--text-secondary, #adb5bd);
+}
+
+.mesh-chat-dest-search .form-control {
+  border-color: var(--card-border);
+  min-width: 0;
+}
+
+.mesh-chat-dest-count {
+  min-width: 3.25rem;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #adb5bd);
+}
+
+.mesh-chat-dest-list {
+  font-size: 0.82rem;
+  line-height: 1.35;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+
+.mesh-chat-dest-list option {
+  padding: 0.15rem 0.25rem;
 }
 
 .mesh-chat-field {

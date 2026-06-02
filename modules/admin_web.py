@@ -635,8 +635,16 @@ def create_app(
         if kind == "dm":
             dest_row = """
     <div class="mesh-chat-field mesh-chat-field--dest">
-      <label class="mesh-chat-label" for="mesh-chat-dest">An</label>
-      <select id="mesh-chat-dest" class="form-select form-select-sm" required></select>
+      <label class="mesh-chat-label" for="mesh-chat-dest-search">An</label>
+      <div class="mesh-chat-dest-picker">
+        <div class="input-group input-group-sm mesh-chat-dest-search">
+          <span class="input-group-text" aria-hidden="true"><i class="bi bi-search"></i></span>
+          <input type="search" id="mesh-chat-dest-search" class="form-control"
+            placeholder="Name, ShortName, !hex oder #Nummer …" autocomplete="off" spellcheck="false">
+          <span class="input-group-text mesh-chat-dest-count" id="mesh-chat-dest-count" title="Treffer"></span>
+        </div>
+        <select id="mesh-chat-dest" class="form-select form-select-sm mesh-chat-dest-list" size="6" required></select>
+      </div>
     </div>"""
 
         alert_link = (
@@ -676,7 +684,7 @@ def create_app(
         import json
 
         inner = f"""
-<div class="mesh-chat-shell">
+<div class="mesh-chat-shell{" mesh-chat-shell--dm" if kind == "dm" else ""}">
   <p class="mesh-chat-subtitle">{html_escape(subtitle)}</p>
   {log_hint}
   <form id="mesh-chat-form" class="mesh-chat-compose">
@@ -716,7 +724,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=2"></script>
+<script src="/static/portal/mesh-chat.js?v=3"></script>
 """
         return _render_admin_template(
             inner,

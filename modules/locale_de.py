@@ -114,3 +114,16 @@ def duration_seconds_de(seconds: float) -> str:
     if rem:
         return f"{hours} Std. {rem} Min."
     return f"{hours} Std."
+
+
+def missing_cmd_bang_hint(cmd: str) -> str:
+    """Hinweis wenn ein Befehl ohne führendes ! per DM gesendet wurde."""
+    token = (cmd or "").strip()
+    if token.startswith("!"):
+        token = token[1:]
+    example = f"!{token}" if token else "!cmd"
+    return (
+        f"{BOT_NAME}: Mesh-Befehle beginnen mit !\n"
+        f'Meintest du „{example}"?\n'
+        f"!cmd = Befehlsliste"
+    )

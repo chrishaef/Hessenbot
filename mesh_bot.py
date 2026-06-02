@@ -15,7 +15,7 @@ from datetime import datetime
 from modules.log import logger, CustomFormatter, msgLogger, getPrettyTime
 import modules.settings as my_settings
 from modules.system import *
-import modules.nodedb as _ndb
+from modules.locale_de import missing_cmd_bang_hint
 
 # list of commands to remove from the default list for DM only
 restrictedCommands = []
@@ -1430,7 +1430,29 @@ def onReceive(packet, interface):
                         # respond with DM
                         send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode)
                 else:
-                    if llm_enabled and my_settings.llmReplyToNonCommands:
+                    missing_cmd = detect_missing_cmd_bang(message_string)
+                    if missing_cmd:
+                        logger.info(
+                            f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} "
+                            + CustomFormatter.green
+                            + "Received DM (missing !): "
+                            + CustomFormatter.white
+                            + f"{message_log_string} "
+                            + CustomFormatter.purple
+                            + "From: "
+                            + CustomFormatter.white
+                            + f"{get_name_from_number(message_from_id, 'long', rxNode)}"
+                        )
+                        if is_cmd_rate_limited(message_from_id):
+                            send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                        else:
+                            send_message(
+                                missing_cmd_bang_hint(missing_cmd),
+                                channel_number,
+                                message_from_id,
+                                rxNode,
+                            )
+                    elif llm_enabled and my_settings.llmReplyToNonCommands:
                         llm = handle_llm(message_from_id, channel_number, rxNode, message_string, publicChannel)
                         send_message(llm, channel_number, message_from_id, rxNode)
                     else:

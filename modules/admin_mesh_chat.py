@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import re
 import threading
@@ -246,12 +247,24 @@ def list_send_targets(iface_id: int) -> Tuple[Optional[str], List[Dict[str, str]
     for r in rows:
         if r.get("is_self"):
             continue
-        label = f"{r.get('shortName') or '?'} · {r.get('longName') or '?'}"
+        short = html.unescape(str(r.get("shortName") or "")).strip()
+        long_n = html.unescape(str(r.get("longName") or "")).strip()
+        node_id = html.unescape(str(r.get("node_id") or "")).strip()
+        num = str(r["num"])
+        label = f"{short or '?'} · {long_n or '?'}"
+        search = " ".join(
+            p.lower()
+            for p in (short, long_n, num, node_id, label)
+            if p
+        )
         out.append(
             {
-                "num": str(r["num"]),
-                "node_id": r.get("node_id") or "",
+                "num": num,
+                "node_id": node_id,
+                "short": short,
+                "long": long_n,
                 "label": label,
+                "search": search,
             }
         )
     out.sort(key=lambda x: x["label"].lower())
