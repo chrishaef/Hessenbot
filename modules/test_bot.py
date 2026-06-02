@@ -107,6 +107,42 @@ class TestBot(unittest.TestCase):
         self.assertIn("heute mittag", texts)
         self.assertEqual(msgs[-1].get("text"), "heute mittag")
 
+    def test_collect_messages_finds_dms_in_busy_channel_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        channel_noise = (
+            "2026-05-31 12:00:00,100 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "Ignoring Message: chatter From: Node{i}\n"
+        )
+        dm_in = (
+            "2026-05-31 12:45:00,200 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris\n"
+        )
+        dm_out = (
+            "2026-05-31 12:45:01,300 |     INFO | Device:1 req.ACK Sending DM: "
+            "pong To: Chris\n"
+        )
+        dm_missing = (
+            "2026-05-31 12:46:00,400 |     INFO | Device:1 Channel:0 "
+            "Received DM (missing !): ping From: Chris\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                for i in range(3000):
+                    f.write(channel_noise.format(i=i))
+                f.write(dm_in)
+                f.write(dm_out)
+                f.write(dm_missing)
+            msgs, err = collect_messages(td, kind="dm", limit=80)
+        self.assertIsNone(err)
+        texts = [m.get("text", "") for m in msgs]
+        self.assertIn("!ping", texts)
+        self.assertIn("pong", texts)
+        self.assertIn("ping", texts)
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 

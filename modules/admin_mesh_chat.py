@@ -24,6 +24,14 @@ _RING_LOCK = threading.Lock()
 _SEND_LOCK = threading.Lock()
 
 _TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+")
+_SEND_DM_TEXT_RE = re.compile(r"Sending DM:\s*(.+?)\s+To:")
+_RECV_DM_TEXT_RE = re.compile(r"(?:Received|Ignoring) DM:\s*(.+?)\s+From:")
+_RECV_DM_MISSING_BANG_RE = re.compile(r"Received DM \(missing !\):\s*(.+?)\s+From:")
+
+MESHBOT_TAIL_DEFAULT = 2500
+MESHBOT_TAIL_DM_SCAN = 12000
+MSGLOG_TAIL_DEFAULT = 1000
+MSGLOG_TAIL_DM_SCAN = 4000
 
 
 def _message_key(event: Dict[str, Any]) -> str:
@@ -52,6 +60,14 @@ def _parse_ts(line: str) -> Optional[datetime]:
         return None
 
 
+def _line_is_meshbot_dm(plain: str) -> bool:
+    return (
+        "Sending DM:" in plain
+        or "Received DM" in plain
+        or "Ignoring DM:" in plain
+    )
+
+
 def _parse_meshbot_line(
     plain: str, timestamp: datetime, nodes: _NodeDirectory
 ) -> Optional[Dict[str, Any]]:
@@ -76,10 +92,7 @@ def _parse_meshbot_line(
     if "Sending DM:" in plain or "Sending Multi-Chunk DM:" in plain:
         to_m = re.search(r"\sTo:\s*(.+?)$", plain)
         peer = nodes.resolve(to_m.group(1)) if to_m else {}
-        text_m = re.search(
-            r"Sending(?: Multi-Chunk)? DM:\s*(.+?)\s+To:",
-            plain,
-        )
+        text_m = _SEND_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return {**base, "dir": "out", "kind": "dm", "text": text, **peer}
 
@@ -102,13 +115,17 @@ def _parse_meshbot_line(
             "long": "",
         }
 
+    if "Received DM (missing !):" in plain:
+        from_m = re.search(r"From:\s*(.+?)$", plain)
+        peer = nodes.resolve(from_m.group(1)) if from_m else {}
+        text_m = _RECV_DM_MISSING_BANG_RE.search(plain)
+        text = text_m.group(1).strip() if text_m else ""
+        return {**base, "dir": "in", "kind": "dm", "text": text, **peer}
+
     if "Received DM:" in plain or "Ignoring DM:" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
         peer = nodes.resolve(from_m.group(1)) if from_m else {}
-        text_m = re.search(
-            r"(?:Received|Ignoring) DM:\s*(.+?)\s+From:",
-            plain,
-        )
+        text_m = _RECV_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return {**base, "dir": "in", "kind": "dm", "text": text, **peer}
 
@@ -199,11 +216,19 @@ def _tail_merged_log_paths(paths: List[str], max_lines: int) -> List[str]:
     return merged
 
 
-def _parse_meshbot_tail(log_dir: str, nodes: _NodeDirectory, *, max_lines: int = 2500) -> List[Dict[str, Any]]:
+def _parse_meshbot_tail(
+    log_dir: str,
+    nodes: _NodeDirectory,
+    *,
+    max_lines: int = MESHBOT_TAIL_DEFAULT,
+    dm_only: bool = False,
+) -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     paths = _resolve_rotated_log_paths(log_dir, "meshbot.log")
     for line in _tail_merged_log_paths(paths, max_lines):
         plain = _strip_ansi(line)
+        if dm_only and not _line_is_meshbot_dm(plain):
+            continue
         ts = _parse_ts(line)
         if not ts:
             continue
@@ -214,7 +239,11 @@ def _parse_meshbot_tail(log_dir: str, nodes: _NodeDirectory, *, max_lines: int =
 
 
 def _parse_messages_logs_tail(
-    log_dir: str, nodes: _NodeDirectory, *, max_lines: int = 1000
+    log_dir: str,
+    nodes: _NodeDirectory,
+    *,
+    max_lines: int = MSGLOG_TAIL_DEFAULT,
+    dm_only: bool = False,
 ) -> List[Dict[str, Any]]:
     from modules.web_dashboard import _parse_messages_log_lines
 
@@ -222,6 +251,8 @@ def _parse_messages_logs_tail(
     if not paths:
         return []
     lines = _tail_merged_log_paths(paths, max_lines)
+    if dm_only:
+        lines = [ln for ln in lines if " DM |" in ln]
     return _parse_messages_log_lines(lines, nodes)
 
 
@@ -240,8 +271,19 @@ def collect_messages(
     meshbot_path = os.path.join(os.path.realpath(log_dir), "meshbot.log")
 
     nodes = _NodeDirectory()
-    meshbot_events = _parse_meshbot_tail(log_dir, nodes)
-    msg_log_events = _parse_messages_logs_tail(log_dir, nodes)
+    dm_mode = kind == "dm"
+    meshbot_events = _parse_meshbot_tail(
+        log_dir,
+        nodes,
+        max_lines=MESHBOT_TAIL_DM_SCAN if dm_mode else MESHBOT_TAIL_DEFAULT,
+        dm_only=dm_mode,
+    )
+    msg_log_events = _parse_messages_logs_tail(
+        log_dir,
+        nodes,
+        max_lines=MSGLOG_TAIL_DM_SCAN if dm_mode else MSGLOG_TAIL_DEFAULT,
+        dm_only=dm_mode,
+    )
 
     merged = _merge_events(meshbot_events, msg_log_events)
 
