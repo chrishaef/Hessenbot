@@ -32,7 +32,6 @@ from modules.locale_de import HELP_PREFIX
 
 help_message = HELP_PREFIX
 asyncLoop = asyncio.new_event_loop()
-games_enabled = False
 multiPingList = [{'message_from_id': 0, 'count': 0, 'type': '', 'deviceID': 0, 'channel_number': 0, 'startCount': 0}]
 interface_retry_count = 3
 _interface_reconnecting: set[int] = set()
@@ -164,8 +163,6 @@ if llm_enabled:
     from modules.llm import * # from the spudgunman/meshing-around repo
     trap_list = trap_list + trap_list_llm # items ask:
     help_message = help_message + ", askai"
-
-gamesCmdList = ""
 
 # Sentry Configuration
 if sentry_enabled:

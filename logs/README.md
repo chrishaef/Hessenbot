@@ -167,4 +167,4 @@ Details zur öffentlichen Statistik und Charts: Projekt-`README.md` und `static/
 ./launch.sh html5
 ```
 
-Ausgabe standardmäßig unter `etc/www/`. Das aktuelle Portal ersetzt diese Ansicht für den Alltag durch `/` und `/admin`.
+Ausgabe standardmäßig unter `etc/report_output/` (konfigurierbar in `etc/web_reporter.cfg`). Das Flask-Portal unter `/` und `/admin` ersetzt diese statischen Reports im Alltag.

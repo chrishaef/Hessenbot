@@ -157,19 +157,15 @@ chmod +x update.sh
 
 ### Purpose
 
-`launch.sh` is a convenience script for starting the Mesh Bot, Pong Bot, or generating reports within the Python virtual environment. It ensures the correct environment is activated and the appropriate script is run.
+`launch.sh` is a convenience script for starting Hessenbot or generating reports within the Python virtual environment. It ensures the correct environment is activated and the appropriate script is run.
 
 ### How to Use
 
 From your project root, run one of the following commands:
 
-- Launch Mesh Bot:  
+- Launch Hessenbot (mesh_bot):  
   ```sh
   bash launch.sh mesh
-  ```
-- Launch Pong Bot:  
-  ```sh
-  bash launch.sh pong
   ```
 - Generate HTML report:  
   ```sh
@@ -196,7 +192,7 @@ From your project root, run one of the following commands:
 
 - The script requires a Python virtual environment (`venv`) to be present in the project directory.
 - If `venv` is missing, the script will exit with an error message.
-- Always provide an argument (`mesh`, `pong`, `html`, `html5`, or `add`) to specify what you want to launch.
+- Always provide an argument (`mesh`, `html`, `html5`, or `add`) to specify what you want to launch.
 
 ## Troubleshooting
 

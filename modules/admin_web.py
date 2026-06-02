@@ -1129,7 +1129,6 @@ def create_app(
             ("fri", "Freitags zur Uhrzeit (fri)"),
             ("sat", "Samstags zur Uhrzeit (sat)"),
             ("sun", "Sonntags zur Uhrzeit (sun)"),
-            ("joke", "Witz — Intervall = Minuten (joke)"),
             ("link", "bbslink — Intervall = Stunden (link)"),
             ("weather", "Wetter — täglich zur Uhrzeit (weather)"),
             ("news", "News — Intervall = Stunden (news)"),
@@ -1192,7 +1191,7 @@ def create_app(
       <strong>day:</strong> ohne Uhrzeit = alle N Tage; mit Uhrzeit = alle N Tage zur gleichen Uhrzeit.
       <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
       <strong>mon … sun:</strong> Uhrzeit unten setzen (HH:MM).
-      <strong>joke:</strong> Minuten; <strong>link, news, readrss, sysinfo:</strong> Stunden.
+      <strong>link, news, readrss, sysinfo:</strong> Stunden.
       <strong>weather, mwx, tide, solar:</strong> Uhrzeit Pflicht, Intervall oft egal (siehe Code).
     </p>
 
@@ -1208,7 +1207,6 @@ def create_app(
           <tr><td>day</td><td>Tage (1=täglich)</td><td>optional, sonst nur Tagesabstand</td></tr>
           <tr><td>hour / min</td><td>Stunden bzw. Minuten</td><td>—</td></tr>
           <tr><td>mon … sun</td><td>—</td><td>erforderlich</td></tr>
-          <tr><td>joke</td><td>Minuten</td><td>—</td></tr>
           <tr><td>link, news, readrss, sysinfo</td><td>Stunden</td><td>—</td></tr>
           <tr><td>weather, mwx, tide, solar</td><td>(siehe Log)</td><td>erforderlich</td></tr>
         </tbody>

@@ -1,31 +1,24 @@
 # etc Directory
 
-This folder contains supporting files and resources for the Mesh Bot project. Typical contents include:
+Supporting files and resources for Hessenbot:
 
-- **Images**: Visual assets used in documentation (e.g., `pong-bot.jpg`).
-- **Custom Scripts**: Example or utility scripts for advanced configuration (e.g., `custom_scheduler.py` for scheduled tasks).
-- **tmp**: Temp files for install
+- **Custom Scripts**: Example or utility scripts (e.g. `custom_scheduler.template` for scheduled tasks).
+- **Service templates**: `mesh_bot.tmp`, `mesh_bot_reporting.tmp` — used by `install.sh`.
+- **Reports**: `report_generator.py` / `report_generator5.py` — static HTML from logs (output: `etc/report_output/`).
 
 ## db_admin.py
 
 **Purpose:**  
-`db_admin.py` is a simple administrative tool for viewing the contents of the Mesh Bot’s data and high score databases. It loads and prints out messages, direct messages, email/SMS records, and game high score tables stored in the `/data` directory.
+Administrative tool for viewing BBS, DM, email/SMS pickle databases and optional checklist/inventory SQLite tables in `data/`.
 
-**Usage:**  
-Run this script from the command line to display the current contents of the bot’s databases. This is useful for debugging, verifying data integrity, or reviewing stored messages and game scores.
+**Usage:**
 
 ```sh
 python etc/db_admin.py
 ```
 
-**What it does:**  
-- Attempts to load various `.pkl` and `.pickle` files from the `data` directory.
-- Prints out the contents of BBS messages, direct messages, email and SMS databases.
-- Displays high scores for supported games (Lemonade Stand, DopeWars, BlackJack, Video Poker, Mastermind, GolfSim).
-- If a file is missing, it will print a message indicating so.
-
 **Note:**  
-This tool is for administrative and debugging purposes only. It does not modify any data.
+Read-only debugging tool; does not modify data.
 
 ## eas_alert_parser.py
 

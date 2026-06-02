@@ -20,12 +20,6 @@ if [[ $NOPE -eq 1 ]]; then
     sudo systemctl stop mesh_bot || true
     sudo systemctl disable mesh_bot || true
 
-    sudo systemctl stop pong_bot || true
-    sudo systemctl disable pong_bot || true
-
-    sudo systemctl stop mesh_bot_w3_server || true
-    sudo systemctl disable mesh_bot_w3_server || true
-
     sudo systemctl stop mesh_bot_reporting || true
     sudo systemctl disable mesh_bot_reporting || true
 
@@ -191,17 +185,13 @@ mkdir -p "$program_path/logs"
 mkdir -p "$program_path/data"
 
 # copy service files
-cp etc/pong_bot.tmp etc/pong_bot.service
 cp etc/mesh_bot.tmp etc/mesh_bot.service
 cp etc/mesh_bot_reporting.tmp etc/mesh_bot_reporting.service
-cp etc/mesh_bot_w3_server.tmp etc/mesh_bot_w3_server.service
 
 # set the correct path in the service file
 replace="s|/dir/|$program_path/|g"
-sed -i "$replace" etc/pong_bot.service
 sed -i "$replace" etc/mesh_bot.service
 sed -i "$replace" etc/mesh_bot_reporting.service
-sed -i "$replace" etc/mesh_bot_w3_server.service
 
 # copy modules/custom_scheduler.py template if it does not exist
 if [[ ! -f modules/custom_scheduler.py ]]; then
@@ -274,8 +264,6 @@ else
             # config service files for virtual environment
             replace="s|python3 mesh_bot.py|/usr/bin/bash launch.sh mesh|g"
             sed -i "$replace" etc/mesh_bot.service
-            replace="s|python3 pong_bot.py|/usr/bin/bash launch.sh pong|g"
-            sed -i "$replace" etc/pong_bot.service
 
             # install dependencies to venv
             pip install -U -r requirements.txt
@@ -294,21 +282,19 @@ else
 fi
 
 echo "----------------------------------------------"
-echo "Installing bot service? - mesh or pong or none"
+echo "Install Hessenbot (mesh_bot) as systemd service?"
 echo "----------------------------------------------"
 
-# if $1 is passed
-if [[ $1 == "pong" ]]; then
-    bot="pong"
-elif [[ $1 == "mesh" ]] || [[ $(echo "${embedded}" | grep -i "^y") ]]; then
+if [[ $1 == "mesh" ]] || [[ $(echo "${embedded}" | grep -i "^y") ]]; then
     bot="mesh"
 else
-    printf "\n\n"
-    echo "Which bot do you want to install as a service? Pong Mesh or None? (pong/mesh/n)"
-    echo "Pong bot is a simple bot for network testing"
-    echo "Mesh bot is a more complex bot more suited for meshing around"
-    echo "None will skip the service install"
-    read bot
+    printf "\n\nInstall mesh_bot.service? (y/n): "
+    read install_mesh
+    if [[ $(echo "${install_mesh}" | grep -i "^y") ]]; then
+        bot="mesh"
+    else
+        bot="none"
+    fi
 fi
 
 # Decide which user to use for the service
@@ -316,7 +302,7 @@ if [[ $(echo "${bot}" | grep -i "^n") ]]; then
     # Not installing as a service, use current user
     bot_user=$(whoami)
 else
-    # Installing as a service (meshbot or pongbot), always use meshbot account
+    # Installing as a service, always use meshbot account
     if ! id meshbot &>/dev/null; then
         sudo useradd -M meshbot
         sudo usermod -L meshbot
@@ -337,13 +323,11 @@ echo "----------------------------------------------"
 
 # set the correct user in the service file
 replace="s|User=pi|User=$bot_user|g"
-sed -i "$replace" etc/pong_bot.service
 sed -i "$replace" etc/mesh_bot.service
 sed -i "$replace" etc/mesh_bot_reporting.service
 sed -i "$replace" etc/mesh_bot_reporting.timer
 # set the correct group in the service file
 replace="s|Group=pi|Group=$bot_user|g"
-sed -i "$replace" etc/pong_bot.service
 sed -i "$replace" etc/mesh_bot.service
 sed -i "$replace" etc/mesh_bot_reporting.service
 sed -i "$replace" etc/mesh_bot_reporting.timer
@@ -370,15 +354,6 @@ if ! systemctl is-active --quiet ntp.service && \
 fi
 
 
-if [[ $(echo "${bot}" | grep -i "^p") ]]; then
-    # install service for pong bot
-    sudo cp etc/pong_bot.service /etc/systemd/system/
-    sudo systemctl enable pong_bot.service
-    sudo systemctl daemon-reload
-    echo "to start pong bot service: systemctl start pong_bot"
-    service="pong_bot"
-fi
-
 if [[ $(echo "${bot}" | grep -i "^m") ]]; then
     # install service for mesh bot
     sudo cp etc/mesh_bot.service /etc/systemd/system/
@@ -400,16 +375,6 @@ echo "mesh_bot_reporting.timer installed and enabled"
 echo "Check timer status with: systemctl status mesh_bot_reporting.timer"
 echo "List all timers with: systemctl list-timers"
 echo ""
-
-# # install mesh_bot_w3_server service
-# echo "Installing mesh_bot_w3_server.service to run the web3 server..."
-# sudo cp etc/mesh_bot_w3_server.service /etc/systemd/system/
-# sudo systemctl daemon-reload
-# sudo systemctl enable mesh_bot_w3_server.service
-# sudo systemctl start mesh_bot_w3_server.service
-# echo "mesh_bot_w3_server.service installed and enabled"
-# echo "Check service status with: systemctl status mesh_bot_w3_server.service"
-# echo ""
 
 echo "----------------------------------------------"
 echo "Extra options for installation..."
@@ -554,19 +519,10 @@ exit 0
 # sudo systemctl stop mesh_bot
 # sudo systemctl disable mesh_bot
 
-# sudo systemctl stop pong_bot
-# sudo systemctl disable pong_bot
-
-# sudo systemctl stop mesh_bot_w3_server
-# sudo systemctl disable mesh_bot_w3_server
-
 # sudo systemctl stop mesh_bot_reporting
 # sudo systemctl disable mesh_bot_reporting
 
 # sudo rm /etc/systemd/system/mesh_bot.service
-# sudo rm /etc/systemd/system/mesh_bot_reporting
-# sudo rm /etc/systemd/system/pong_bot.service
-# sudo rm /etc/systemd/system/mesh_bot_w3_server.service
 # sudo rm /etc/systemd/system/mesh_bot_reporting.service
 # sudo rm /etc/systemd/system/mesh_bot_reporting.timer
 

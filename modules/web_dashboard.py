@@ -432,17 +432,12 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
             timestamp = datetime.strptime(timestamp_match.group(1), "%Y-%m-%d %H:%M:%S")
             hourly[timestamp.strftime("%Y-%m-%d %H:00:00")] += 1
 
-        if "Bot detected Commands" in line or "LLM Query:" in line or "PlayingGame" in line:
+        if "Bot detected Commands" in line or "LLM Query:" in line:
             command = re.search(r"'cmd': '(\w+)'", line)
             user = re.search(r"From: (.+)$", line)
             if "LLM Query:" in line and timestamp:
                 command_counts["LLM Query"] += 1
                 command_timestamps.append((timestamp.isoformat(), "LLM Query"))
-            if "PlayingGame" in line:
-                game = re.search(r"PlayingGame (\w+)", line)
-                if game and timestamp:
-                    command_counts[game.group(1)] += 1
-                    command_timestamps.append((timestamp.isoformat(), game.group(1)))
             if command and timestamp:
                 cmd = command.group(1)
                 command_counts[cmd] += 1

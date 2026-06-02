@@ -56,10 +56,6 @@ welcome_message = Hessenbot (Meshhessen) — dein Mesh-Assistent. Probiere: ping
 # whoami
 whoami = True
 
-# enable or disable the Joke module
-DadJokes = False
-DadJokesEmoji = False
-
 # enable or disable the Solar module
 spaceWeather = True
 
@@ -324,9 +320,9 @@ message = "Hessenbot (Meshhessen) grüßt! DM für mehr Infos."
 # enable overides the above and uses the motd as the message
 schedulerMotd = False
 # value = Zeitplantyp (siehe Web-Admin Scheduler oder modules/scheduler.py). z.B. day, hour, min, mon…sun,
-# joke, link, weather, news, readrss, mwx, sysinfo, tide, solar, custom
+# link, weather, news, readrss, mwx, sysinfo, tide, solar, custom
 value =
-# interval = Zahl: bei day oft Tage; bei hour/min Stunden bzw. Minuten; bei joke Minuten;
+# interval = Zahl: bei day oft Tage; bei hour/min Stunden bzw. Minuten;
 # bei link/news/readrss/sysinfo Stunden (siehe Kurzübersicht im Web-Admin)
 interval = 
 # time = Uhrzeit HH:MM (24h), nötig u.a. für day mit Uhrzeit, Wochentage mon…sun, weather, mwx, tide, solar
@@ -386,7 +382,7 @@ voxInputDevice = default
 # "hey chirpy"
 voxOnTrapList = True
 voxTrapList = chirpy
-# allow use of 'weather' and 'joke' commands via VOX
+# allow use of 'weather' commands via VOX
 voxEnableCmd = True
 
 # Meshages Text-to-Speech (TTS) for incoming messages and DM

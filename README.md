@@ -2,7 +2,7 @@
 
 **Hessenbot** ist ein Meshtastic-Autoresponder für [Meshhessen](https://meshhessen.de) — ein Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
 
-Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, Traceroute, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden entfernt; der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
+Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, Traceroute, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
 
 ## Screenshots
 
@@ -195,13 +195,6 @@ enabled = True
 ```
 
 `cmdBang = True` — normale Befehle beginnen mit `!`. Ausnahme: **Channel-Test** (siehe oben).
-
-## Was in diesem Fork **nicht** mehr enthalten ist
-
-- Spiele (Blackjack, DopeWars, Quiz, …) und `modules/games/`
-- US-/UK-Alerts (NOAA EAS, FEMA iPAWS, USGS, UK-Scraper)
-- Legacy-Webserver `modules/web.py` und `etc/www/` (Port 8420)
-- `launch.sh game` / Display-Spiele
 
 ## Entwicklung & Plattform
 

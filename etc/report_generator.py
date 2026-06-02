@@ -16,13 +16,13 @@ from collections import Counter, defaultdict
 
 # global variables
 LOG_PATH = '/opt/meshing-around/logs' # override path to log files (defaults to ../log)
-W3_PATH = '/var/www/html/' # override path to web server root (defaults to ../www)
+W3_PATH = '/var/www/html/' # override path for HTML report output (defaults to etc/report_output)
 multiLogReader = False # set to True to read all logs in ../log
 shameWordList = ['password', 'combo', 'key', 'hidden', 'secret', 'pass', 'token', 'login', 'username', 'admin', 'root', 'base64:', '==' ]
 
 # system variables
 script_dir = os.path.dirname(os.path.realpath(__file__))
-www_dir = os.path.join(script_dir, 'www')
+www_dir = os.path.join(script_dir, 'report_output')
 config_file = os.path.join(script_dir, 'web_reporter.cfg')
 
 # set up report.cfg as ini file
@@ -111,7 +111,7 @@ def parse_log_file(file_path):
             timestamp = datetime.strptime(timestamp_match.group(1), '%Y-%m-%d %H:%M:%S')
             log_data['hourly_activity'][timestamp.strftime('%Y-%m-%d %H:00:00')] += 1
 
-        if 'Bot detected Commands' in line or 'LLM Query:' in line or 'PlayingGame' in line:
+        if 'Bot detected Commands' in line or 'LLM Query:' in line:
             # get the command and user from the line
             command = re.search(r"'cmd': '(\w+)'", line)
             user = re.search(r"From: (.+)$", line)
@@ -120,12 +120,13 @@ def parse_log_file(file_path):
                 log_data['command_counts']['LLM Query'] += 1
                 log_data['command_timestamps'].append((timestamp.isoformat(), 'LLM Query'))
 
-            if 'PlayingGame' in line:
-                #log line looks like this. 2024-10-04 20:24:53,381 |    DEBUG | System: 862418040 PlayingGame BlackJack last_cmd: new
-                game = re.search(r'PlayingGame (\w+)', line)
-                user = re.search(r'System: (\d+)', line)
-                log_data['command_counts'][game.group(1)] += 1
-                log_data['command_timestamps'].append((timestamp.isoformat(), game))
+            if user:
+                user = user.group(1)
+            if command:
+                cmd = command.group(1)
+                log_data['command_counts'][cmd] += 1
+                # include the user who sent the command
+                log_data['command_timestamps'].append((timestamp.isoformat(), cmd + f' from {user}'))
 
         if 'Sending DM:' in line or 'Sending Multi-Chunk DM:' in line or 'SendingChannel:' in line or 'Sending Multi-Chunk Message:' in line:
             log_data['message_types']['Outgoing DM'] += 1
@@ -343,32 +344,14 @@ def get_database_info():
     base_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'data'))
 
     # data files
-    databaseFiles = [os.path.join(base_dir, 'lemonstand_hs.pkl'),
-                     os.path.join(base_dir, 'dopewar_hs.pkl'),
-                     os.path.join(base_dir, 'blackjack_hs.pkl'),
-                     os.path.join(base_dir, 'videopoker_hs.pkl'),
-                     os.path.join(base_dir, 'mmind_hs.pkl'),
-                     os.path.join(base_dir, 'golfsim_hs.pkl'),
-                     os.path.join(base_dir, 'bbsdb.pkl'),
+    databaseFiles = [os.path.join(base_dir, 'bbsdb.pkl'),
                      os.path.join(base_dir, 'bbsdm.pkl'),
                      os.path.join(base_dir, 'qrz.db')]
     
     for file in databaseFiles:
         try:
             with open(file, 'rb') as f:
-                if 'lemonstand' in file:
-                    lemon_score = pickle.load(f)
-                elif 'dopewar' in file:
-                    dopewar_score = pickle.load(f)
-                elif 'blackjack' in file:
-                    blackjack_score = pickle.load(f)
-                elif 'videopoker' in file:
-                    videopoker_score = pickle.load(f)
-                elif 'mmind' in file:
-                    mmind_score = pickle.load(f)
-                elif 'golfsim' in file:
-                    golfsim_score = pickle.load(f)
-                elif 'bbsdb' in file:
+                if 'bbsdb' in file:
                     bbsdb = pickle.load(f)
                 elif 'bbsdm' in file:
                     bbsdm = pickle.load(f)
@@ -384,19 +367,7 @@ def get_database_info():
                     conn.close()
         except Exception as e:
             print(f"Warning issue reading database file: {str(e)}")
-            if 'lemonstand' in file:
-                lemon_score = "no data"
-            elif 'dopewar' in file:
-                dopewar_score = "no data"
-            elif 'blackjack' in file:
-                blackjack_score = "no data"
-            elif 'videopoker' in file:
-                videopoker_score = "no data"
-            elif 'mmind' in file:
-                mmind_score = "no data"
-            elif 'golfsim' in file:
-                golfsim_score = "no data"
-            elif 'bbsdb' in file:
+            if 'bbsdb' in file:
                 bbsdb = "no data"
             elif 'bbsdm' in file:
                 bbsdm = "no data"
@@ -419,7 +390,7 @@ def get_database_info():
         print(f"Error with database: {str(e)}")
         pass
 
-    if 'no data' in [lemon_score, dopewar_score, blackjack_score, videopoker_score, mmind_score, golfsim_score]:
+    if 'no data' in [bbsdb, bbsdm]:
         database = "Error(s) Detected"
     else:
         database = " Online"
@@ -428,12 +399,6 @@ def get_database_info():
         'database': database,
         "bbsdb": prettyBBSdb,
         "bbsdm": prettyBBSdm,
-        'lemon_score': lemon_score,
-        'dopewar_score': dopewar_score,
-        'blackjack_score': blackjack_score,
-        'videopoker_score': videopoker_score,
-        'mmind_score': mmind_score,
-        'golfsim_score': golfsim_score,
         'banList': banList,
         'adminList': adminList,
         'sentryIgnoreList': sentryIgnoreList,
@@ -915,16 +880,6 @@ def generate_database_html(database_info):
         <h1>BBS Message Database</h1>
         <p>BBSdb: ${bbsdb}</p>
         <p>BBSdm: ${bbsdm}</p>
-        <h1>High Scores</h1>
-        <table>
-            <tr><th>Game</th><th>High Score</th></tr>
-            <tr><td>Lemonade Stand</td><td>${lemon_score}</td></tr>
-            <tr><td>Dopewars</td><td>${dopewar_score}</td></tr>
-            <tr><td>Blackjack</td><td>${blackjack_score}</td></tr>
-            <tr><td>Video Poker</td><td>${videopoker_score}</td></tr>
-            <tr><td>Mastermind</td><td>${mmind_score}</td></tr>
-            <tr><td>Golf Simulator</td><td>${golfsim_score}</td></tr>
-        </table>
         <h1>QRZ Database</h1>
         <p>QRZ Database holds heard nodeID and Shortname</p>
         <table>
@@ -968,7 +923,7 @@ def main():
     
     try:
         if not os.path.exists(output_dir):
-            output_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'www')
+            output_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'report_output')
             output_dir = os.path.abspath(output_dir)
             index_path = os.path.join(output_dir, 'index.html')
 

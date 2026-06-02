@@ -28,8 +28,6 @@ SC="${SUDO} systemctl"
 # Match etc/*.service names used by install.sh
 UNITS=(
     mesh_bot.service
-    pong_bot.service
-    mesh_bot_w3_server.service
     mesh_bot_reporting.timer
 )
 
@@ -140,7 +138,7 @@ echo "----------------------------------------------"
 echo "Runtime permissions (data/, logs/)"
 echo "----------------------------------------------"
 BOT_USER="meshbot"
-for svc in mesh_bot.service pong_bot.service mesh_bot_w3_server.service; do
+for svc in mesh_bot.service; do
     if $SUDO systemctl cat "$svc" &>/dev/null; then
         u=$($SUDO systemctl show "$svc" -p User --value 2>/dev/null || true)
         if [[ -n "$u" && "$u" != "0" ]]; then

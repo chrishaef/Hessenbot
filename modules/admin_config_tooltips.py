@@ -35,8 +35,6 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("general", "motd"): "Standard-Text für MOTD und geplante MOTD-Sendungen; wird beim Start eingelesen.",
     ("general", "welcome_message"): "Text, den der Bot neuen Knoten als Begrüßung schickt (z. B. mit QRZ).",
     ("general", "whoami"): "True: Befehl !whoami zeigt Name, ID, Signal und Route der anfragenden Node.",
-    ("general", "DadJokes"): "True: Witz-Befehle (joke) sind aktiv.",
-    ("general", "DadJokesEmoji"): "True: Witze zusätzlich mit Emoji-Format.",
     ("general", "spaceWeather"): "True: Befehle sun, moon, solar, hfcond und ggf. satpass (mit API-Key) sind verfügbar.",
     ("general", "rssEnable"): "True: RSS-Feeds können per Befehl abgerufen werden.",
     ("general", "rssFeedURL"): "URLs der RSS-Feeds, kommagetrennt — Reihenfolge zu rssFeedNames.",

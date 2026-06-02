@@ -2,7 +2,7 @@
 import pickle
 import sqlite3
 
-print ("\n Meshing-Around Database Admin Tool\n")
+print("\n Hessenbot Database Admin Tool\n")
 
 
 # load the bbs messages from the database file
@@ -47,68 +47,6 @@ except Exception as e:
         sms_db = "System: data/sms_db.pickle not found"
 
 
-# Game HS tables
-try:
-    with open('../data/lemonstand.pkl', 'rb') as f:
-       lemon_score = pickle.load(f)
-except Exception as e:
-    try:
-        with open('data/lemonstand.pkl', 'rb') as f:
-            lemon_score = pickle.load(f)
-    except Exception as e:
-        lemon_score = "System: data/lemonstand.pkl not found"
-
-try:
-    with open('../data/dopewar_hs.pkl', 'rb') as f:
-        dopewar_score = pickle.load(f)
-except Exception as e:
-    try:
-        with open('data/dopewar_hs.pkl', 'rb') as f:
-            dopewar_score = pickle.load(f)
-    except Exception as e:
-        dopewar_score = "System: data/dopewar_hs.pkl not found"
-
-try:
-    with open('../data/blackjack_hs.pkl', 'rb') as f:
-        blackjack_score = pickle.load(f)
-except Exception as e:
-    try:
-        with open('data/blackjack_hs.pkl', 'rb') as f:
-            blackjack_score = pickle.load(f)
-    except Exception as e:
-        blackjack_score = "System: data/blackjack_hs.pkl not found"
-
-try:
-    with open('../data/videopoker_hs.pkl', 'rb') as f:
-        videopoker_score = pickle.load(f)
-except Exception as e:
-    try:
-        with open('data/videopoker_hs.pkl', 'rb') as f:
-            videopoker_score = pickle.load(f)
-    except Exception as e:
-        videopoker_score = "System: data/videopoker_hs.pkl not found"
-
-try:
-    with open('../mmind_hs.pkl', 'rb') as f:
-        mmind_score = pickle.load(f)
-except Exception as e:
-    try:
-        with open('mmind_hs.pkl', 'rb') as f:
-            mmind_score = pickle.load(f)
-    except Exception as e:
-        mmind_score = "System: mmind_hs.pkl not found"
-
-try:
-    with open('../data/golfsim_hs.pkl', 'rb') as f:
-        golfsim_score = pickle.load(f)
-except Exception as e:
-    try:
-        with open('data/golfsim_hs.pkl', 'rb') as f:
-            golfsim_score = pickle.load(f)
-    except Exception as e:
-        golfsim_score = "System: data/golfsim_hs.pkl not found"
-
-
 # checklist.db admin display
 print("\nCurrent Check-ins Table\n")
 
@@ -127,11 +65,9 @@ try:
     rows = c.fetchall()
     col_names = [desc[0] for desc in c.description]
     if rows:
-        # Print header
         header = " | ".join(f"{name:<15}" for name in col_names)
         print(header)
         print("-" * len(header))
-        # Print rows
         for row in rows:
             print(" | ".join(f"{str(col):<15}" for col in row))
     else:
@@ -148,7 +84,7 @@ try:
 except Exception:
     conn = sqlite3.connect('data/inventory.db')
 c = conn.cursor()
-try:    
+try:
     c.execute("""
         SELECT * FROM inventory
         ORDER BY item_id DESC
@@ -157,11 +93,9 @@ try:
     rows = c.fetchall()
     col_names = [desc[0] for desc in c.description]
     if rows:
-        # Print header
         header = " | ".join(f"{name:<15}" for name in col_names)
         print(header)
         print("-" * len(header))
-        # Print rows
         for row in rows:
             print(" | ".join(f"{str(col):<15}" for col in row))
     else:
@@ -172,20 +106,12 @@ finally:
     conn.close()
 
 
-# Pickle database displays
-print ("System: bbs_messages")
-print (bbs_messages)
-print ("\nSystem: bbs_dm")
-print (bbs_dm)
-print ("\nSystem: email_db")
-print (email_db)
-print ("\nSystem: sms_db")
-print (sms_db)
-print (f"\n\nGame HS tables\n")
-print (f"lemon:{lemon_score}")
-print (f"dopewar:{dopewar_score}")
-print (f"blackjack:{blackjack_score}")
-print (f"videopoker:{videopoker_score}")
-print (f"mmind:{mmind_score}")
-print (f"golfsim:{golfsim_score}")
-print ("\n")
+print("System: bbs_messages")
+print(bbs_messages)
+print("\nSystem: bbs_dm")
+print(bbs_dm)
+print("\nSystem: email_db")
+print(email_db)
+print("\nSystem: sms_db")
+print(sms_db)
+print("\n")
