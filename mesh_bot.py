@@ -15,6 +15,7 @@ from datetime import datetime
 from modules.log import logger, CustomFormatter, msgLogger, getPrettyTime
 import modules.settings as my_settings
 from modules.system import *
+import modules.nodedb as _ndb
 from modules.locale_de import missing_cmd_bang_hint
 
 # list of commands to remove from the default list for DM only
