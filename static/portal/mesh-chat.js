@@ -28,6 +28,7 @@
   let hideBotReplies = false;
 
   let allDmMessages = [];
+  let allChannelMessages = [];
   let selectedPeerId = "";
   let userSearchQuery = "";
 
@@ -204,9 +205,82 @@
 
   function scrollFeed(force) {
     if (!feed) return;
-    const nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 100;
-    if (force || nearBottom) {
+    const doScroll = function () {
       feed.scrollTop = feed.scrollHeight;
+    };
+    if (force) {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(doScroll);
+      });
+      return;
+    }
+    const nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120;
+    if (nearBottom) {
+      requestAnimationFrame(doScroll);
+    }
+  }
+
+  function messageSort(a, b) {
+    if (a.time !== b.time) {
+      return a.time > b.time ? 1 : -1;
+    }
+    const ar = a.dir === "in" ? 0 : 1;
+    const br = b.dir === "in" ? 0 : 1;
+    if (ar !== br) return ar - br;
+    return String(a.mid || "").localeCompare(String(b.mid || ""));
+  }
+
+  function rememberMessage(m, idx) {
+    const mid = m.mid || "idx-" + idx + "-" + (m.time || "") + "-" + (m.text || "").slice(0, 40);
+    if (known.has(mid)) return null;
+    known.add(mid);
+    m.mid = mid;
+    if (m.time && m.time > lastIso) lastIso = m.time;
+    return m;
+  }
+
+  function renderFeedMessages(messages, autoScroll) {
+    if (!feed) return;
+    feed.innerHTML = "";
+    lastDateKey = "";
+
+    messages.forEach(function (m) {
+      const dk = dateKey(m.time);
+      if (dk && dk !== lastDateKey) {
+        feed.appendChild(renderDateDivider(dk));
+        lastDateKey = dk;
+      }
+      feed.appendChild(renderMessage(m));
+    });
+
+    updateCount(messages.length);
+    scrollFeed(!!autoScroll);
+  }
+
+  function ingestChannelMessages(messages, replace) {
+    if (replace) {
+      allChannelMessages = [];
+      known.clear();
+      lastIso = "";
+      lastDateKey = "";
+    }
+
+    const before = allChannelMessages.length;
+    (messages || []).forEach(function (m, idx) {
+      const row = rememberMessage(m, idx);
+      if (!row) return;
+      allChannelMessages.push(row);
+    });
+
+    allChannelMessages.sort(messageSort);
+    renderFeedMessages(
+      allChannelMessages.filter(shouldShowMessage),
+      replace || allChannelMessages.length > before
+    );
+
+    if (replace) {
+      lastFullPollAt = Date.now();
+      lastPollDayKey = todayKey();
     }
   }
 
@@ -225,48 +299,7 @@
   }
 
   function appendMessages(messages, replace) {
-    if (!feed) return;
-    if (replace) {
-      feed.innerHTML = "";
-      known.clear();
-      lastDateKey = "";
-      lastIso = "";
-    }
-    if (!messages || !messages.length) {
-      if (replace) updateCount(0);
-      return;
-    }
-
-    let added = 0;
-    messages.forEach(function (m, idx) {
-      const mid = m.mid || "idx-" + idx + "-" + (m.time || "") + "-" + (m.text || "").slice(0, 40);
-      if (known.has(mid)) return;
-      if (!shouldShowMessage(m)) return;
-      known.add(mid);
-      m.mid = mid;
-
-      const dk = dateKey(m.time);
-      if (dk && dk !== lastDateKey) {
-        feed.appendChild(renderDateDivider(dk));
-        lastDateKey = dk;
-      }
-
-      feed.appendChild(renderMessage(m));
-      added++;
-      if (m.time && m.time > lastIso) lastIso = m.time;
-    });
-
-    if (added) {
-      updateCount(known.size);
-      scrollFeed(replace);
-    } else if (replace) {
-      updateCount(0);
-    }
-
-    if (replace) {
-      lastFullPollAt = Date.now();
-      lastPollDayKey = todayKey();
-    }
+    ingestChannelMessages(messages, replace);
   }
 
   function buildUserSummaries() {
@@ -367,13 +400,10 @@
       return shouldShowMessage(m) && dmPartnerId(m) === selectedPeerId;
     });
 
-    thread.sort(function (a, b) {
-      if (a.time === b.time) return 0;
-      return a.time > b.time ? 1 : -1;
-    });
+    thread.sort(messageSort);
 
     lastDateKey = "";
-    thread.forEach(function (m, idx) {
+    thread.forEach(function (m) {
       const dk = dateKey(m.time);
       if (dk && dk !== lastDateKey) {
         feed.appendChild(renderDateDivider(dk));
@@ -395,17 +425,12 @@
     }
 
     (messages || []).forEach(function (m, idx) {
-      const mid = m.mid || "idx-" + idx + "-" + (m.time || "") + "-" + (m.text || "").slice(0, 40);
-      if (known.has(mid)) return;
-      known.add(mid);
-      m.mid = mid;
-      allDmMessages.push(m);
+      const row = rememberMessage(m, idx);
+      if (!row) return;
+      allDmMessages.push(row);
     });
 
-    allDmMessages.sort(function (a, b) {
-      if (a.time === b.time) return 0;
-      return a.time > b.time ? 1 : -1;
-    });
+    allDmMessages.sort(messageSort);
 
     renderUserList();
     renderDmFeed();

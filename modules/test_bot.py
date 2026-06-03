@@ -166,6 +166,51 @@ class TestBot(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(dm_peer_id(msgs[0]), "n:chris")
 
+    def test_channel_feed_orders_in_before_out_same_second(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        lines = (
+            "2026-06-01 20:57:25,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "ReceivedChannel: test From: Chris\n"
+            "2026-06-01 20:57:25,200 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "SendingChannel: Chris [!deadbeef] QSL reply\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(lines)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 2)
+        self.assertEqual(msgs[0].get("dir"), "in")
+        self.assertEqual(msgs[0].get("text"), "test")
+        self.assertEqual(msgs[1].get("dir"), "out")
+
+    def test_channel_feed_dedup_meshbot_and_messages_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        mesh = (
+            "2026-06-01 21:00:00,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "Ignoring Message: Hallo Welt From: TaunusMesh\n"
+        )
+        msglog = (
+            "2026-06-01 21:00:00,150 | Device:1 Channel:1|Mesh Hessen | "
+            "TaunusMesh | meshhessen.de | Hallo Welt\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].get("text"), "Hallo Welt")
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile

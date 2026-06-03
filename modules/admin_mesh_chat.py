@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from modules.web_dashboard import (
     _NodeDirectory,
+    _parse_ts_from_log_line,
     _strip_ansi,
     _tail_lines,
 )
@@ -23,7 +24,6 @@ _RING: deque = deque(maxlen=300)
 _RING_LOCK = threading.Lock()
 _SEND_LOCK = threading.Lock()
 
-_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+")
 _SEND_DM_TEXT_RE = re.compile(r"Sending DM:\s*(.+?)\s+To:")
 _RECV_DM_TEXT_RE = re.compile(r"(?:Received|Ignoring) DM:\s*(.+?)\s+From:")
 _RECV_DM_MISSING_BANG_RE = re.compile(r"Received DM \(missing !\):\s*(.+?)\s+From:")
@@ -55,13 +55,44 @@ def record_optimistic(event: Dict[str, Any]) -> None:
 
 
 def _parse_ts(line: str) -> Optional[datetime]:
-    m = _TS_RE.match(line)
-    if not m:
+    return _parse_ts_from_log_line(line)
+
+
+def _normalize_incoming_text(text: str) -> str:
+    t = re.sub(r"\s+", " ", (text or "").strip().lower())
+    return re.sub(r"^[\w.*-]+\s*\|\s*", "", t)
+
+
+def _peer_name_key(entry: Dict[str, Any]) -> str:
+    for field in ("long", "short"):
+        value = (entry.get(field) or "").strip().lower()
+        if value:
+            return value
+    return ""
+
+
+def _incoming_channel_fingerprint(ev: Dict[str, Any]) -> Optional[str]:
+    if ev.get("kind") != "channel" or ev.get("dir") != "in":
         return None
-    try:
-        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-    except ValueError:
+    ts = ev.get("time", "")[:19]
+    text = _normalize_incoming_text(ev.get("text", ""))
+    if not ts or not text:
         return None
+    return "|".join(
+        (
+            ts,
+            str(ev.get("channel", "")),
+            str(ev.get("device", "")),
+            _peer_name_key(ev),
+            text,
+        )
+    )
+
+
+def _message_sort_key(entry: Dict[str, Any]) -> Tuple[str, int, str]:
+    """Chronological order; at equal time show incoming before bot replies."""
+    dir_rank = 0 if entry.get("dir") == "in" else 1
+    return (entry.get("time", ""), dir_rank, entry.get("mid", ""))
 
 
 def _line_is_meshbot_dm(plain: str) -> bool:
@@ -130,7 +161,7 @@ def _trim_feed(merged: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]
     ]
     if not extra:
         return tail
-    combined = sorted(tail + extra, key=lambda x: x.get("time", ""))
+    combined = sorted(tail + extra, key=_message_sort_key)
     return combined
 
 
@@ -224,18 +255,28 @@ def _merge_events(
     """Prefer messages.log text for incoming when timestamps align."""
     by_key: Dict[str, Dict[str, Any]] = {}
     order: List[str] = []
+    semantic_seen: Dict[str, str] = {}
+
+    def _enrich(existing: Dict[str, Any], ev: Dict[str, Any]) -> None:
+        if not existing.get("text") and ev.get("text"):
+            existing["text"] = ev["text"]
+        for field in ("short", "long", "hex", "id", "channel_label"):
+            if not existing.get(field) and ev.get(field):
+                existing[field] = ev[field]
 
     def add(ev: Dict[str, Any]) -> None:
+        fp = _incoming_channel_fingerprint(ev)
+        if fp and fp in semantic_seen:
+            _enrich(by_key[semantic_seen[fp]], ev)
+            return
+
         base_key = _message_key(ev)
         key = base_key
         suffix = 0
         while key in by_key:
             existing = by_key[key]
             if not existing.get("text") and ev.get("text"):
-                existing["text"] = ev["text"]
-                for field in ("short", "long", "hex", "id", "channel_label"):
-                    if not existing.get(field) and ev.get(field):
-                        existing[field] = ev[field]
+                _enrich(existing, ev)
                 return
             suffix += 1
             key = f"{base_key}:{suffix}"
@@ -243,6 +284,8 @@ def _merge_events(
         ev["mid"] = key
         by_key[key] = ev
         order.append(key)
+        if fp:
+            semantic_seen[fp] = key
 
     for ev in meshbot_events:
         add(ev)
@@ -299,40 +342,28 @@ def _parse_meshbot_tail(
     out_scan_lines: int = MESHBOT_TAIL_OUT_SCAN,
     dm_in_only: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Parse meshbot.log; bot sends are scanned deeper than casual channel chatter."""
+    """Parse meshbot.log in chronological log order (not outbound-first)."""
     events: List[Dict[str, Any]] = []
     seen: set = set()
     paths = _resolve_rotated_log_paths(log_dir, "meshbot.log")
     scan_lines = max(in_scan_lines, out_scan_lines)
     deep = _tail_merged_log_paths(paths, scan_lines)
-    in_recent = deep[-in_scan_lines:] if len(deep) > in_scan_lines else deep
 
-    def consume(line: str) -> None:
+    for line in deep:
         plain = _strip_ansi(line)
-        ts = _parse_ts(line)
-        if not ts:
-            return
-        ev = _parse_meshbot_line(plain, ts, nodes)
-        if not ev:
-            return
-        key = _message_key(ev)
-        if key in seen:
-            return
-        seen.add(key)
-        events.append(ev)
-
-    out_lines = _tail_merged_log_paths(paths, out_scan_lines)
-    for line in out_lines:
-        if _line_is_meshbot_out(_strip_ansi(line)):
-            consume(line)
-
-    for line in in_recent:
-        plain = _strip_ansi(line)
-        if _line_is_meshbot_out(plain):
-            continue
         if dm_in_only and not _line_is_meshbot_dm(plain):
             continue
-        consume(line)
+        ts = _parse_ts(line)
+        if not ts:
+            continue
+        ev = _parse_meshbot_line(plain, ts, nodes)
+        if not ev:
+            continue
+        key = _message_key(ev)
+        if key in seen:
+            continue
+        seen.add(key)
+        events.append(ev)
 
     return events
 
@@ -403,7 +434,7 @@ def collect_messages(
     if channel is not None and kind == "channel":
         merged = [m for m in merged if _matches_channel_filter(m, channel)]
 
-    merged.sort(key=lambda x: x.get("time", ""))
+    merged.sort(key=_message_sort_key)
     merged = _trim_feed(merged, limit)
 
     err = None

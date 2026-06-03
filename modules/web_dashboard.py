@@ -24,6 +24,26 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
+_LOG_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,(\d+))?")
+
+
+def _parse_log_timestamp(date_s: str, frac_s: Optional[str] = None) -> Optional[datetime]:
+    try:
+        dt = datetime.strptime(date_s, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    if frac_s:
+        dt = dt.replace(microsecond=int(frac_s.ljust(6, "0")[:6]))
+    return dt
+
+
+def _parse_ts_from_log_line(line: str) -> Optional[datetime]:
+    m = _LOG_TS_RE.match(line)
+    if not m:
+        return None
+    return _parse_log_timestamp(m.group(1), m.group(2))
+
+
 class _NodeDirectory:
     """Maps Meshtastic node IDs / names while scanning meshbot.log."""
 
@@ -295,22 +315,21 @@ def _parse_messages_log_lines(
     events: List[Dict[str, Any]] = []
     for line in lines:
         m = re.match(
-            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
+            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d+) \| "
             r"Device:(\d+) (Channel:\d+(?:\|[^|]+)?) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
             line.strip(),
         )
         if not m:
             m = re.match(
-                r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
+                r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d+) \| "
                 r"Device:(\d+) Channel:(\d+) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
                 line.strip(),
             )
         if not m:
             continue
-        ts_s, dev_s, ch_field, name, _text = m.groups()
-        try:
-            ts = datetime.strptime(ts_s, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
+        ts_s, frac_s, dev_s, ch_field, name, _text = m.groups()
+        ts = _parse_log_timestamp(ts_s, frac_s)
+        if not ts:
             continue
         device = int(dev_s)
         if ch_field.startswith("Channel:"):
