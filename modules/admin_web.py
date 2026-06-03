@@ -733,7 +733,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=12"></script>
+<script src="/static/portal/mesh-chat.js?v=13"></script>
 """
         else:
             inner = f"""
@@ -750,7 +750,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=12"></script>
+<script src="/static/portal/mesh-chat.js?v=13"></script>
 """
         return _render_admin_template(
             inner,
@@ -811,12 +811,16 @@ def create_app(
         text = request.form.get("text", "")
         channel = request.form.get("channel", chat.default_mesh_channel(), type=int)
         interface = request.form.get("interface", chat.default_mesh_interface(), type=int)
-        dest_node = request.form.get("dest_node", 0, type=int)
+        kind = (request.form.get("kind") or "").strip().lower()
+        dest_raw = (request.form.get("dest_node") or "").strip()
 
-        if request.form.get("kind") == "dm" or dest_node:
-            dest_node = dest_node or 0
-            if not dest_node:
-                return jsonify({"ok": False, "message": "Bitte Empfänger wählen."}), 400
+        if kind == "dm" or dest_raw:
+            dest_node, resolve_err = chat.resolve_dest_node(dest_raw, interface)
+            if resolve_err or not dest_node:
+                return jsonify({
+                    "ok": False,
+                    "message": resolve_err or "Bitte Empfänger wählen.",
+                }), 400
         else:
             dest_node = 0
 

@@ -238,6 +238,21 @@ class TestBot(unittest.TestCase):
         self.assertEqual(incoming[0].get("text"), "Test")
         self.assertEqual(len(msgs), 2)
 
+    def test_resolve_dest_node_numeric_and_hex(self):
+        from modules.admin_mesh_chat import resolve_dest_node
+
+        num, err = resolve_dest_node("42424242", 1)
+        self.assertIsNone(err)
+        self.assertEqual(num, 42424242)
+
+        num, err = resolve_dest_node("!0284a8c8", 1)
+        self.assertIsNone(err)
+        self.assertEqual(num, 0x0284A8C8)
+
+        num, err = resolve_dest_node("", 1)
+        self.assertIsNone(num)
+        self.assertIn("Empfänger", err or "")
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile

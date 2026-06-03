@@ -493,6 +493,7 @@
       body.set("channel", String(cfg.sendChannel != null ? cfg.sendChannel : 1));
       body.set("interface", ifaceSelect ? ifaceSelect.value : String(cfg.interface));
       if (isDm) {
+        body.set("kind", "dm");
         const users = buildUserSummaries();
         let destNode = selectedPeerId;
         for (let i = 0; i < users.length; i++) {

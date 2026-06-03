@@ -500,6 +500,47 @@ def list_send_targets(iface_id: int) -> Tuple[Optional[str], List[Dict[str, str]
     return None, out
 
 
+def resolve_dest_node(raw: str, interface: int) -> Tuple[Optional[int], Optional[str]]:
+    """Resolve UI peer id / node num / hex to decimal node id for send_message."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None, "Bitte Empfänger wählen."
+
+    if raw.isdigit():
+        return int(raw), None
+
+    if raw.startswith("!"):
+        try:
+            return int(raw[1:], 16), None
+        except ValueError:
+            return None, "Ungültige Hex-Adresse."
+
+    target = raw[2:].strip().lower() if raw.startswith("n:") else raw.strip().lower()
+    if not target:
+        return None, "Bitte Empfänger wählen."
+
+    from modules import admin_web_ops as ops
+
+    err, rows = ops.list_node_rows(interface)
+    if err:
+        return None, err
+
+    for r in rows:
+        if r.get("is_self"):
+            continue
+        num = int(r["num"])
+        candidates = {
+            str(num).lower(),
+            html.unescape(str(r.get("node_id") or "")).strip().lower(),
+            html.unescape(str(r.get("shortName") or "")).strip().lower(),
+            html.unescape(str(r.get("longName") or "")).strip().lower(),
+        }
+        if target in candidates:
+            return num, None
+
+    return None, f"Empfänger nicht in NodeDB gefunden ({raw})."
+
+
 def send_mesh_message(
     text: str,
     *,
