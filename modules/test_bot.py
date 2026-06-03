@@ -253,6 +253,34 @@ class TestBot(unittest.TestCase):
         self.assertIsNone(num)
         self.assertIn("Empfänger", err or "")
 
+    def test_channel_feed_dedup_realm_prefix_and_short_name(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        body = (
+            "Man soll auch keine Pizza in den Teilchenbeschleuniger werfen. "
+            "Trotzdem musste erst ein Schild aufgestellt werden."
+        )
+        mesh = (
+            "2026-06-03 21:30:57,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            f"Ignoring Message: {body} From: TaunusMesh\n"
+        )
+        msglog = (
+            "2026-06-03 21:30:57,150 | Device:1 Channel:1|Mesh Hessen | "
+            f"TaunusMesh | meshhessen.de | {body}\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        incoming = [m for m in msgs if m.get("dir") == "in"]
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0].get("text"), body)
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile

@@ -44,6 +44,19 @@ def _parse_ts_from_log_line(line: str) -> Optional[datetime]:
     return _parse_log_timestamp(m.group(1), m.group(2))
 
 
+_REALM_TEXT_PREFIX_RE = re.compile(r"^[\w.*-]+\s*\|\s*", re.IGNORECASE)
+
+
+def _strip_realm_text_prefix(text: str) -> str:
+    """Remove leading ``meshhessen.de |`` style prefixes from message bodies."""
+    out = (text or "").strip()
+    while True:
+        stripped = _REALM_TEXT_PREFIX_RE.sub("", out, count=1).strip()
+        if stripped == out:
+            return out
+        out = stripped
+
+
 class _NodeDirectory:
     """Maps Meshtastic node IDs / names while scanning meshbot.log."""
 
@@ -338,6 +351,7 @@ def _parse_messages_log_lines(
             channel, channel_label = int(ch_field), f"Kanal {ch_field}"
         peer = nodes.resolve(name.strip())
         is_dm = " DM |" in line
+        body = _strip_realm_text_prefix(_text.strip().replace("\n", " "))
         events.append(
             {
                 "time": ts.isoformat(),
@@ -347,7 +361,7 @@ def _parse_messages_log_lines(
                 "channel": channel,
                 "channel_label": channel_label,
                 "device": device,
-                "text": _text.strip().replace("\n", " "),
+                "text": body,
                 **peer,
             }
         )

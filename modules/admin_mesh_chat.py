@@ -17,6 +17,7 @@ from modules.web_dashboard import (
     _NodeDirectory,
     _parse_ts_from_log_line,
     _strip_ansi,
+    _strip_realm_text_prefix,
     _tail_lines,
 )
 
@@ -61,16 +62,18 @@ def _parse_ts(line: str) -> Optional[datetime]:
 
 
 def _normalize_incoming_text(text: str) -> str:
-    t = re.sub(r"\s+", " ", (text or "").strip().lower())
-    return re.sub(r"^[\w.*-]+\s*\|\s*", "", t)
+    t = re.sub(r"\s+", " ", _strip_realm_text_prefix(text).lower())
+    return t
 
 
 def _peer_name_key(entry: Dict[str, Any]) -> str:
-    for field in ("long", "short"):
-        value = (entry.get(field) or "").strip().lower()
-        if value:
-            return value
-    return ""
+    short = (entry.get("short") or "").strip().lower()
+    if short:
+        return short
+    long_n = (entry.get("long") or "").strip().lower()
+    if "|" in long_n:
+        long_n = long_n.split("|", 1)[0].strip()
+    return long_n
 
 
 def _incoming_time_bucket(iso_time: str) -> str:
