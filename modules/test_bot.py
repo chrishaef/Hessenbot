@@ -424,6 +424,35 @@ class TestBot(unittest.TestCase):
         self.assertEqual(len(incoming), 1)
         self.assertEqual(incoming[0].get("text"), body)
 
+    def test_peer_display_names_format(self):
+        from modules.web_dashboard import (
+            _hhmm_from_event,
+            _peer_display_names,
+            _render_toplist_message_item,
+        )
+
+        short, long_name = _peer_display_names(
+            {"short": "Taun", "long": "TaunusMesh | meshhessen.de"}
+        )
+        self.assertEqual(short, "Taun")
+        self.assertEqual(long_name, "TaunusMesh")
+
+        short, long_name = _peer_display_names(
+            {"long": "Chris 🌐🛰️ *meshhessen.de*"}
+        )
+        self.assertEqual(short, "Chris")
+        self.assertEqual(long_name, "Chris 🌐🛰️ *meshhessen.de*")
+
+        entry = {
+            "time": "2026-06-03T22:22:27",
+            "short": "Taun",
+            "long": "TaunusMesh",
+            "text": "Hallo",
+        }
+        self.assertEqual(_hhmm_from_event(entry), "22:22")
+        html = _render_toplist_message_item(entry)
+        self.assertIn("22:22 Taun | TaunusMesh", html)
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile

@@ -211,31 +211,14 @@ def _extract_message_event(
 
 
 def _format_message_peer(entry: Dict[str, Any]) -> str:
-    short = entry.get("short") or ""
-    node_id = entry.get("id") or ""
-    hex_id = entry.get("hex") or ""
-    long_name = entry.get("long") or ""
-
-    if not hex_id and node_id.isdigit():
-        hex_id = f"!{int(node_id):08x}"
-
-    if short and hex_id and node_id:
-        return f"{short} · {hex_id} (#{node_id})"
-    if short and hex_id:
-        return f"{short} · {hex_id}"
-    if short and node_id:
-        return f"{short} · #{node_id}"
-    if hex_id:
-        return hex_id
-    if node_id:
-        return f"#{node_id}"
-    if long_name:
-        return long_name
-    return "?"
+    short, long_name = _peer_display_names(entry)
+    if long_name and long_name != short:
+        return f"{short} | {long_name}"
+    return short or long_name or "?"
 
 
 def _format_message_line(entry: Dict[str, Any]) -> str:
-    t = entry.get("time_short") or entry.get("time", "")[-8:]
+    t = _hhmm_from_event(entry) or (entry.get("time_short") or "")[:5]
     direction = "An" if entry.get("dir") == "out" else "Von"
     peer = _format_message_peer(entry)
 
@@ -1122,51 +1105,79 @@ def _mesh_node_counts_for_dash(lb: Dict[str, Any], log: Dict[str, Any]) -> Dict[
 
 
 def _peer_short_name(entry: Dict[str, Any]) -> str:
-    short = (entry.get("short") or "").strip()
-    if short:
-        return short
-    node_id = entry.get("id")
-    if node_id:
-        try:
-            from modules.system import get_name_from_number
-
-            device = entry.get("device") or 1
-            name = get_name_from_number(int(node_id), "short", int(device))
-            if name and str(name).strip() and not str(name).startswith("!"):
-                return str(name).strip()
-        except Exception:
-            pass
-    long_name = (entry.get("long") or "").strip()
-    if long_name:
-        return long_name[:4]
-    return "?"
+    return _peer_display_names(entry)[0]
 
 
 def _peer_long_name(entry: Dict[str, Any]) -> str:
-    long_name = (entry.get("long") or "").strip()
-    if long_name:
-        return long_name
+    return _peer_display_names(entry)[1]
+
+
+_REALM_LONG_SUFFIX_RE = re.compile(r"\s*\|\s*\*?meshhessen\.de\*?\s*$", re.IGNORECASE)
+
+
+def _clean_peer_long_name(long_name: str) -> str:
+    long_name = (long_name or "").strip()
+    long_name = _REALM_LONG_SUFFIX_RE.sub("", long_name).strip()
+    if "|" in long_name:
+        left, right = [p.strip() for p in long_name.split("|", 1)]
+        if "meshhessen" in right.lower().replace("*", ""):
+            return left
+    return long_name
+
+
+def _fallback_short_from_long(long_name: str) -> str:
+    match = re.match(r"^(\S+)", (long_name or "").strip())
+    if not match:
+        return "?"
+    word = match.group(1)
+    if len(word) <= 4:
+        return word
+    if word.isalpha() and len(word) <= 8:
+        return word
+    return word[:4]
+
+
+def _peer_display_names(entry: Dict[str, Any]) -> tuple[str, str]:
+    """Return (shortName, longName) for dashboard display."""
+    short = (entry.get("short") or "").strip()
+    long_name = _clean_peer_long_name(entry.get("long") or "")
+
     node_id = entry.get("id")
     if node_id:
         try:
             from modules.system import get_name_from_number
 
-            device = entry.get("device") or 1
-            name = get_name_from_number(int(node_id), "long", int(device))
-            if name and str(name).strip():
-                return str(name).strip()
+            device = int(entry.get("device") or 1)
+            nid = int(node_id)
+            if not short:
+                resolved = get_name_from_number(nid, "short", device)
+                if resolved and str(resolved).strip() and not str(resolved).startswith("!"):
+                    short = str(resolved).strip()
+            if not long_name:
+                resolved = get_name_from_number(nid, "long", device)
+                if resolved and str(resolved).strip():
+                    long_name = _clean_peer_long_name(str(resolved).strip())
         except Exception:
             pass
-    return "—"
+
+    if long_name and not short:
+        short = _fallback_short_from_long(long_name)
+    if short and not long_name:
+        long_name = short
+    if not short:
+        short = "?"
+    if not long_name:
+        long_name = "—"
+    return short, long_name
 
 
 def _hhmm_from_event(entry: Dict[str, Any]) -> str:
     ts = entry.get("time") or ""
     try:
-        return datetime.fromisoformat(ts).strftime("%H.%M")
+        return datetime.fromisoformat(ts).strftime("%H:%M")
     except ValueError:
         raw = (entry.get("time_short") or "")[:5]
-        return raw.replace(":", ".") if raw else ""
+        return raw if raw else "—"
 
 
 def _channel_recent_messages(
@@ -1184,11 +1195,11 @@ def _channel_recent_messages(
 
 
 def _render_toplist_message_item(entry: Dict[str, Any]) -> str:
-    """HH.MM Short | Long, then message body on the next line."""
+    """HH:MM Shortname | Longname, then message body on the next line."""
+    short, long_name = _peer_display_names(entry)
     meta = (
         f"{html_escape(_hhmm_from_event(entry))} "
-        f"{html_escape(_peer_short_name(entry))} | "
-        f"{html_escape(_peer_long_name(entry))}"
+        f"{html_escape(short)} | {html_escape(long_name)}"
     )
     text = (entry.get("text") or "").strip().replace("\r\n", "\n").replace("\r", "\n")
     if text:
