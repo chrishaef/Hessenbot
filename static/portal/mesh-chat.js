@@ -100,7 +100,14 @@
   }
 
   function dmPartnerId(m) {
-    return String(m.peer_id || "");
+    if (m.peer_id) return String(m.peer_id);
+    const longN = (m.peer_long || "").trim().toLowerCase();
+    if (longN) return "n:" + longN;
+    const shortN = (m.peer_short || "").trim().toLowerCase();
+    if (shortN) return "n:" + shortN;
+    const peer = (m.peer || "").trim().toLowerCase();
+    if (peer) return "p:" + peer;
+    return "";
   }
 
   function dmPartnerLabel(m) {
@@ -270,13 +277,17 @@
       if (!pid) return;
       const cur = map[pid];
       if (!cur || (m.time || "") >= (cur.time || "")) {
+        const nodeNum = m.peer_num || (/^\d+$/.test(pid) ? pid : "");
         map[pid] = {
           id: pid,
+          nodeNum: nodeNum,
           label: dmPartnerLabel(m),
           time: m.time || "",
           timeShort: m.time_short || "",
           preview: (m.text || "").trim().slice(0, 72),
         };
+      } else if (m.peer_num && !cur.nodeNum) {
+        cur.nodeNum = m.peer_num;
       }
     });
     return Object.values(map).sort(function (a, b) {
@@ -457,7 +468,15 @@
       body.set("channel", String(cfg.sendChannel != null ? cfg.sendChannel : 1));
       body.set("interface", ifaceSelect ? ifaceSelect.value : String(cfg.interface));
       if (isDm) {
-        body.set("dest_node", selectedPeerId);
+        const users = buildUserSummaries();
+        let destNode = selectedPeerId;
+        for (let i = 0; i < users.length; i++) {
+          if (users[i].id === selectedPeerId && users[i].nodeNum) {
+            destNode = users[i].nodeNum;
+            break;
+          }
+        }
+        body.set("dest_node", destNode);
       }
       fetch(cfg.apiSend, {
         method: "POST",

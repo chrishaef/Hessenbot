@@ -733,7 +733,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=9"></script>
+<script src="/static/portal/mesh-chat.js?v=10"></script>
 """
         else:
             inner = f"""
@@ -750,7 +750,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=9"></script>
+<script src="/static/portal/mesh-chat.js?v=10"></script>
 """
         return _render_admin_template(
             inner,
@@ -796,6 +796,9 @@ def create_app(
                 row["peer_id"] = chat.dm_peer_id(m)
                 row["peer_short"] = m.get("short") or ""
                 row["peer_long"] = m.get("long") or ""
+                numeric = m.get("id")
+                if numeric not in (None, ""):
+                    row["peer_num"] = str(numeric)
             out.append(row)
         return jsonify({"messages": out, "error": err})
 

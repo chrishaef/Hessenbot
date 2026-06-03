@@ -143,6 +143,29 @@ class TestBot(unittest.TestCase):
         self.assertIn("pong", texts)
         self.assertIn("ping", texts)
 
+    def test_dm_peer_id_name_fallback(self):
+        from modules.admin_mesh_chat import collect_messages, dm_peer_id
+
+        self.assertEqual(dm_peer_id({"long": "Chris"}), "n:chris")
+        self.assertEqual(dm_peer_id({"id": "42424242"}), "42424242")
+        self.assertEqual(dm_peer_id({"hex": "!0284a8c8"}), "!0284a8c8")
+
+        import os
+        import tempfile
+
+        line = (
+            "2026-05-31 12:45:00,200 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(line)
+            msgs, err = collect_messages(td, kind="dm", limit=10)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(dm_peer_id(msgs[0]), "n:chris")
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile

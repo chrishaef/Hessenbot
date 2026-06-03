@@ -97,13 +97,19 @@ def _matches_channel_filter(entry: Dict[str, Any], channel: int) -> bool:
 
 
 def dm_peer_id(entry: Dict[str, Any]) -> str:
-    """Node id of the remote party in a DM thread."""
+    """Stable key for grouping a DM thread (numeric id, hex, or name fallback)."""
     pid = entry.get("id")
     if pid not in (None, ""):
         return str(pid)
-    hex_id = entry.get("hex") or ""
+    hex_id = (entry.get("hex") or "").strip()
     if hex_id:
         return hex_id.lower()
+    long_n = (entry.get("long") or "").strip().lower()
+    if long_n:
+        return "n:" + long_n
+    short = (entry.get("short") or "").strip().lower()
+    if short:
+        return "n:" + short
     return ""
 
 
@@ -157,7 +163,8 @@ def _parse_meshbot_line(
 
     if "Sending DM:" in plain or "Sending Multi-Chunk DM:" in plain:
         to_m = re.search(r"\sTo:\s*(.+?)$", plain)
-        peer = nodes.resolve(to_m.group(1)) if to_m else {}
+        to_label = to_m.group(1).strip() if to_m else ""
+        peer = nodes.resolve(to_label) if to_label else {}
         text_m = _SEND_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return _bot_event({**base, "dir": "out", "kind": "dm", "text": text, **peer})
@@ -183,14 +190,16 @@ def _parse_meshbot_line(
 
     if "Received DM (missing !):" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
-        peer = nodes.resolve(from_m.group(1)) if from_m else {}
+        from_label = from_m.group(1).strip() if from_m else ""
+        peer = nodes.resolve(from_label) if from_label else {}
         text_m = _RECV_DM_MISSING_BANG_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return _bot_event({**base, "dir": "in", "kind": "dm", "text": text, **peer})
 
     if "Received DM:" in plain or "Ignoring DM:" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
-        peer = nodes.resolve(from_m.group(1)) if from_m else {}
+        from_label = from_m.group(1).strip() if from_m else ""
+        peer = nodes.resolve(from_label) if from_label else {}
         text_m = _RECV_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return _bot_event({**base, "dir": "in", "kind": "dm", "text": text, **peer})
