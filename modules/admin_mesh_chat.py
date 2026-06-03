@@ -35,6 +35,8 @@ MSGLOG_TAIL_DEFAULT = 2000
 MSGLOG_TAIL_DM_SCAN = 6000
 FEED_LIMIT_DEFAULT = 150
 FEED_LIMIT_MAX = 250
+# meshbot ReceivedChannel vs messages.log for the same packet can differ by seconds
+_INCOMING_CHANNEL_DEDUP_SEC = 15
 
 
 def _message_key(event: Dict[str, Any]) -> str:
@@ -71,16 +73,23 @@ def _peer_name_key(entry: Dict[str, Any]) -> str:
     return ""
 
 
+def _incoming_time_bucket(iso_time: str) -> str:
+    try:
+        dt = datetime.fromisoformat(iso_time)
+        return str(int(dt.timestamp()) // _INCOMING_CHANNEL_DEDUP_SEC)
+    except (TypeError, ValueError):
+        return (iso_time or "")[:19]
+
+
 def _incoming_channel_fingerprint(ev: Dict[str, Any]) -> Optional[str]:
     if ev.get("kind") != "channel" or ev.get("dir") != "in":
         return None
-    ts = ev.get("time", "")[:19]
     text = _normalize_incoming_text(ev.get("text", ""))
-    if not ts or not text:
+    if not text:
         return None
     return "|".join(
         (
-            ts,
+            _incoming_time_bucket(ev.get("time", "")),
             str(ev.get("channel", "")),
             str(ev.get("device", "")),
             _peer_name_key(ev),

@@ -733,7 +733,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=11"></script>
+<script src="/static/portal/mesh-chat.js?v=12"></script>
 """
         else:
             inner = f"""
@@ -750,7 +750,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=11"></script>
+<script src="/static/portal/mesh-chat.js?v=12"></script>
 """
         return _render_admin_template(
             inner,
