@@ -1764,9 +1764,9 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
       </h1>
     </div>
     <div class="col-lg-4 text-lg-end">
-      <a href="/" class="btn btn-success">
+      <button type="button" id="dash-refresh-btn" class="btn btn-success">
         <i class="bi bi-arrow-clockwise me-2"></i>Aktualisieren
-      </a>
+      </button>
       <p class="small text-muted mt-2 mb-0">Stand {html_escape(stand_time)}</p>
     </div>
   </div>
@@ -1853,6 +1853,6 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
 <script type="application/json" id="dash-chart-data">{chart_data_json}</script>
 <script src="/static/portal/chart.umd.min.js"></script>
 <script src="/static/portal/dashboard-charts.js"></script>
-<script src="/static/portal/dashboard-views.js"></script>
+<script src="/static/portal/dashboard-views.js?v=2"></script>
 """
 
