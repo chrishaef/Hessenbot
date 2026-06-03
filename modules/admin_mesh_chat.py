@@ -28,11 +28,13 @@ _SEND_DM_TEXT_RE = re.compile(r"Sending DM:\s*(.+?)\s+To:")
 _RECV_DM_TEXT_RE = re.compile(r"(?:Received|Ignoring) DM:\s*(.+?)\s+From:")
 _RECV_DM_MISSING_BANG_RE = re.compile(r"Received DM \(missing !\):\s*(.+?)\s+From:")
 
-MESHBOT_TAIL_IN = 8000
-MESHBOT_TAIL_OUT_SCAN = 15000
-MESHBOT_TAIL_DM_IN = 12000
-MSGLOG_TAIL_DEFAULT = 1000
-MSGLOG_TAIL_DM_SCAN = 4000
+MESHBOT_TAIL_IN = 12000
+MESHBOT_TAIL_OUT_SCAN = 30000
+MESHBOT_TAIL_DM_IN = 15000
+MSGLOG_TAIL_DEFAULT = 2000
+MSGLOG_TAIL_DM_SCAN = 6000
+FEED_LIMIT_DEFAULT = 150
+FEED_LIMIT_MAX = 250
 
 
 def _message_key(event: Dict[str, Any]) -> str:
@@ -71,7 +73,59 @@ def _line_is_meshbot_dm(plain: str) -> bool:
 
 
 def _line_is_meshbot_out(plain: str) -> bool:
-    return "Sending DM:" in plain or "SendingChannel:" in plain
+    return (
+        "Sending DM:" in plain
+        or "SendingChannel:" in plain
+        or "Sending Multi-Chunk Message:" in plain
+        or "Sending Multi-Chunk DM:" in plain
+    )
+
+
+def _channel_index(entry: Dict[str, Any]) -> Optional[int]:
+    ch = entry.get("channel")
+    if ch is None:
+        return None
+    try:
+        return int(ch)
+    except (TypeError, ValueError):
+        return None
+
+
+def _matches_channel_filter(entry: Dict[str, Any], channel: int) -> bool:
+    idx = _channel_index(entry)
+    return idx is not None and idx == int(channel)
+
+
+def dm_peer_id(entry: Dict[str, Any]) -> str:
+    """Node id of the remote party in a DM thread."""
+    pid = entry.get("id")
+    if pid not in (None, ""):
+        return str(pid)
+    hex_id = entry.get("hex") or ""
+    if hex_id:
+        return hex_id.lower()
+    return ""
+
+
+def _trim_feed(merged: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    """Keep the newest ``limit`` rows but never drop bot replies in that window."""
+    if limit <= 0 or len(merged) <= limit:
+        return merged
+    tail = merged[-limit:]
+    floor_time = tail[0].get("time", "")
+    seen = {m.get("mid") for m in tail if m.get("mid")}
+    extra = [
+        m
+        for m in merged
+        if m.get("dir") == "out"
+        and m.get("source") == "bot"
+        and m.get("time", "") >= floor_time
+        and m.get("mid") not in seen
+    ]
+    if not extra:
+        return tail
+    combined = sorted(tail + extra, key=lambda x: x.get("time", ""))
+    return combined
 
 
 def _bot_event(extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -280,6 +334,7 @@ def _parse_messages_logs_tail(
     *,
     max_lines: int = MSGLOG_TAIL_DEFAULT,
     dm_only: bool = False,
+    channel: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     from modules.web_dashboard import _parse_messages_log_lines
 
@@ -289,6 +344,10 @@ def _parse_messages_logs_tail(
     lines = _tail_merged_log_paths(paths, max_lines)
     if dm_only:
         lines = [ln for ln in lines if " DM |" in ln]
+    elif channel is not None:
+        ch = int(channel)
+        pat = re.compile(rf"Channel:{ch}(?:\||\s)")
+        lines = [ln for ln in lines if pat.search(ln)]
     return _parse_messages_log_lines(lines, nodes)
 
 
@@ -308,6 +367,7 @@ def collect_messages(
 
     nodes = _NodeDirectory()
     dm_mode = kind == "dm"
+    channel_mode = kind == "channel"
     meshbot_events = _parse_meshbot_tail(
         log_dir,
         nodes,
@@ -320,6 +380,7 @@ def collect_messages(
         nodes,
         max_lines=MSGLOG_TAIL_DM_SCAN if dm_mode else MSGLOG_TAIL_DEFAULT,
         dm_only=dm_mode,
+        channel=channel if channel_mode else None,
     )
 
     merged = _merge_events(meshbot_events, msg_log_events)
@@ -330,18 +391,11 @@ def collect_messages(
     if kind:
         merged = [m for m in merged if m.get("kind") == kind]
 
-    if channel is not None:
-        filtered = []
-        for m in merged:
-            if m.get("kind") == "dm":
-                filtered.append(m)
-            elif m.get("channel") == channel:
-                filtered.append(m)
-        merged = filtered
+    if channel is not None and kind == "channel":
+        merged = [m for m in merged if _matches_channel_filter(m, channel)]
 
     merged.sort(key=lambda x: x.get("time", ""))
-    if len(merged) > limit:
-        merged = merged[-limit:]
+    merged = _trim_feed(merged, limit)
 
     err = None
     if not os.path.isfile(meshbot_path):

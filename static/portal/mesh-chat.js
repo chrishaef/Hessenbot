@@ -4,28 +4,33 @@
   const cfg = window.__MESH_CHAT__;
   if (!cfg) return;
 
+  const isDm = cfg.kind === "dm";
+
   const feed = document.getElementById("mesh-chat-feed");
   const emptyEl = document.getElementById("mesh-chat-empty");
   const countEl = document.getElementById("mesh-chat-count");
   const form = document.getElementById("mesh-chat-form");
   const input = document.getElementById("mesh-chat-input");
   const statusEl = document.getElementById("mesh-chat-status");
-  const destSelect = document.getElementById("mesh-chat-dest");
-  const destSearch = document.getElementById("mesh-chat-dest-search");
-  const destCount = document.getElementById("mesh-chat-dest-count");
   const ifaceSelect = document.getElementById("mesh-chat-iface");
   const sendBtn = document.getElementById("mesh-chat-send");
+
+  const userListEl = document.getElementById("mesh-dm-user-list");
+  const userSearchEl = document.getElementById("mesh-dm-user-search");
+  const activeLabelEl = document.getElementById("mesh-dm-active-label");
 
   let lastIso = "";
   let known = new Set();
   let msgCount = 0;
   let lastDateKey = "";
-  let allNodes = [];
-  let selectedDest = "";
   let lastFullPollAt = 0;
   let lastPollDayKey = "";
   let hideBotReplies = false;
-  const DEST_MATCH_LIMIT = 200;
+
+  let allDmMessages = [];
+  let selectedPeerId = "";
+  let userSearchQuery = "";
+
   const FULL_REFRESH_MS = 5 * 60 * 1000;
 
   function setStatus(msg, isErr) {
@@ -94,6 +99,20 @@
     return cfg.botName || "Hessenbot";
   }
 
+  function dmPartnerId(m) {
+    return String(m.peer_id || "");
+  }
+
+  function dmPartnerLabel(m) {
+    if (m.peer_short || m.peer_long) {
+      if (m.peer_short && m.peer_long && m.peer_short !== m.peer_long) {
+        return m.peer_short + " · " + m.peer_long;
+      }
+      return m.peer_long || m.peer_short;
+    }
+    return m.peer || "?";
+  }
+
   function renderMessage(m) {
     const out = m.dir === "out";
     const kind = m.kind || "channel";
@@ -115,6 +134,9 @@
       tag = "DM";
     } else if (m.channel_label) {
       tag = m.channel_label;
+      if (cfg.filterChannel != null && m.channel != null && Number(m.channel) !== Number(cfg.filterChannel)) {
+        tag = tag + " · Ch" + m.channel;
+      }
     } else if (cfg.channelLabel) {
       tag = cfg.channelLabel;
     }
@@ -141,7 +163,7 @@
     head.appendChild(badgeEl);
     head.appendChild(whoEl);
     if (out && kind === "dm" && m.source !== "web") {
-      const toName = peer.long || peer.short;
+      const toName = dmPartnerLabel(m);
       if (toName && toName !== "?") {
         const subEl = document.createElement("span");
         subEl.className = "mesh-msg-who-sub";
@@ -240,12 +262,159 @@
     }
   }
 
+  function buildUserSummaries() {
+    const map = {};
+    allDmMessages.forEach(function (m) {
+      if (!shouldShowMessage(m)) return;
+      const pid = dmPartnerId(m);
+      if (!pid) return;
+      const cur = map[pid];
+      if (!cur || (m.time || "") >= (cur.time || "")) {
+        map[pid] = {
+          id: pid,
+          label: dmPartnerLabel(m),
+          time: m.time || "",
+          timeShort: m.time_short || "",
+          preview: (m.text || "").trim().slice(0, 72),
+        };
+      }
+    });
+    return Object.values(map).sort(function (a, b) {
+      if (a.time === b.time) return 0;
+      return a.time > b.time ? -1 : 1;
+    });
+  }
+
+  function renderUserList() {
+    if (!userListEl) return;
+    const q = userSearchQuery.trim().toLowerCase();
+    const users = buildUserSummaries().filter(function (u) {
+      if (!q) return true;
+      return (u.label + " " + u.id + " " + u.preview).toLowerCase().indexOf(q) !== -1;
+    });
+
+    userListEl.innerHTML = "";
+    if (!users.length) {
+      const li = document.createElement("li");
+      li.className = "mesh-dm-user-empty";
+      li.textContent = q ? "Kein Treffer" : "Noch keine DMs";
+      userListEl.appendChild(li);
+      return;
+    }
+
+    users.forEach(function (u) {
+      const li = document.createElement("li");
+      li.className = "mesh-dm-user-item" + (u.id === selectedPeerId ? " is-active" : "");
+      li.dataset.peerId = u.id;
+      li.setAttribute("role", "option");
+      li.innerHTML =
+        '<span class="mesh-dm-user-name">' + escapeHtml(u.label) + "</span>" +
+        '<span class="mesh-dm-user-meta">' +
+        escapeHtml(u.timeShort || "") +
+        "</span>" +
+        '<span class="mesh-dm-user-preview">' +
+        escapeHtml(u.preview || "—") +
+        "</span>";
+      li.addEventListener("click", function () {
+        selectPeer(u.id, u.label);
+      });
+      userListEl.appendChild(li);
+    });
+
+    if (!selectedPeerId && users.length) {
+      selectPeer(users[0].id, users[0].label, true);
+    } else if (selectedPeerId && !users.some(function (u) {
+      return u.id === selectedPeerId;
+    })) {
+      selectPeer(users[0].id, users[0].label, true);
+    }
+  }
+
+  function selectPeer(peerId, label, silent) {
+    selectedPeerId = String(peerId || "");
+    if (activeLabelEl) {
+      activeLabelEl.textContent = label || selectedPeerId || "Bitte Nutzer wählen";
+    }
+    renderUserList();
+    renderDmFeed();
+    if (!silent) {
+      if (input) input.focus();
+    }
+  }
+
+  function renderDmFeed() {
+    if (!feed) return;
+    feed.innerHTML = "";
+    lastDateKey = "";
+
+    if (!selectedPeerId) {
+      updateCount(0);
+      return;
+    }
+
+    const thread = allDmMessages.filter(function (m) {
+      return shouldShowMessage(m) && dmPartnerId(m) === selectedPeerId;
+    });
+
+    thread.sort(function (a, b) {
+      if (a.time === b.time) return 0;
+      return a.time > b.time ? 1 : -1;
+    });
+
+    lastDateKey = "";
+    thread.forEach(function (m, idx) {
+      const dk = dateKey(m.time);
+      if (dk && dk !== lastDateKey) {
+        feed.appendChild(renderDateDivider(dk));
+        lastDateKey = dk;
+      }
+      feed.appendChild(renderMessage(m));
+      if (m.time && m.time > lastIso) lastIso = m.time;
+    });
+
+    updateCount(thread.length);
+    scrollFeed(true);
+  }
+
+  function ingestDmMessages(messages, replace) {
+    if (replace) {
+      allDmMessages = [];
+      known.clear();
+      lastIso = "";
+    }
+
+    (messages || []).forEach(function (m, idx) {
+      const mid = m.mid || "idx-" + idx + "-" + (m.time || "") + "-" + (m.text || "").slice(0, 40);
+      if (known.has(mid)) return;
+      known.add(mid);
+      m.mid = mid;
+      allDmMessages.push(m);
+    });
+
+    allDmMessages.sort(function (a, b) {
+      if (a.time === b.time) return 0;
+      return a.time > b.time ? 1 : -1;
+    });
+
+    renderUserList();
+    renderDmFeed();
+
+    if (replace) {
+      lastFullPollAt = Date.now();
+      lastPollDayKey = todayKey();
+    }
+  }
+
   function buildQuery(initial) {
     const q = new URLSearchParams();
     q.set("kind", cfg.kind);
     if (cfg.filterChannel != null) q.set("channel", String(cfg.filterChannel));
     if (!initial && lastIso) q.set("after", lastIso);
-    q.set("limit", initial ? "80" : "120");
+    if (isDm) {
+      q.set("limit", initial ? "250" : "250");
+    } else {
+      q.set("limit", initial ? "150" : "200");
+    }
     return q.toString();
   }
 
@@ -262,119 +431,14 @@
       .then(function (data) {
         if (data.error) setStatus(data.error, true);
         else setStatus("Aktualisiert " + new Date().toLocaleTimeString("de-DE"), false);
-        appendMessages(data.messages || [], !!initial);
+        if (isDm) {
+          ingestDmMessages(data.messages || [], !!initial);
+        } else {
+          appendMessages(data.messages || [], !!initial);
+        }
       })
       .catch(function (e) {
         setStatus("Abruf fehlgeschlagen: " + e.message, true);
-      });
-  }
-
-  function nodeHay(n) {
-    if (n.search) return n.search;
-    return (n.label + " " + n.num + " " + (n.node_id || "") + " " + (n.short || "") + " " + (n.long || "")).toLowerCase();
-  }
-
-  function updateDestCount(visible, total, query) {
-    if (!destCount) return;
-    if (!total) {
-      destCount.textContent = "—";
-      return;
-    }
-    if (!query) {
-      destCount.textContent = String(total);
-      destCount.title = total + " Knoten — Suche eingeben";
-      return;
-    }
-    destCount.textContent = visible + " / " + total;
-    destCount.title = visible + " Treffer von " + total;
-  }
-
-  function setDestListOpen(open) {
-    if (!destSelect) return;
-    destSelect.classList.toggle("is-open", !!open);
-  }
-
-  function renderDestOptions() {
-    if (!destSelect || cfg.kind !== "dm") return;
-    const query = destSearch ? destSearch.value.trim().toLowerCase() : "";
-    const prev = selectedDest || destSelect.value;
-    destSelect.innerHTML = "";
-
-    if (!query) {
-      setDestListOpen(false);
-      updateDestCount(0, allNodes.length, "");
-      return;
-    }
-
-    setDestListOpen(true);
-
-    if (!allNodes.length) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "Keine Knoten in NodeDB";
-      destSelect.appendChild(opt);
-      updateDestCount(0, 0, query);
-      return;
-    }
-
-    const allMatched = allNodes.filter(function (n) {
-      return nodeHay(n).indexOf(query) !== -1;
-    });
-    const matched = allMatched.slice(0, DEST_MATCH_LIMIT);
-
-    if (!matched.length) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "Kein Treffer — Suchbegriff anpassen";
-      destSelect.appendChild(opt);
-      updateDestCount(0, allNodes.length, query);
-      return;
-    }
-
-    matched.forEach(function (n) {
-      const opt = document.createElement("option");
-      opt.value = n.num;
-      const idHint = n.node_id ? " · " + n.node_id : "";
-      opt.textContent = n.label + " (#" + n.num + idHint + ")";
-      destSelect.appendChild(opt);
-    });
-
-    if (allMatched.length > DEST_MATCH_LIMIT) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.disabled = true;
-      opt.textContent = "… " + (allMatched.length - DEST_MATCH_LIMIT) + " weitere — Suche verfeinern";
-      destSelect.appendChild(opt);
-    }
-
-    if (prev && matched.some(function (n) {
-      return n.num === prev;
-    })) {
-      destSelect.value = prev;
-      selectedDest = prev;
-    } else if (matched.length === 1) {
-      destSelect.value = matched[0].num;
-      selectedDest = matched[0].num;
-    }
-
-    updateDestCount(matched.length, allNodes.length, query);
-  }
-
-  function loadNodes() {
-    if (!destSelect || cfg.kind !== "dm") return;
-    fetch(cfg.apiNodes + "?iface=" + encodeURIComponent(ifaceSelect ? ifaceSelect.value : cfg.interface), {
-      credentials: "same-origin",
-    })
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (data) {
-        allNodes = data.nodes || [];
-        renderDestOptions();
-      })
-      .catch(function () {
-        allNodes = [];
-        renderDestOptions();
       });
   }
 
@@ -383,19 +447,17 @@
       ev.preventDefault();
       const text = (input && input.value.trim()) || "";
       if (!text) return;
+      if (isDm && !selectedPeerId) {
+        setStatus("Bitte zuerst einen Nutzer links wählen.", true);
+        return;
+      }
       if (sendBtn) sendBtn.disabled = true;
       const body = new URLSearchParams();
       body.set("text", text);
       body.set("channel", String(cfg.sendChannel != null ? cfg.sendChannel : 1));
       body.set("interface", ifaceSelect ? ifaceSelect.value : String(cfg.interface));
-      if (cfg.kind === "dm") {
-        const dest = selectedDest || (destSelect && destSelect.value);
-        if (!dest) {
-          setStatus("Bitte Empfänger wählen.", true);
-          if (sendBtn) sendBtn.disabled = false;
-          return;
-        }
-        body.set("dest_node", dest);
+      if (isDm) {
+        body.set("dest_node", selectedPeerId);
       }
       fetch(cfg.apiSend, {
         method: "POST",
@@ -428,22 +490,10 @@
     });
   }
 
-  if (ifaceSelect) {
-    ifaceSelect.addEventListener("change", function () {
-      if (destSearch) destSearch.value = "";
-      selectedDest = "";
-      loadNodes();
-    });
-  }
-
-  if (destSearch) {
-    destSearch.addEventListener("input", renderDestOptions);
-    destSearch.addEventListener("search", renderDestOptions);
-  }
-
-  if (destSelect) {
-    destSelect.addEventListener("change", function () {
-      if (destSelect.value) selectedDest = destSelect.value;
+  if (userSearchEl) {
+    userSearchEl.addEventListener("input", function () {
+      userSearchQuery = userSearchEl.value;
+      renderUserList();
     });
   }
 
@@ -465,7 +515,6 @@
   }
 
   poll(true);
-  loadNodes();
   setInterval(function () {
     poll(false);
   }, cfg.pollMs || 3000);

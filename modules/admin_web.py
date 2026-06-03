@@ -631,21 +631,39 @@ def create_app(
         else:
             subtitle = "Direktnachrichten · empfangen & senden"
 
-        dest_row = ""
-        if kind == "dm":
-            dest_row = """
-    <div class="mesh-chat-field mesh-chat-field--dest">
-      <label class="mesh-chat-label" for="mesh-chat-dest-search">An</label>
-      <div class="mesh-chat-dest-picker">
-        <div class="input-group input-group-sm mesh-chat-dest-search">
-          <span class="input-group-text" aria-hidden="true"><i class="bi bi-search"></i></span>
-          <input type="search" id="mesh-chat-dest-search" class="form-control"
-            placeholder="Name, ShortName, !hex oder #Nummer …" autocomplete="off" spellcheck="false">
-          <span class="input-group-text mesh-chat-dest-count" id="mesh-chat-dest-count" title="Treffer"></span>
-        </div>
-        <select id="mesh-chat-dest" class="form-select form-select-sm mesh-chat-dest-list" size="6"></select>
+        compose_bar = f"""
+    <div class="mesh-chat-compose-bar">
+      <div class="mesh-chat-field mesh-chat-field--iface">
+        <label class="mesh-chat-label" for="mesh-chat-iface">Radio</label>
+        <select id="mesh-chat-iface" class="form-select form-select-sm">{iface_opts}</select>
+      </div>
+      <div class="mesh-chat-field mesh-chat-field--grow">
+        <label class="mesh-chat-label" for="mesh-chat-input">Nachricht</label>
+        <textarea id="mesh-chat-input" class="form-control mesh-chat-input" rows="2" maxlength="500"
+          placeholder="Text eingeben …" required></textarea>
+      </div>
+      <div class="mesh-chat-field mesh-chat-field--send">
+        <span class="mesh-chat-label mesh-chat-label--hidden" aria-hidden="true">&nbsp;</span>
+        <button type="submit" id="mesh-chat-send" class="btn btn-success mesh-chat-send-btn">
+          <i class="bi bi-send-fill"></i><span class="mesh-chat-send-label">Senden</span>
+        </button>
       </div>
     </div>"""
+
+        feed_block = """
+  <div class="mesh-chat-feed-head">
+    <span class="mesh-chat-feed-title"><i class="bi bi-chat-left-text me-1"></i>Verlauf</span>
+    <label class="mesh-chat-filter form-check form-check-inline mb-0">
+      <input type="checkbox" class="form-check-input" id="mesh-chat-hide-bot">
+      <span class="form-check-label">Bot-Antworten ausblenden</span>
+    </label>
+    <span id="mesh-chat-count" class="mesh-chat-count">0 Nachrichten</span>
+  </div>
+  <div id="mesh-chat-feed" class="mesh-chat-feed" aria-live="polite"></div>
+  <div id="mesh-chat-empty" class="mesh-chat-empty" hidden>
+    <i class="bi bi-inbox"></i>
+    <p>Noch keine Nachrichten — Feed aktualisiert sich alle 3&nbsp;s.</p>
+  </div>"""
 
         alert_link = (
             f'<p class="mesh-chat-footnote mb-0">'
@@ -684,52 +702,55 @@ def create_app(
         }
         import json
 
-        inner = f"""
-<div class="mesh-chat-shell{" mesh-chat-shell--dm" if kind == "dm" else ""}">
+        if kind == "dm":
+            inner = f"""
+<div class="mesh-chat-shell mesh-chat-shell--dm">
   <p class="mesh-chat-subtitle">{html_escape(subtitle)}</p>
   {log_hint}
-  <form id="mesh-chat-form" class="mesh-chat-compose">
-    <div class="mesh-chat-compose-bar">
-      <div class="mesh-chat-field mesh-chat-field--iface">
-        <label class="mesh-chat-label" for="mesh-chat-iface">Radio</label>
-        <select id="mesh-chat-iface" class="form-select form-select-sm">{iface_opts}</select>
+  <div class="mesh-dm-layout">
+    <aside class="mesh-dm-sidebar">
+      <div class="mesh-dm-sidebar-head">
+        <label class="mesh-chat-label" for="mesh-dm-user-search">Chats</label>
+        <input type="search" id="mesh-dm-user-search" class="form-control form-control-sm"
+          placeholder="Nutzer suchen …" autocomplete="off" spellcheck="false">
       </div>
-      {dest_row}
-      <div class="mesh-chat-field mesh-chat-field--grow">
-        <label class="mesh-chat-label" for="mesh-chat-input">Nachricht</label>
-        <textarea id="mesh-chat-input" class="form-control mesh-chat-input" rows="2" maxlength="500"
-          placeholder="Text eingeben …" required></textarea>
+      <ul id="mesh-dm-user-list" class="mesh-dm-user-list" role="listbox" aria-label="DM-Chats"></ul>
+    </aside>
+    <div class="mesh-dm-panel">
+      <div class="mesh-dm-panel-head">
+        <span id="mesh-dm-active-label" class="mesh-dm-active-label">Bitte Nutzer links wählen</span>
       </div>
-      <div class="mesh-chat-field mesh-chat-field--send">
-        <span class="mesh-chat-label mesh-chat-label--hidden" aria-hidden="true">&nbsp;</span>
-        <button type="submit" id="mesh-chat-send" class="btn btn-success mesh-chat-send-btn">
-          <i class="bi bi-send-fill"></i><span class="mesh-chat-send-label">Senden</span>
-        </button>
-      </div>
+      <form id="mesh-chat-form" class="mesh-chat-compose">
+        {compose_bar}
+        <div class="mesh-chat-compose-meta">
+          <span id="mesh-chat-status" class="mesh-chat-status">Lade …</span>
+          {alert_link}
+        </div>
+      </form>
+      {feed_block}
     </div>
-    <div class="mesh-chat-compose-meta">
-      <span id="mesh-chat-status" class="mesh-chat-status">Lade …</span>
-      {alert_link}
-    </div>
-  </form>
-
-  <div class="mesh-chat-feed-head">
-    <span class="mesh-chat-feed-title"><i class="bi bi-chat-left-text me-1"></i>Verlauf</span>
-    <label class="mesh-chat-filter form-check form-check-inline mb-0">
-      <input type="checkbox" class="form-check-input" id="mesh-chat-hide-bot">
-      <span class="form-check-label">Bot-Antworten ausblenden</span>
-    </label>
-    <span id="mesh-chat-count" class="mesh-chat-count">0 Nachrichten</span>
-  </div>
-  <div id="mesh-chat-feed" class="mesh-chat-feed" aria-live="polite"></div>
-  <div id="mesh-chat-empty" class="mesh-chat-empty" hidden>
-    <i class="bi bi-inbox"></i>
-    <p>Noch keine Nachrichten — Feed aktualisiert sich alle 3&nbsp;s.</p>
   </div>
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=8"></script>
+<script src="/static/portal/mesh-chat.js?v=9"></script>
+"""
+        else:
+            inner = f"""
+<div class="mesh-chat-shell">
+  <p class="mesh-chat-subtitle">{html_escape(subtitle)}</p>
+  {log_hint}
+  <form id="mesh-chat-form" class="mesh-chat-compose">
+    {compose_bar}
+    <div class="mesh-chat-compose-meta">
+      <span id="mesh-chat-status" class="mesh-chat-status">Lade …</span>
+    </div>
+  </form>
+  {feed_block}
+</div>
+<script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
+<script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
+<script src="/static/portal/mesh-chat.js?v=9"></script>
 """
         return _render_admin_template(
             inner,
@@ -744,7 +765,10 @@ def create_app(
 
         kind = request.args.get("kind") or None
         channel = request.args.get("channel", type=int)
-        limit = min(request.args.get("limit", 100, type=int), 200)
+        limit = min(
+            request.args.get("limit", chat.FEED_LIMIT_DEFAULT, type=int),
+            chat.FEED_LIMIT_MAX,
+        )
         after = request.args.get("after") or None
 
         messages, err = chat.collect_messages(
@@ -756,20 +780,23 @@ def create_app(
         )
         out = []
         for m in messages:
-            out.append(
-                {
-                    "mid": m.get("mid"),
-                    "time": m.get("time"),
-                    "time_short": m.get("time_short"),
-                    "dir": m.get("dir"),
-                    "kind": m.get("kind"),
-                    "channel": m.get("channel"),
-                    "channel_label": m.get("channel_label"),
-                    "text": m.get("text", ""),
-                    "source": m.get("source", "bot"),
-                    "peer": chat.peer_label(m),
-                }
-            )
+            row = {
+                "mid": m.get("mid"),
+                "time": m.get("time"),
+                "time_short": m.get("time_short"),
+                "dir": m.get("dir"),
+                "kind": m.get("kind"),
+                "channel": m.get("channel"),
+                "channel_label": m.get("channel_label"),
+                "text": m.get("text", ""),
+                "source": m.get("source", "bot"),
+                "peer": chat.peer_label(m),
+            }
+            if m.get("kind") == "dm":
+                row["peer_id"] = chat.dm_peer_id(m)
+                row["peer_short"] = m.get("short") or ""
+                row["peer_long"] = m.get("long") or ""
+            out.append(row)
         return jsonify({"messages": out, "error": err})
 
     @app.route("/api/admin/mesh/send", methods=["POST"])
