@@ -363,6 +363,8 @@ def _parse_meshbot_line(
 def _merge_events(
     meshbot_events: List[Dict[str, Any]],
     msg_log_events: List[Dict[str, Any]],
+    *,
+    include_optimistic: bool = True,
 ) -> List[Dict[str, Any]]:
     """Prefer messages.log text for incoming when timestamps align."""
     by_key: Dict[str, Dict[str, Any]] = {}
@@ -387,6 +389,14 @@ def _merge_events(
                 existing["long"] = ev["long"]
         elif not _is_web_admin_send(existing) and existing.get("source") == "web" and ev.get("source") == "bot":
             existing["source"] = "bot"
+        if (
+            existing.get("dir") == "in"
+            and existing.get("kind") in ("channel", "dm")
+            and (existing.get("text") or ev.get("text"))
+        ):
+            clean = _strip_realm_text_prefix(str(existing.get("text") or ev.get("text") or ""))
+            if clean:
+                existing["text"] = clean
 
     def add(ev: Dict[str, Any]) -> None:
         for fp in _semantic_fingerprints(ev):
@@ -416,11 +426,26 @@ def _merge_events(
     for ev in msg_log_events:
         add(ev)
 
-    with _RING_LOCK:
-        for ev in _RING:
-            add(ev)
+    if include_optimistic:
+        with _RING_LOCK:
+            for ev in _RING:
+                add(ev)
 
     return [by_key[k] for k in order]
+
+
+def merge_log_message_events(
+    meshbot_events: List[Dict[str, Any]],
+    msg_log_events: List[Dict[str, Any]],
+    *,
+    include_optimistic: bool = False,
+) -> List[Dict[str, Any]]:
+    """Merge meshbot + messages.log rows with semantic deduplication."""
+    return _merge_events(
+        meshbot_events,
+        msg_log_events,
+        include_optimistic=include_optimistic,
+    )
 
 
 def _resolve_rotated_log_paths(

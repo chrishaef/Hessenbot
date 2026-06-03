@@ -396,6 +396,34 @@ class TestBot(unittest.TestCase):
         with _RING_LOCK:
             _RING.clear()
 
+    def test_public_dashboard_dedup_meshbot_and_messages_log(self):
+        import os
+        import tempfile
+        from modules.web_dashboard import parse_meshbot_log
+
+        body = "Oh aehm. Temporale Verzerrung in der chrona ordina."
+        mesh = (
+            "2026-06-03 22:22:27,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            f"Ignoring Message: {body} From: TaunusMesh\n"
+        )
+        msglog = (
+            "2026-06-03 22:22:27,150 | Device:1 Channel:1|Mesh Hessen | "
+            f"TaunusMesh | meshhessen.de | {body}\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            stats = parse_meshbot_log(os.path.join(td, "meshbot.log"))
+        incoming = [
+            m
+            for m in stats.get("recent_messages") or []
+            if m.get("kind") == "channel" and m.get("dir") == "in"
+        ]
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0].get("text"), body)
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile

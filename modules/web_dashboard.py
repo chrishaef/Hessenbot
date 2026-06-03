@@ -468,8 +468,9 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
         plain = _strip_ansi(line)
         timestamp_match = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+", line)
         if timestamp_match:
-            timestamp = datetime.strptime(timestamp_match.group(1), "%Y-%m-%d %H:%M:%S")
-            hourly[timestamp.strftime("%Y-%m-%d %H:00:00")] += 1
+            timestamp = _parse_ts_from_log_line(line)
+            if timestamp:
+                hourly[timestamp.strftime("%Y-%m-%d %H:00:00")] += 1
 
         if "Bot detected Commands" in line or "LLM Query:" in line:
             command = re.search(r"'cmd': '(\w+)'", line)
@@ -594,15 +595,9 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
     msg_log_path = os.path.join(os.path.dirname(log_path), "messages.log")
     msg_log_events = _parse_messages_log_tail(msg_log_path, nodes)
     if msg_log_events:
-        merged = {e["time"]: e for e in recent_messages}
-        for e in msg_log_events:
-            if e["time"] not in merged:
-                if e.get("dir") == "out":
-                    message_types["Ausgehend"] += 1
-                else:
-                    message_types["Eingehend"] += 1
-            merged.setdefault(e["time"], e)
-        recent_messages = sorted(merged.values(), key=lambda x: x["time"])
+        from modules.admin_mesh_chat import merge_log_message_events
+
+        recent_messages = merge_log_message_events(recent_messages, msg_log_events)
 
     node_rx_counts: defaultdict[int, int] = defaultdict(int)
     node_rx_counts_24h: defaultdict[int, int] = defaultdict(int)
