@@ -676,6 +676,7 @@ def create_app(
             "sendChannel": channel,
             "interface": iface,
             "channelLabel": ch_label,
+            "botName": "Hessenbot",
             "apiMessages": url_for("api_mesh_messages"),
             "apiSend": url_for("api_mesh_send"),
             "apiNodes": url_for("api_mesh_nodes"),
@@ -714,6 +715,10 @@ def create_app(
 
   <div class="mesh-chat-feed-head">
     <span class="mesh-chat-feed-title"><i class="bi bi-chat-left-text me-1"></i>Verlauf</span>
+    <label class="mesh-chat-filter form-check form-check-inline mb-0">
+      <input type="checkbox" class="form-check-input" id="mesh-chat-hide-bot">
+      <span class="form-check-label">Bot-Antworten ausblenden</span>
+    </label>
     <span id="mesh-chat-count" class="mesh-chat-count">0 Nachrichten</span>
   </div>
   <div id="mesh-chat-feed" class="mesh-chat-feed" aria-live="polite"></div>
@@ -724,7 +729,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=6"></script>
+<script src="/static/portal/mesh-chat.js?v=8"></script>
 """
         return _render_admin_template(
             inner,
@@ -761,6 +766,7 @@ def create_app(
                     "channel": m.get("channel"),
                     "channel_label": m.get("channel_label"),
                     "text": m.get("text", ""),
+                    "source": m.get("source", "bot"),
                     "peer": chat.peer_label(m),
                 }
             )

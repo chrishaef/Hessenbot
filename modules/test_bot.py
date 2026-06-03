@@ -143,6 +143,30 @@ class TestBot(unittest.TestCase):
         self.assertIn("pong", texts)
         self.assertIn("ping", texts)
 
+    def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        noise = (
+            "2026-05-31 12:00:00,100 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "Ignoring Message: chatter From: Node{i}\n"
+        )
+        bot_reply = (
+            "2026-05-31 12:45:01,300 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "req.ACK SendingChannel: !ping Antwort From Bot\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                for i in range(5000):
+                    f.write(noise.format(i=i))
+                f.write(bot_reply)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=80)
+        self.assertIsNone(err)
+        out_texts = [m.get("text", "") for m in msgs if m.get("dir") == "out"]
+        self.assertTrue(any("Antwort" in t for t in out_texts), out_texts)
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 

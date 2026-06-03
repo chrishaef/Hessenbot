@@ -28,8 +28,9 @@ _SEND_DM_TEXT_RE = re.compile(r"Sending DM:\s*(.+?)\s+To:")
 _RECV_DM_TEXT_RE = re.compile(r"(?:Received|Ignoring) DM:\s*(.+?)\s+From:")
 _RECV_DM_MISSING_BANG_RE = re.compile(r"Received DM \(missing !\):\s*(.+?)\s+From:")
 
-MESHBOT_TAIL_DEFAULT = 2500
-MESHBOT_TAIL_DM_SCAN = 12000
+MESHBOT_TAIL_IN = 8000
+MESHBOT_TAIL_OUT_SCAN = 15000
+MESHBOT_TAIL_DM_IN = 12000
 MSGLOG_TAIL_DEFAULT = 1000
 MSGLOG_TAIL_DM_SCAN = 4000
 
@@ -46,6 +47,7 @@ def record_optimistic(event: Dict[str, Any]) -> None:
     """Append a just-sent message so the UI updates before the log line appears."""
     event = dict(event)
     event.setdefault("mid", _message_key(event))
+    event.setdefault("source", "web")
     with _RING_LOCK:
         _RING.append(event)
 
@@ -66,6 +68,16 @@ def _line_is_meshbot_dm(plain: str) -> bool:
         or "Received DM" in plain
         or "Ignoring DM:" in plain
     )
+
+
+def _line_is_meshbot_out(plain: str) -> bool:
+    return "Sending DM:" in plain or "SendingChannel:" in plain
+
+
+def _bot_event(extra: Dict[str, Any]) -> Dict[str, Any]:
+    ev = dict(extra)
+    ev.setdefault("source", "bot")
+    return ev
 
 
 def _parse_meshbot_line(
@@ -94,7 +106,7 @@ def _parse_meshbot_line(
         peer = nodes.resolve(to_m.group(1)) if to_m else {}
         text_m = _SEND_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
-        return {**base, "dir": "out", "kind": "dm", "text": text, **peer}
+        return _bot_event({**base, "dir": "out", "kind": "dm", "text": text, **peer})
 
     if "SendingChannel:" in plain or "Sending Multi-Chunk Message:" in plain:
         text_m = re.search(
@@ -104,7 +116,7 @@ def _parse_meshbot_line(
         if not text_m:
             text_m = re.search(r"SendingChannel:\s*(.+)$", plain)
         text = text_m.group(1).strip() if text_m else ""
-        return {
+        return _bot_event({
             **base,
             "dir": "out",
             "kind": "channel",
@@ -113,21 +125,21 @@ def _parse_meshbot_line(
             "hex": "",
             "short": "",
             "long": "",
-        }
+        })
 
     if "Received DM (missing !):" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
         peer = nodes.resolve(from_m.group(1)) if from_m else {}
         text_m = _RECV_DM_MISSING_BANG_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
-        return {**base, "dir": "in", "kind": "dm", "text": text, **peer}
+        return _bot_event({**base, "dir": "in", "kind": "dm", "text": text, **peer})
 
     if "Received DM:" in plain or "Ignoring DM:" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
         peer = nodes.resolve(from_m.group(1)) if from_m else {}
         text_m = _RECV_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
-        return {**base, "dir": "in", "kind": "dm", "text": text, **peer}
+        return _bot_event({**base, "dir": "in", "kind": "dm", "text": text, **peer})
 
     if "ReceivedChannel:" in plain or "Ignoring Message:" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
@@ -137,7 +149,7 @@ def _parse_meshbot_line(
         else:
             text_m = re.search(r"Ignoring Message:\s*(.+?)\s+From:", plain)
         text = text_m.group(1).strip() if text_m else ""
-        return {**base, "dir": "in", "kind": "channel", "text": text, **peer}
+        return _bot_event({**base, "dir": "in", "kind": "channel", "text": text, **peer})
 
     return None
 
@@ -220,21 +232,45 @@ def _parse_meshbot_tail(
     log_dir: str,
     nodes: _NodeDirectory,
     *,
-    max_lines: int = MESHBOT_TAIL_DEFAULT,
-    dm_only: bool = False,
+    in_scan_lines: int = MESHBOT_TAIL_IN,
+    out_scan_lines: int = MESHBOT_TAIL_OUT_SCAN,
+    dm_in_only: bool = False,
 ) -> List[Dict[str, Any]]:
+    """Parse meshbot.log; bot sends are scanned deeper than casual channel chatter."""
     events: List[Dict[str, Any]] = []
+    seen: set = set()
     paths = _resolve_rotated_log_paths(log_dir, "meshbot.log")
-    for line in _tail_merged_log_paths(paths, max_lines):
+    scan_lines = max(in_scan_lines, out_scan_lines)
+    deep = _tail_merged_log_paths(paths, scan_lines)
+    in_recent = deep[-in_scan_lines:] if len(deep) > in_scan_lines else deep
+
+    def consume(line: str) -> None:
         plain = _strip_ansi(line)
-        if dm_only and not _line_is_meshbot_dm(plain):
-            continue
         ts = _parse_ts(line)
         if not ts:
-            continue
+            return
         ev = _parse_meshbot_line(plain, ts, nodes)
-        if ev:
-            events.append(ev)
+        if not ev:
+            return
+        key = _message_key(ev)
+        if key in seen:
+            return
+        seen.add(key)
+        events.append(ev)
+
+    out_lines = _tail_merged_log_paths(paths, out_scan_lines)
+    for line in out_lines:
+        if _line_is_meshbot_out(_strip_ansi(line)):
+            consume(line)
+
+    for line in in_recent:
+        plain = _strip_ansi(line)
+        if _line_is_meshbot_out(plain):
+            continue
+        if dm_in_only and not _line_is_meshbot_dm(plain):
+            continue
+        consume(line)
+
     return events
 
 
@@ -275,8 +311,9 @@ def collect_messages(
     meshbot_events = _parse_meshbot_tail(
         log_dir,
         nodes,
-        max_lines=MESHBOT_TAIL_DM_SCAN if dm_mode else MESHBOT_TAIL_DEFAULT,
-        dm_only=dm_mode,
+        in_scan_lines=MESHBOT_TAIL_DM_IN if dm_mode else MESHBOT_TAIL_IN,
+        out_scan_lines=MESHBOT_TAIL_OUT_SCAN,
+        dm_in_only=dm_mode,
     )
     msg_log_events = _parse_messages_logs_tail(
         log_dir,

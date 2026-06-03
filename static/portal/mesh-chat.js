@@ -24,6 +24,7 @@
   let selectedDest = "";
   let lastFullPollAt = 0;
   let lastPollDayKey = "";
+  let hideBotReplies = false;
   const DEST_MATCH_LIMIT = 200;
   const FULL_REFRESH_MS = 5 * 60 * 1000;
 
@@ -78,6 +79,21 @@
     return div;
   }
 
+  function isBotAutoReply(m) {
+    return m.dir === "out" && m.source !== "web";
+  }
+
+  function shouldShowMessage(m) {
+    return !(hideBotReplies && isBotAutoReply(m));
+  }
+
+  function outSenderLabel(m, peer) {
+    if (m.source === "web" || peer.short === "Web-Admin") {
+      return "Web-Admin";
+    }
+    return cfg.botName || "Hessenbot";
+  }
+
   function renderMessage(m) {
     const out = m.dir === "out";
     const kind = m.kind || "channel";
@@ -89,7 +105,7 @@
     const badgeClass = out ? "mesh-msg-badge--out" : "mesh-msg-badge--in";
     let who = "";
     if (out) {
-      who = kind === "dm" ? peer.long || peer.short || "DM" : "Web-Admin";
+      who = outSenderLabel(m, peer);
     } else {
       who = peer.short || peer.long || "?";
     }
@@ -124,7 +140,15 @@
 
     head.appendChild(badgeEl);
     head.appendChild(whoEl);
-    if (peer.long && !out && peer.short && peer.long !== peer.short) {
+    if (out && kind === "dm" && m.source !== "web") {
+      const toName = peer.long || peer.short;
+      if (toName && toName !== "?") {
+        const subEl = document.createElement("span");
+        subEl.className = "mesh-msg-who-sub";
+        subEl.textContent = "An: " + toName;
+        head.appendChild(subEl);
+      }
+    } else if (peer.long && !out && peer.short && peer.long !== peer.short) {
       const subEl = document.createElement("span");
       subEl.className = "mesh-msg-who-sub";
       subEl.textContent = peer.long;
@@ -188,6 +212,7 @@
     messages.forEach(function (m, idx) {
       const mid = m.mid || "idx-" + idx + "-" + (m.time || "") + "-" + (m.text || "").slice(0, 40);
       if (known.has(mid)) return;
+      if (!shouldShowMessage(m)) return;
       known.add(mid);
       m.mid = mid;
 
@@ -428,6 +453,14 @@
         ev.preventDefault();
         form.requestSubmit();
       }
+    });
+  }
+
+  const hideBotEl = document.getElementById("mesh-chat-hide-bot");
+  if (hideBotEl) {
+    hideBotEl.addEventListener("change", function () {
+      hideBotReplies = !!hideBotEl.checked;
+      poll(true);
     });
   }
 

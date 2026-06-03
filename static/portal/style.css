@@ -1326,8 +1326,20 @@ pre.admin-pre {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.75rem;
   padding: 0 0.15rem;
+}
+
+.mesh-chat-filter {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted, #6c757d);
+  user-select: none;
+}
+
+.mesh-chat-filter .form-check-label {
+  font-size: 0.75rem;
 }
 
 .mesh-chat-feed-title {
