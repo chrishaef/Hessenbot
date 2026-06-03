@@ -168,6 +168,24 @@ def _outgoing_dm_fingerprints(ev: Dict[str, Any]) -> List[str]:
     return fps
 
 
+def _outgoing_channel_fingerprints(ev: Dict[str, Any]) -> List[str]:
+    if ev.get("kind") != "channel" or ev.get("dir") != "out":
+        return []
+    text = _normalize_incoming_text(ev.get("text", ""))
+    if not text:
+        return []
+    ch = _channel_index(ev)
+    if ch is None:
+        return []
+    bucket = _incoming_time_bucket(ev.get("time", ""))
+    device = str(ev.get("device", ""))
+    return ["|".join(("ch-out", bucket, device, str(ch), text[:160]))]
+
+
+def _is_web_admin_send(ev: Dict[str, Any]) -> bool:
+    return ev.get("source") == "web" or ev.get("short") == "Web-Admin"
+
+
 def _semantic_fingerprints(ev: Dict[str, Any]) -> List[str]:
     fps: List[str] = []
     for fn in (_incoming_channel_fingerprint, _incoming_dm_fingerprint):
@@ -175,6 +193,9 @@ def _semantic_fingerprints(ev: Dict[str, Any]) -> List[str]:
         if fp and fp not in fps:
             fps.append(fp)
     for fp in _outgoing_dm_fingerprints(ev):
+        if fp not in fps:
+            fps.append(fp)
+    for fp in _outgoing_channel_fingerprints(ev):
         if fp not in fps:
             fps.append(fp)
     return fps
@@ -359,7 +380,12 @@ def _merge_events(
         for field in ("short", "long", "hex", "id", "channel_label"):
             if not existing.get(field) and ev.get(field):
                 existing[field] = ev[field]
-        if existing.get("source") == "web" and ev.get("source") == "bot":
+        if _is_web_admin_send(ev):
+            existing["source"] = "web"
+            existing["short"] = "Web-Admin"
+            if ev.get("long"):
+                existing["long"] = ev["long"]
+        elif not _is_web_admin_send(existing) and existing.get("source") == "web" and ev.get("source") == "bot":
             existing["source"] = "bot"
 
     def add(ev: Dict[str, Any]) -> None:

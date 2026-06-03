@@ -350,6 +350,52 @@ class TestBot(unittest.TestCase):
         with _RING_LOCK:
             _RING.clear()
 
+    def test_channel_feed_dedup_outgoing_web_and_bot_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import (
+            _RING,
+            _RING_LOCK,
+            _merge_events,
+            collect_messages,
+            record_optimistic,
+        )
+
+        mesh = (
+            "2026-06-01 21:30:00,200 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "req.ACK SendingChannel: Hallo vom Admin Panel\n"
+        )
+        with _RING_LOCK:
+            _RING.clear()
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(mesh)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        record_optimistic(
+            {
+                "time": "2026-06-01T21:30:00",
+                "time_short": "21:30:00",
+                "dir": "out",
+                "kind": "channel",
+                "channel": 1,
+                "channel_label": "Mesh Hessen",
+                "device": 1,
+                "text": "Hallo vom Admin Panel",
+                "short": "Web-Admin",
+                "long": "Hessenbot Web-Admin",
+                "source": "web",
+            }
+        )
+        merged = _merge_events(msgs, [])
+        outgoing = [m for m in merged if m.get("dir") == "out"]
+        self.assertEqual(len(outgoing), 1)
+        self.assertEqual(outgoing[0].get("short"), "Web-Admin")
+        self.assertEqual(outgoing[0].get("source"), "web")
+        with _RING_LOCK:
+            _RING.clear()
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile
