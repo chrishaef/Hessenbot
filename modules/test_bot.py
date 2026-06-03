@@ -281,6 +281,75 @@ class TestBot(unittest.TestCase):
         self.assertEqual(len(incoming), 1)
         self.assertEqual(incoming[0].get("text"), body)
 
+    def test_dm_feed_dedup_meshbot_and_messages_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        mesh = (
+            "2026-06-01 12:00:00,100 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris mobil 📲 *meshhessen.de*\n"
+        )
+        msglog = (
+            "2026-06-01 12:00:02,150 | Device:1 Channel:0 | "
+            "Chris 🌐🛰️ *meshhessen.de* | DM | ping\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            msgs, err = collect_messages(td, kind="dm", limit=20)
+        self.assertIsNone(err)
+        incoming = [m for m in msgs if m.get("dir") == "in"]
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0].get("text"), "!ping")
+
+    def test_dm_feed_dedup_outgoing_web_and_bot_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import (
+            _RING,
+            _RING_LOCK,
+            _merge_events,
+            collect_messages,
+            record_optimistic,
+        )
+
+        mesh = (
+            "2026-06-01 12:01:00,200 |     INFO | Device:1 req.ACK "
+            "Sending DM: Hallo zurück To: Chris mobil 📲 *meshhessen.de*\n"
+        )
+        with _RING_LOCK:
+            _RING.clear()
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(mesh)
+            msgs, err = collect_messages(td, kind="dm", limit=20)
+        self.assertIsNone(err)
+        record_optimistic(
+            {
+                "time": "2026-06-01T12:01:00",
+                "time_short": "12:01:00",
+                "dir": "out",
+                "kind": "dm",
+                "channel": 0,
+                "channel_label": "DM",
+                "device": 1,
+                "text": "Hallo zurück",
+                "id": "1127983492",
+                "short": "Web-Admin",
+                "long": "Hessenbot Web-Admin",
+                "source": "web",
+            }
+        )
+        merged = _merge_events(msgs, [])
+        outgoing = [m for m in merged if m.get("dir") == "out"]
+        self.assertEqual(len(outgoing), 1)
+        with _RING_LOCK:
+            _RING.clear()
+
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os
         import tempfile

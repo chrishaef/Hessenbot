@@ -66,6 +66,37 @@ def _normalize_incoming_text(text: str) -> str:
     return t
 
 
+def _normalize_dm_text(text: str) -> str:
+    t = _normalize_incoming_text(text)
+    if t.startswith("!"):
+        t = t[1:].strip()
+    return t
+
+
+def _normalize_party_name(name: str) -> str:
+    n = re.sub(r"\s+", " ", (name or "").strip().lower())
+    n = re.sub(r"\*?meshhessen\.de\*?", "", n).strip()
+    n = re.sub(r"[^\w\s]", "", n, flags=re.UNICODE)
+    n = re.sub(r"\s+", " ", n).strip()
+    if not n:
+        return ""
+    return n.split()[0]
+
+
+def _dm_party_key(entry: Dict[str, Any]) -> str:
+    pid = entry.get("id")
+    if pid not in (None, ""):
+        return f"id:{pid}"
+    hex_id = (entry.get("hex") or "").strip().lower()
+    if hex_id:
+        return hex_id
+    for field in ("short", "long"):
+        token = _normalize_party_name(entry.get(field) or "")
+        if token:
+            return f"n:{token}"
+    return ""
+
+
 def _peer_name_key(entry: Dict[str, Any]) -> str:
     short = (entry.get("short") or "").strip().lower()
     if short:
@@ -99,6 +130,54 @@ def _incoming_channel_fingerprint(ev: Dict[str, Any]) -> Optional[str]:
             text,
         )
     )
+
+
+def _incoming_dm_fingerprint(ev: Dict[str, Any]) -> Optional[str]:
+    if ev.get("kind") != "dm" or ev.get("dir") != "in":
+        return None
+    text = _normalize_dm_text(ev.get("text", ""))
+    if not text:
+        return None
+    party = _dm_party_key(ev)
+    if not party:
+        return None
+    return "|".join(
+        (
+            "dm-in",
+            _incoming_time_bucket(ev.get("time", "")),
+            str(ev.get("device", "")),
+            party,
+            text,
+        )
+    )
+
+
+def _outgoing_dm_fingerprints(ev: Dict[str, Any]) -> List[str]:
+    if ev.get("kind") != "dm" or ev.get("dir") != "out":
+        return []
+    text = _normalize_dm_text(ev.get("text", ""))
+    if not text:
+        return []
+    bucket = _incoming_time_bucket(ev.get("time", ""))
+    device = str(ev.get("device", ""))
+    loose = "|".join(("dm-out", bucket, device, text[:160]))
+    fps = [loose]
+    party = _dm_party_key(ev)
+    if party:
+        fps.append(f"{loose}|{party}")
+    return fps
+
+
+def _semantic_fingerprints(ev: Dict[str, Any]) -> List[str]:
+    fps: List[str] = []
+    for fn in (_incoming_channel_fingerprint, _incoming_dm_fingerprint):
+        fp = fn(ev)
+        if fp and fp not in fps:
+            fps.append(fp)
+    for fp in _outgoing_dm_fingerprints(ev):
+        if fp not in fps:
+            fps.append(fp)
+    return fps
 
 
 def _message_sort_key(entry: Dict[str, Any]) -> Tuple[str, int, str]:
@@ -272,15 +351,22 @@ def _merge_events(
     def _enrich(existing: Dict[str, Any], ev: Dict[str, Any]) -> None:
         if not existing.get("text") and ev.get("text"):
             existing["text"] = ev["text"]
+        elif (
+            ev.get("text")
+            and len(str(ev.get("text", ""))) > len(str(existing.get("text", "")))
+        ):
+            existing["text"] = ev["text"]
         for field in ("short", "long", "hex", "id", "channel_label"):
             if not existing.get(field) and ev.get(field):
                 existing[field] = ev[field]
+        if existing.get("source") == "web" and ev.get("source") == "bot":
+            existing["source"] = "bot"
 
     def add(ev: Dict[str, Any]) -> None:
-        fp = _incoming_channel_fingerprint(ev)
-        if fp and fp in semantic_seen:
-            _enrich(by_key[semantic_seen[fp]], ev)
-            return
+        for fp in _semantic_fingerprints(ev):
+            if fp in semantic_seen:
+                _enrich(by_key[semantic_seen[fp]], ev)
+                return
 
         base_key = _message_key(ev)
         key = base_key
@@ -296,7 +382,7 @@ def _merge_events(
         ev["mid"] = key
         by_key[key] = ev
         order.append(key)
-        if fp:
+        for fp in _semantic_fingerprints(ev):
             semantic_seen[fp] = key
 
     for ev in meshbot_events:
