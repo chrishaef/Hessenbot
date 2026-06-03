@@ -448,6 +448,47 @@ def merge_log_message_events(
     )
 
 
+def build_merged_message_feed(
+    log_dir: str,
+    *,
+    limit: int = 120,
+    include_optimistic: bool = False,
+) -> List[Dict[str, Any]]:
+    """Chronological mesh message feed from meshbot.log + messages.log (with rotation)."""
+    nodes = _NodeDirectory()
+    meshbot_events = _parse_meshbot_tail(log_dir, nodes)
+    msg_log_events = _parse_messages_logs_tail(log_dir, nodes)
+    merged = merge_log_message_events(
+        meshbot_events,
+        msg_log_events,
+        include_optimistic=include_optimistic,
+    )
+    merged.sort(key=_message_sort_key)
+    return _trim_feed(merged, limit)
+
+
+def load_public_channel_toplist(
+    log_dir: str,
+    channel: int,
+    *,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """Latest inbound channel messages for the public stats page (Kanal-Topliste)."""
+    nodes = _NodeDirectory()
+    meshbot_events = _parse_meshbot_tail(log_dir, nodes)
+    msg_log_events = _parse_messages_logs_tail(log_dir, nodes, channel=int(channel))
+    merged = merge_log_message_events(meshbot_events, msg_log_events)
+    filtered = [
+        m
+        for m in merged
+        if m.get("kind") == "channel"
+        and m.get("dir") == "in"
+        and _matches_channel_filter(m, channel)
+    ]
+    filtered.sort(key=_message_sort_key)
+    return list(reversed(filtered[-limit:]))
+
+
 def _resolve_rotated_log_paths(
     log_dir: str, basename: str, *, max_backups: int = 1
 ) -> List[str]:

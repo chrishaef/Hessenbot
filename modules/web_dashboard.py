@@ -354,11 +354,11 @@ def _parse_messages_log_lines(
 def _parse_messages_log_tail(
     log_path: str, nodes: _NodeDirectory, *, max_lines: int = 800
 ) -> List[Dict[str, Any]]:
-    """Supplement recent messages from logs/messages.log (pipe format)."""
-    if not os.path.isfile(log_path):
-        return []
-    lines = _tail_lines(log_path, max_lines)
-    return _parse_messages_log_lines(lines, nodes)
+    """Supplement recent messages from logs/messages.log (pipe format, with rotation)."""
+    from modules.admin_mesh_chat import _parse_messages_logs_tail
+
+    log_dir = os.path.dirname(os.path.realpath(log_path))
+    return _parse_messages_logs_tail(log_dir, nodes, max_lines=max_lines)
 
 
 def _empty_log_stats() -> Dict[str, Any]:
@@ -396,30 +396,60 @@ _LEADERBOARD_24H_SEC = 86400
 
 # Cache parsed log stats so repeated dashboard requests (and the 5s auto-refresh
 # admin views) don't re-read and re-parse a multi-MB log every time. Keyed by log
-# path; served for up to _LOG_PARSE_TTL seconds and invalidated immediately when
-# the file shrinks (log rotation/truncation).
+# path; served for up to _LOG_PARSE_TTL seconds and invalidated when meshbot.log or
+# messages.log change (size/mtime, including the newest rotated backup).
 _LOG_PARSE_TTL = 30.0
 _log_parse_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _log_sources_fingerprint(log_path: str) -> tuple:
+    """Cheap change detector for meshbot.log + messages.log (+ latest rotation)."""
+    import glob
+
+    log_dir = os.path.dirname(os.path.realpath(log_path))
+    parts: List[tuple] = []
+    for basename in ("meshbot.log", "messages.log"):
+        primary = os.path.join(log_dir, basename)
+        try:
+            parts.append(
+                (basename, os.path.getsize(primary), int(os.path.getmtime(primary)))
+            )
+        except OSError:
+            parts.append((basename, -1, -1))
+        backups = sorted(
+            glob.glob(os.path.join(log_dir, f"{basename}.*")),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        if backups:
+            try:
+                parts.append(
+                    (
+                        f"{basename}.rot",
+                        os.path.getsize(backups[0]),
+                        int(os.path.getmtime(backups[0])),
+                    )
+                )
+            except OSError:
+                parts.append((f"{basename}.rot", -1, -1))
+    return tuple(parts)
 
 
 def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     """Parse meshbot.log with a short-TTL cache (see _log_parse_cache)."""
     now = time.time()
-    try:
-        size = os.path.getsize(log_path)
-    except OSError:
-        size = -1
+    fp = _log_sources_fingerprint(log_path)
     cached = _log_parse_cache.get(log_path)
     if (
         cached is not None
         and (now - cached["ts"]) < _LOG_PARSE_TTL
-        and size >= cached["size"]
+        and cached.get("fp") == fp
         and not cached["stats"].get("log_error")
     ):
         return cached["stats"]
 
     stats = _parse_meshbot_log_uncached(log_path, max_lines)
-    _log_parse_cache[log_path] = {"ts": now, "size": size, "stats": stats}
+    _log_parse_cache[log_path] = {"ts": now, "fp": fp, "stats": stats}
     return stats
 
 
@@ -439,7 +469,6 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
     message_types: Counter = Counter()
     command_timestamps: List[tuple] = []
     message_timestamps: List[tuple] = []
-    recent_messages: List[Dict[str, Any]] = []
     nodes = _NodeDirectory()
     warnings: List[str] = []
     errors: List[str] = []
@@ -475,7 +504,6 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
 
         evt = _extract_message_event(plain, timestamp, nodes) if timestamp else None
         if evt:
-            recent_messages.append(evt)
             if evt.get("dir") == "out":
                 message_types["Ausgehend"] += 1
             else:
@@ -575,12 +603,10 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
                     stats["node2_name"] = name
                     stats["node2_ID"] = node_id
 
-    msg_log_path = os.path.join(os.path.dirname(log_path), "messages.log")
-    msg_log_events = _parse_messages_log_tail(msg_log_path, nodes)
-    if msg_log_events:
-        from modules.admin_mesh_chat import merge_log_message_events
+    log_dir = os.path.dirname(os.path.realpath(log_path))
+    from modules.admin_mesh_chat import build_merged_message_feed
 
-        recent_messages = merge_log_message_events(recent_messages, msg_log_events)
+    recent_messages = build_merged_message_feed(log_dir, limit=120)
 
     node_rx_counts: defaultdict[int, int] = defaultdict(int)
     node_rx_counts_24h: defaultdict[int, int] = defaultdict(int)
@@ -612,7 +638,7 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
     stats["errors"] = errors[-15:][::-1]
     stats["command_timestamps"] = command_timestamps[-40:]
     stats["message_timestamps"] = message_timestamps[-40:]
-    stats["recent_messages"] = recent_messages[-40:]
+    stats["recent_messages"] = recent_messages
     stats["bbs_dm_delivered"] = bbs_dm_delivered[-25:]
     stats["bbs_dm_queued"] = bbs_dm_queued[-50:]
     stats["node_rx_counts_by_id"] = dict(node_rx_counts)
@@ -1125,45 +1151,87 @@ def _clean_peer_long_name(long_name: str) -> str:
     return long_name
 
 
-def _fallback_short_from_long(long_name: str) -> str:
-    match = re.match(r"^(\S+)", (long_name or "").strip())
-    if not match:
-        return "?"
-    word = match.group(1)
-    if len(word) <= 4:
-        return word
-    if word.isalpha() and len(word) <= 8:
-        return word
-    return word[:4]
+def _resolve_peer_node_id(entry: Dict[str, Any]) -> Optional[int]:
+    """Node id from log fields or persistent NodeDB (never guessed from longName)."""
+    raw_id = entry.get("id")
+    if raw_id not in (None, ""):
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):
+            pass
+
+    hex_id = (entry.get("hex") or "").strip()
+    if hex_id.startswith("!"):
+        try:
+            return int(hex_id[1:], 16)
+        except ValueError:
+            pass
+
+    try:
+        from modules import nodedb as ndb
+
+        raw_long = (entry.get("long") or "").strip()
+        clean_long = _clean_peer_long_name(raw_long)
+        for candidate in (raw_long, clean_long):
+            if candidate:
+                nid = ndb.find_node_id_by_long_name(candidate)
+                if nid:
+                    return nid
+        entry_short = (entry.get("short") or "").strip()
+        if entry_short:
+            nid = ndb.find_node_id_by_short_name(entry_short)
+            if nid:
+                return nid
+    except Exception:
+        pass
+    return None
 
 
 def _peer_display_names(entry: Dict[str, Any]) -> tuple[str, str]:
-    """Return (shortName, longName) for dashboard display."""
-    short = (entry.get("short") or "").strip()
+    """Return (shortName, longName) from NodeDB / NodeInfo — not derived from longName."""
+    device = int(entry.get("device") or 1)
+    node_id = _resolve_peer_node_id(entry)
+    short = ""
     long_name = _clean_peer_long_name(entry.get("long") or "")
 
-    node_id = entry.get("id")
-    if node_id:
+    if node_id is not None:
         try:
             from modules.system import get_name_from_number
 
-            device = int(entry.get("device") or 1)
-            nid = int(node_id)
-            if not short:
-                resolved = get_name_from_number(nid, "short", device)
-                if resolved and str(resolved).strip() and not str(resolved).startswith("!"):
-                    short = str(resolved).strip()
-            if not long_name:
-                resolved = get_name_from_number(nid, "long", device)
-                if resolved and str(resolved).strip():
-                    long_name = _clean_peer_long_name(str(resolved).strip())
+            resolved_short = get_name_from_number(node_id, "short", device)
+            if (
+                resolved_short
+                and str(resolved_short).strip()
+                and not str(resolved_short).startswith("!")
+            ):
+                short = str(resolved_short).strip()
+            resolved_long = get_name_from_number(node_id, "long", device)
+            if (
+                resolved_long
+                and str(resolved_long).strip()
+                and not str(resolved_long).startswith("!")
+            ):
+                long_name = _clean_peer_long_name(str(resolved_long).strip())
         except Exception:
             pass
 
-    if long_name and not short:
-        short = _fallback_short_from_long(long_name)
-    if short and not long_name:
-        long_name = short
+        if not short or short == "?":
+            try:
+                from modules import nodedb as ndb
+
+                ndb._ensure_nodedb_loaded()
+                cached_short = ndb.get_node_short_name(node_id)
+                if cached_short and str(cached_short).strip():
+                    short = str(cached_short).strip()
+                if not long_name:
+                    cached_long = ndb.get_node_long_name(node_id)
+                    if cached_long and str(cached_long).strip():
+                        long_name = _clean_peer_long_name(str(cached_long).strip())
+            except Exception:
+                pass
+
+    if not long_name:
+        long_name = _clean_peer_long_name(entry.get("long") or "")
     if not short:
         short = "?"
     if not long_name:
@@ -1191,6 +1259,7 @@ def _channel_recent_messages(
         and e.get("dir") == "in"
         and e.get("channel") == channel
     ]
+    filtered.sort(key=lambda e: e.get("time") or "")
     return list(reversed(filtered[-limit:]))
 
 
@@ -1242,10 +1311,20 @@ def _dashboard_messages_heading(channel: int) -> str:
     return html_escape(f"{generic} · {name}")
 
 
-def _render_toplist_html(log: Dict[str, Any], *, channel: Optional[int] = None) -> str:
+def _render_toplist_html(
+    log: Dict[str, Any],
+    *,
+    channel: Optional[int] = None,
+    log_dir: Optional[str] = None,
+) -> str:
     if channel is None:
         channel = _dashboard_messages_channel()
-    entries = _channel_recent_messages(log, channel=channel, limit=10)
+    if log_dir:
+        from modules.admin_mesh_chat import load_public_channel_toplist
+
+        entries = load_public_channel_toplist(log_dir, channel, limit=10)
+    else:
+        entries = _channel_recent_messages(log, channel=channel, limit=10)
     ch_title = _dashboard_channel_title(channel)
     if entries:
         items = "".join(_render_toplist_message_item(e) for e in entries)
@@ -1423,6 +1502,7 @@ def collect_dashboard(log_dir: str) -> Dict[str, Any]:
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "repo": repo_root(),
         "log_path": log_path,
+        "log_dir": os.path.dirname(os.path.realpath(log_path)),
         "log": parse_meshbot_log(log_path),
         "runtime": collect_runtime_stats(),
         "want_ack_on_dm": want_ack_dm,
@@ -1551,7 +1631,8 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
 def _message_list_items(entries: List[Dict[str, Any]], empty: str = "Keine Nachrichten") -> str:
     if not entries:
         return f'<li class="text-muted">{html_escape(empty)}</li>'
-    lines = [_format_message_line(e) for e in reversed(entries[-12:])]
+    ordered = sorted(entries, key=lambda e: e.get("time") or "")
+    lines = [_format_message_line(e) for e in reversed(ordered[-12:])]
     return "".join(f"<li>{html_escape(line)}</li>" for line in lines)
 
 
@@ -1628,7 +1709,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     )
     msg_ch = _dashboard_messages_channel()
     msg_ch_heading = _dashboard_messages_heading(msg_ch)
-    toplist_html = _render_toplist_html(log, channel=msg_ch)
+    toplist_html = _render_toplist_html(log, channel=msg_ch, log_dir=data.get("log_dir"))
     leaderboard_html = _render_mesh_leaderboard_html(lb, log=log)
     want_ack_dm = bool(data.get("want_ack_on_dm"))
     dm_stats = data.get("dm_delivery_24h")

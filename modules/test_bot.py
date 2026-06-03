@@ -424,34 +424,119 @@ class TestBot(unittest.TestCase):
         self.assertEqual(len(incoming), 1)
         self.assertEqual(incoming[0].get("text"), body)
 
+    def test_public_dashboard_reads_fresh_messages_log_when_meshbot_stale(self):
+        import os
+        import tempfile
+        from modules.web_dashboard import parse_meshbot_log, _channel_recent_messages
+
+        stale_mesh = (
+            "2026-05-31 19:01:06,464 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "Ignoring Message: !cmd From: TaunusMesh\n"
+            "2026-05-31 19:38:32,822 |    DEBUG | System: Exiting\n"
+        )
+        fresh_msglog = (
+            "2026-06-03 20:41:06,252 | Device:1 Channel:1|Mesh Hessen | "
+            "Chris | Wieder so ruhig. Haben wir schon Sommerloch ?\n"
+            "2026-06-03 20:45:04,171 | Device:1 Channel:1|Mesh Hessen | "
+            "Arheilgen 01 | meshhessen.de | 4️⃣\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(stale_mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(fresh_msglog)
+            stats = parse_meshbot_log(os.path.join(td, "meshbot.log"))
+        ch1 = _channel_recent_messages(stats, channel=1, limit=5)
+        texts = [m.get("text") for m in ch1]
+        self.assertIn("Wieder so ruhig. Haben wir schon Sommerloch ?", texts)
+        self.assertIn("4️⃣", texts)
+        self.assertNotIn("!cmd", texts)
+
+    def test_public_channel_toplist_ignores_dm_noise_in_recent_window(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import load_public_channel_toplist
+
+        mesh_lines = []
+        for i in range(45):
+            mesh_lines.append(
+                "2026-06-03 22:00:{sec:02d},100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+                f"Ignoring Message: filler{i} From: Node{i}\n".format(sec=i % 60)
+            )
+        mesh_lines.append(
+            "2026-06-03 22:43:04,513 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "Ignoring Message: Aktuellste Kanalnachricht From: EsGe-WT1\n"
+        )
+        for i in range(30):
+            mesh_lines.append(
+                f"2026-06-03 22:44:{i:02d},100 |     INFO | Device:1 Received DM: noise{i} From: {1000 + i}\n"
+            )
+        msglog = (
+            "2026-06-03 22:43:04,514 | Device:1 Channel:1|Mesh Hessen | "
+            "EsGe-WT1 | Aktuellste Kanalnachricht\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write("".join(mesh_lines))
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            top = load_public_channel_toplist(td, 1, limit=5)
+        texts = [m.get("text") for m in top]
+        self.assertIn("Aktuellste Kanalnachricht", texts)
+
     def test_peer_display_names_format(self):
+        from unittest.mock import patch
+
         from modules.web_dashboard import (
             _hhmm_from_event,
             _peer_display_names,
             _render_toplist_message_item,
         )
 
-        short, long_name = _peer_display_names(
-            {"short": "Taun", "long": "TaunusMesh | meshhessen.de"}
-        )
-        self.assertEqual(short, "Taun")
-        self.assertEqual(long_name, "TaunusMesh")
+        chris_long = "Chris 🌐🛰️ *meshhessen.de*"
 
-        short, long_name = _peer_display_names(
-            {"long": "Chris 🌐🛰️ *meshhessen.de*"}
-        )
-        self.assertEqual(short, "Chris")
-        self.assertEqual(long_name, "Chris 🌐🛰️ *meshhessen.de*")
+        def fake_get_name(number, typ="long", node_int=1):
+            if int(number) == 1615824276:
+                return chris_long if typ == "long" else "CR36"
+            if int(number) == 424242:
+                return "TaunusMesh" if typ == "long" else "Taun"
+            return f"!{int(number):08x}"
+
+        with patch("modules.system.get_name_from_number", side_effect=fake_get_name):
+            short, long_name = _peer_display_names(
+                {"id": "424242", "long": "TaunusMesh | meshhessen.de", "device": 1}
+            )
+            self.assertEqual(short, "Taun")
+            self.assertEqual(long_name, "TaunusMesh")
+
+            short, long_name = _peer_display_names(
+                {"id": "1615824276", "long": chris_long, "device": 1}
+            )
+            self.assertEqual(short, "CR36")
+            self.assertEqual(long_name, chris_long)
+
+            short, long_name = _peer_display_names({"long": chris_long, "device": 1})
+            self.assertEqual(short, "?")
+            self.assertEqual(long_name, chris_long)
+
+        with patch("modules.system.get_name_from_number", side_effect=fake_get_name), patch(
+            "modules.nodedb.find_node_id_by_long_name", return_value=1615824276
+        ):
+            short, long_name = _peer_display_names({"long": chris_long, "device": 1})
+            self.assertEqual(short, "CR36")
+            self.assertEqual(long_name, chris_long)
 
         entry = {
             "time": "2026-06-03T22:22:27",
-            "short": "Taun",
+            "id": "424242",
             "long": "TaunusMesh",
             "text": "Hallo",
+            "device": 1,
         }
-        self.assertEqual(_hhmm_from_event(entry), "22:22")
-        html = _render_toplist_message_item(entry)
-        self.assertIn("22:22 Taun | TaunusMesh", html)
+        with patch("modules.system.get_name_from_number", side_effect=fake_get_name):
+            self.assertEqual(_hhmm_from_event(entry), "22:22")
+            html = _render_toplist_message_item(entry)
+            self.assertIn("22:22 Taun | TaunusMesh", html)
 
     def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
         import os

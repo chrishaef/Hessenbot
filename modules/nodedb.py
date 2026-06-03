@@ -8,8 +8,11 @@ Cleanup policy: only drop entries older than NODE_DB_MAX_AGE_DAYS when the
 total number of entries exceeds NODE_DB_MIN_SIZE (1000).
 """
 
+from typing import Optional
+
 import base64
 import json
+import re
 import time
 
 from modules.log import logger
@@ -119,6 +122,54 @@ def get_node_pubkey(node_id: int) -> str:
 
 def get_node(node_id: int) -> dict:
     return dict(_nodedb.get(str(int(node_id)), {}))
+
+
+def _ensure_nodedb_loaded() -> None:
+    if _nodedb:
+        return
+    try:
+        load_nodedb()
+    except Exception:
+        pass
+
+
+def _normalize_long_name_key(name: str) -> str:
+    name = (name or "").strip()
+    name = re.sub(r"\s*\|\s*\*?meshhessen\.de\*?\s*$", "", name, flags=re.IGNORECASE).strip()
+    return name.casefold()
+
+
+def find_node_id_by_long_name(long_name: str) -> Optional[int]:
+    """Resolve a Meshtastic node id from a longName seen in logs."""
+    long_name = (long_name or "").strip()
+    if not long_name:
+        return None
+    _ensure_nodedb_loaded()
+    want = _normalize_long_name_key(long_name)
+    if not want:
+        return None
+    for key, entry in _nodedb.items():
+        db_long = (entry.get("longName") or "").strip()
+        if not db_long:
+            continue
+        if db_long == long_name:
+            return int(key)
+        if _normalize_long_name_key(db_long) == want:
+            return int(key)
+    return None
+
+
+def find_node_id_by_short_name(short_name: str) -> Optional[int]:
+    """Resolve a Meshtastic node id from a shortName."""
+    short_name = (short_name or "").strip()
+    if not short_name:
+        return None
+    _ensure_nodedb_loaded()
+    for key, entry in _nodedb.items():
+        db_short = (entry.get("shortName") or "").strip()
+        if db_short and db_short == short_name:
+            return int(key)
+    return None
 
 
 # ---------------------------------------------------------------------------
