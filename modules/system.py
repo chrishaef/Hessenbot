@@ -532,6 +532,11 @@ def mesh_hops_consumed(hop_away: int, hop_start: int, hop_limit: int) -> int:
 _TRACE_HOP_CACHE: dict[int, tuple[int, float]] = {}
 _TRACE_HOP_CACHE_TTL = 86400.0
 
+# Hop counts learned from packets with usable hopStart/hopLimit (survives MQTT
+# copies that arrive with hopStart == hopLimit and overwrite NodeDB hopsAway to 0).
+_PACKET_HOP_CACHE: dict[int, tuple[int, float]] = {}
+_PACKET_HOP_CACHE_TTL = 86400.0
+
 
 def record_mesh_hops_from_trace(node_id: int, hops: int) -> None:
     """Remember mesh hop count from a successful traceroute (for ping QSL fallback)."""
@@ -542,7 +547,10 @@ def record_mesh_hops_from_trace(node_id: int, hops: int) -> None:
         return
     if hops_i <= 0:
         return
-    _TRACE_HOP_CACHE[node_i] = (hops_i, time.time())
+    now = time.time()
+    _TRACE_HOP_CACHE[node_i] = (hops_i, now)
+    # Keep the shared hop cache warm so !test matches app NodeDB hopsAway sooner.
+    _PACKET_HOP_CACHE[node_i] = (hops_i, now)
 
 
 def mesh_hops_from_trace_cache(node_id: int, ttl: float = _TRACE_HOP_CACHE_TTL) -> int | None:
@@ -552,6 +560,31 @@ def mesh_hops_from_trace_cache(node_id: int, ttl: float = _TRACE_HOP_CACHE_TTL) 
     hops, ts = entry
     if time.time() - ts > ttl:
         _TRACE_HOP_CACHE.pop(int(node_id), None)
+        return None
+    return hops if hops > 0 else None
+
+
+def record_mesh_hops_from_packet(node_id: int, hops: int) -> None:
+    """Remember hop count from a packet with hopStart > hopLimit (or hopsAway > 0)."""
+    try:
+        hops_i = int(hops)
+        node_i = int(node_id)
+    except (TypeError, ValueError):
+        return
+    if hops_i <= 0:
+        return
+    _PACKET_HOP_CACHE[node_i] = (hops_i, time.time())
+
+
+def mesh_hops_from_packet_cache(
+    node_id: int, ttl: float = _PACKET_HOP_CACHE_TTL
+) -> int | None:
+    entry = _PACKET_HOP_CACHE.get(int(node_id))
+    if not entry:
+        return None
+    hops, ts = entry
+    if time.time() - ts > ttl:
+        _PACKET_HOP_CACHE.pop(int(node_id), None)
         return None
     return hops if hops > 0 else None
 
@@ -652,10 +685,13 @@ def resolve_mesh_hop_count(
     Mesh hop count for ping/QSL display.
 
     Local RF (serial/BLE): packet metadata only — accurate when a radio is connected.
-    Tunneled (MQTT/Gateway/TCP meshtasticd): optional fallbacks when metadata is empty.
+    Tunneled (MQTT/Gateway/TCP meshtasticd): when hopStart==hopLimit (often 0 via MQTT),
+    prefer NodeDB hopsAway / learned hop cache — same idea as the app node list — before
+    falling back to traceroute cache.
     """
     hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
     if hop_count > 0:
+        record_mesh_hops_from_packet(message_from_id, hop_count)
         return hop_count, "packet"
 
     tunneled = is_tunneled_mesh_packet(packet, transport_mechanism)
@@ -667,9 +703,21 @@ def resolve_mesh_hop_count(
     if not getattr(st, "mqtt_hop_fallbacks", True):
         return hop_count, "tunneled-strict"
 
-    ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=True)
+    # Prefer NodeDB hopsAway first (what the Meshtastic app shows for the node),
+    # then our cache of earlier packets that still had hopStart > hopLimit.
+    ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=False)
     if ndb_hops is not None and ndb_hops > 0:
+        record_mesh_hops_from_packet(message_from_id, ndb_hops)
         return ndb_hops, "nodedb"
+
+    cached_hops = mesh_hops_from_packet_cache(message_from_id)
+    if cached_hops is not None and cached_hops > 0:
+        return cached_hops, "packet-cache"
+
+    # Soft MQTT hints (SNR → 1) only after real hopsAway / learned cache miss.
+    ndb_hint = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=True)
+    if ndb_hint is not None and ndb_hint > 0:
+        return ndb_hint, "nodedb-hint"
 
     trace_hops = mesh_hops_from_trace_cache(message_from_id)
     if trace_hops is not None and trace_hops > 0:

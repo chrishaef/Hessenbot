@@ -562,6 +562,54 @@ class TestBot(unittest.TestCase):
         out_texts = [m.get("text", "") for m in msgs if m.get("dir") == "out"]
         self.assertTrue(any("Antwort" in t for t in out_texts), out_texts)
 
+    def test_mqtt_hop_fallback_prefers_nodedb_and_packet_cache(self):
+        from unittest.mock import patch
+
+        import modules.settings as st
+        from modules import system as sysmod
+
+        st.mqtt_hop_fallbacks = True
+        sysmod._PACKET_HOP_CACHE.clear()
+        sysmod._TRACE_HOP_CACHE.clear()
+
+        mqtt_pkt = {
+            "decoded": {"viaMqtt": False},
+            "transport_mechanism": "TRANSPORT_MQTT",
+        }
+
+        # Good packet metadata still wins and warms the cache.
+        hops, src = sysmod.resolve_mesh_hop_count(
+            42, 1, 0, 6, 3, mqtt_pkt, "TRANSPORT_MQTT"
+        )
+        self.assertEqual((hops, src), (3, "packet"))
+        self.assertEqual(sysmod.mesh_hops_from_packet_cache(42), 3)
+
+        # Later MQTT copy with hopStart==hopLimit uses learned packet cache.
+        with patch.object(sysmod, "mesh_hops_from_nodedb", return_value=None):
+            hops, src = sysmod.resolve_mesh_hop_count(
+                42, 1, 0, 7, 7, mqtt_pkt, "TRANSPORT_MQTT"
+            )
+        self.assertEqual((hops, src), (3, "packet-cache"))
+
+        # NodeDB hopsAway preferred over packet-cache (app node-list behaviour).
+        with patch.object(sysmod, "mesh_hops_from_nodedb", return_value=2) as mock_ndb:
+            hops, src = sysmod.resolve_mesh_hop_count(
+                42, 1, 0, 7, 7, mqtt_pkt, "TRANSPORT_MQTT"
+            )
+            self.assertEqual((hops, src), (2, "nodedb"))
+            mock_ndb.assert_called()
+            # First call is without mqtt_hints.
+            self.assertEqual(mock_ndb.call_args_list[0].kwargs.get("mqtt_hints"), False)
+
+        # Trace cache is last resort after NodeDB/packet-cache miss.
+        sysmod._PACKET_HOP_CACHE.clear()
+        sysmod.record_mesh_hops_from_trace(99, 4)
+        with patch.object(sysmod, "mesh_hops_from_nodedb", return_value=None):
+            hops, src = sysmod.resolve_mesh_hop_count(
+                99, 1, 0, 5, 5, mqtt_pkt, "TRANSPORT_MQTT"
+            )
+        self.assertEqual((hops, src), (4, "trace-cache"))
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 
