@@ -610,6 +610,39 @@ class TestBot(unittest.TestCase):
             )
         self.assertEqual((hops, src), (4, "trace-cache"))
 
+    def test_late_duplicate_warms_hop_cache(self):
+        from unittest.mock import patch
+
+        from modules import packet_dedup
+
+        packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
+
+        first = {
+            "from": 77,
+            "id": 501,
+            "to": 2,
+            "hopStart": 3,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "transport_mechanism": "TRANSPORT_MQTT",
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!test"},
+        }
+        richer = {
+            "from": 77,
+            "id": 501,
+            "to": 2,
+            "hopStart": 3,
+            "hopLimit": 2,
+            "hopsAway": 0,
+            "transport_mechanism": "TRANSPORT_MQTT",
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!test"},
+        }
+        self.assertFalse(packet_dedup.should_drop_duplicate_packet(first))
+        with patch("modules.system.record_mesh_hops_from_packet") as rec:
+            self.assertTrue(packet_dedup.should_drop_duplicate_packet(richer))
+            rec.assert_called_with(77, 1)
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 

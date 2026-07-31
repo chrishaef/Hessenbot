@@ -536,10 +536,71 @@ _TRACE_HOP_CACHE_TTL = 86400.0
 # copies that arrive with hopStart == hopLimit and overwrite NodeDB hopsAway to 0).
 _PACKET_HOP_CACHE: dict[int, tuple[int, float]] = {}
 _PACKET_HOP_CACHE_TTL = 86400.0
+_HOP_CACHE_PATH = "data/hop_cache.json"
+_hop_cache_loaded = False
+_hop_cache_dirty = False
+
+
+def _load_hop_caches() -> None:
+    global _hop_cache_loaded
+    if _hop_cache_loaded:
+        return
+    _hop_cache_loaded = True
+    try:
+        path = path_in_repo(_HOP_CACHE_PATH)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    now = time.time()
+    for nid, entry in (data.get("packet") or {}).items():
+        try:
+            hops = int(entry.get("hops") or 0)
+            ts = float(entry.get("ts") or 0)
+            if hops > 0 and now - ts <= _PACKET_HOP_CACHE_TTL:
+                _PACKET_HOP_CACHE[int(nid)] = (hops, ts)
+        except (TypeError, ValueError, AttributeError):
+            continue
+    for nid, entry in (data.get("trace") or {}).items():
+        try:
+            hops = int(entry.get("hops") or 0)
+            ts = float(entry.get("ts") or 0)
+            if hops > 0 and now - ts <= _TRACE_HOP_CACHE_TTL:
+                _TRACE_HOP_CACHE[int(nid)] = (hops, ts)
+        except (TypeError, ValueError, AttributeError):
+            continue
+
+
+def _save_hop_caches() -> None:
+    global _hop_cache_dirty
+    if not _hop_cache_dirty:
+        return
+    try:
+        path = path_in_repo(_HOP_CACHE_PATH)
+        ensure_parent_dir(path)
+        payload = {
+            "packet": {
+                str(nid): {"hops": hops, "ts": ts}
+                for nid, (hops, ts) in _PACKET_HOP_CACHE.items()
+            },
+            "trace": {
+                str(nid): {"hops": hops, "ts": ts}
+                for nid, (hops, ts) in _TRACE_HOP_CACHE.items()
+            },
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        _hop_cache_dirty = False
+    except Exception as exc:
+        logger.debug(f"System: hop cache save failed: {exc}")
 
 
 def record_mesh_hops_from_trace(node_id: int, hops: int) -> None:
     """Remember mesh hop count from a successful traceroute (for ping QSL fallback)."""
+    global _hop_cache_dirty
+    _load_hop_caches()
     try:
         hops_i = int(hops)
         node_i = int(node_id)
@@ -551,9 +612,17 @@ def record_mesh_hops_from_trace(node_id: int, hops: int) -> None:
     _TRACE_HOP_CACHE[node_i] = (hops_i, now)
     # Keep the shared hop cache warm so !test matches app NodeDB hopsAway sooner.
     _PACKET_HOP_CACHE[node_i] = (hops_i, now)
+    _hop_cache_dirty = True
+    try:
+        _ndb.update_node(node_i, hops_away=hops_i)
+        _ndb.save_nodedb()
+    except Exception:
+        pass
+    _save_hop_caches()
 
 
 def mesh_hops_from_trace_cache(node_id: int, ttl: float = _TRACE_HOP_CACHE_TTL) -> int | None:
+    _load_hop_caches()
     entry = _TRACE_HOP_CACHE.get(int(node_id))
     if not entry:
         return None
@@ -566,6 +635,8 @@ def mesh_hops_from_trace_cache(node_id: int, ttl: float = _TRACE_HOP_CACHE_TTL) 
 
 def record_mesh_hops_from_packet(node_id: int, hops: int) -> None:
     """Remember hop count from a packet with hopStart > hopLimit (or hopsAway > 0)."""
+    global _hop_cache_dirty
+    _load_hop_caches()
     try:
         hops_i = int(hops)
         node_i = int(node_id)
@@ -573,12 +644,26 @@ def record_mesh_hops_from_packet(node_id: int, hops: int) -> None:
         return
     if hops_i <= 0:
         return
+    prev = _PACKET_HOP_CACHE.get(node_i)
     _PACKET_HOP_CACHE[node_i] = (hops_i, time.time())
+    _hop_cache_dirty = True
+    try:
+        _ndb.update_node(node_i, hops_away=hops_i)
+    except Exception:
+        pass
+    # Persist when value changes or first seen for this node.
+    if not prev or prev[0] != hops_i:
+        try:
+            _ndb.save_nodedb()
+        except Exception:
+            pass
+        _save_hop_caches()
 
 
 def mesh_hops_from_packet_cache(
     node_id: int, ttl: float = _PACKET_HOP_CACHE_TTL
 ) -> int | None:
+    _load_hop_caches()
     entry = _PACKET_HOP_CACHE.get(int(node_id))
     if not entry:
         return None
@@ -587,6 +672,16 @@ def mesh_hops_from_packet_cache(
         _PACKET_HOP_CACHE.pop(int(node_id), None)
         return None
     return hops if hops > 0 else None
+
+
+def mesh_hops_from_persistent_nodedb(node_id: int) -> int | None:
+    """Positive hopsAway from data/nodedb.json (survives interface NodeDB resets to 0)."""
+    try:
+        _ndb._ensure_nodedb_loaded()
+        hops = _ndb.get_node_hops_away(int(node_id))
+        return hops if hops > 0 else None
+    except Exception:
+        return None
 
 
 def _interface_node(node_id: int, node_int: int = 1) -> dict | None:
@@ -704,11 +799,15 @@ def resolve_mesh_hop_count(
         return hop_count, "tunneled-strict"
 
     # Prefer NodeDB hopsAway first (what the Meshtastic app shows for the node),
-    # then our cache of earlier packets that still had hopStart > hopLimit.
+    # then our persistent nodedb / cache of earlier packets with hopStart > hopLimit.
     ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=False)
     if ndb_hops is not None and ndb_hops > 0:
         record_mesh_hops_from_packet(message_from_id, ndb_hops)
         return ndb_hops, "nodedb"
+
+    persistent_hops = mesh_hops_from_persistent_nodedb(message_from_id)
+    if persistent_hops is not None and persistent_hops > 0:
+        return persistent_hops, "nodedb-file"
 
     cached_hops = mesh_hops_from_packet_cache(message_from_id)
     if cached_hops is not None and cached_hops > 0:

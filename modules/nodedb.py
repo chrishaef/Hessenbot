@@ -87,7 +87,8 @@ def save_nodedb() -> bool:
 def update_node(node_id: int, *,
                 long_name: str = None,
                 short_name: str = None,
-                public_key=None) -> None:
+                public_key=None,
+                hops_away: int = None) -> None:
     """Create or refresh a node entry.  Only supplied kwargs are written."""
     global _dirty
     key = str(int(node_id))
@@ -104,6 +105,16 @@ def update_node(node_id: int, *,
         if pk_str and entry.get("publicKey") != pk_str:
             entry["publicKey"] = pk_str
             logger.debug(f"NodeDB: PKI key stored/updated for node {key}")
+    # Never store 0 from MQTT zero-diff copies — only positive learned hops.
+    if hops_away is not None:
+        try:
+            hops_i = int(hops_away)
+        except (TypeError, ValueError):
+            hops_i = 0
+        if hops_i > 0 and entry.get("hopsAway") != hops_i:
+            entry["hopsAway"] = hops_i
+            _dirty = True
+            return
     _dirty = True
 
 
@@ -113,6 +124,14 @@ def get_node_long_name(node_id: int) -> str:
 
 def get_node_short_name(node_id: int) -> str:
     return _nodedb.get(str(int(node_id)), {}).get("shortName", "")
+
+
+def get_node_hops_away(node_id: int) -> int:
+    """Last known positive hop count (from packet metadata or traceroute)."""
+    try:
+        return int(_nodedb.get(str(int(node_id)), {}).get("hopsAway") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def get_node_pubkey(node_id: int) -> str:

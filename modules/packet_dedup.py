@@ -37,13 +37,13 @@ def _transport_mechanism(packet: Dict[str, Any]) -> str:
 def _extract_hop_fields(packet: Dict[str, Any]) -> Dict[str, Any]:
     decoded = _decoded(packet)
     return {
-        "hopsAway": packet.get("hopsAway"),
-        "hopStart": packet.get("hopStart"),
-        "hopLimit": packet.get("hopLimit"),
-        "rxSnr": packet.get("rxSnr"),
-        "rxRssi": packet.get("rxRssi"),
+        "hopsAway": packet.get("hopsAway", packet.get("hops_away")),
+        "hopStart": packet.get("hopStart", packet.get("hop_start")),
+        "hopLimit": packet.get("hopLimit", packet.get("hop_limit")),
+        "rxSnr": packet.get("rxSnr", packet.get("rx_snr")),
+        "rxRssi": packet.get("rxRssi", packet.get("rx_rssi")),
         "transport_mechanism": _transport_mechanism(packet),
-        "viaMqtt": decoded.get("viaMqtt"),
+        "viaMqtt": decoded.get("viaMqtt", decoded.get("via_mqtt")),
     }
 
 
@@ -71,11 +71,34 @@ def _hop_metadata_score(fields: Dict[str, Any]) -> int:
     return score
 
 
+def _record_hops_from_fields(packet: Dict[str, Any], fields: Dict[str, Any]) -> None:
+    """Learn hop counts from a late/richer duplicate even when the packet is dropped."""
+    try:
+        from modules.system import mesh_hops_consumed, record_mesh_hops_from_packet
+
+        ha = int(fields.get("hopsAway") or 0)
+        hs = int(fields.get("hopStart") or 0)
+        hl = int(fields.get("hopLimit") or 0)
+        hops = mesh_hops_consumed(ha, hs, hl)
+        if hops <= 0:
+            return
+        from_id = packet.get("from")
+        if from_id is None:
+            return
+        record_mesh_hops_from_packet(int(from_id), hops)
+        logger.debug(
+            f"System: Learned {hops} hop(s) from duplicate packet metadata "
+            f"(from={from_id})"
+        )
+    except Exception as exc:
+        logger.debug(f"System: hop learn from duplicate failed: {exc}")
+
+
 def _hop_wait_seconds() -> float:
     import modules.settings as st
 
-    ms = int(getattr(st, "packet_dedup_hop_wait_ms", 200))
-    return max(0.0, min(1000.0, ms)) / 1000.0
+    ms = int(getattr(st, "packet_dedup_hop_wait_ms", 800))
+    return max(0.0, min(2000.0, ms)) / 1000.0
 
 
 def _merge_hop_fields(packet: Dict[str, Any], extra: Dict[str, Any]) -> bool:
@@ -235,6 +258,8 @@ def should_drop_duplicate_packet(packet: Dict[str, Any]) -> bool:
             prev = _enrichment.get(key)
             if prev is None or _hop_metadata_score(fields) > _hop_metadata_score(prev):
                 _enrichment[key] = fields
+                # Late richer MQTT/UDP copy: warm hop cache even though we drop the packet.
+                _record_hops_from_fields(packet, fields)
             _seen.move_to_end(key)
             _stats["dropped"] += 1
             logger.debug(f"System: Dropping duplicate packet ({key})")

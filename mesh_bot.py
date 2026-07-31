@@ -1357,15 +1357,17 @@ def onReceive(packet, interface):
                 or transport_mechanism
             )
 
-            if 'hopsAway' in packet:
-                hop_away = packet.get('hopsAway', 0)
-            if packet.get('hopStart') is not None:
-                hop_start = packet.get('hopStart', 0)
-            if packet.get('hopLimit') is not None:
-                hop_limit = packet.get('hopLimit', 0)
-            if packet.get('rxSnr') or packet.get('rxRssi'):
-                snr = packet.get('rxSnr', 0)
-                rssi = packet.get('rxRssi', 0)
+            if "hopsAway" in packet or "hops_away" in packet:
+                hop_away = packet.get("hopsAway", packet.get("hops_away", 0)) or 0
+            hop_start_val = packet.get("hopStart", packet.get("hop_start"))
+            if hop_start_val is not None:
+                hop_start = hop_start_val
+            hop_limit_val = packet.get("hopLimit", packet.get("hop_limit"))
+            if hop_limit_val is not None:
+                hop_limit = hop_limit_val
+            if packet.get("rxSnr") or packet.get("rxRssi"):
+                snr = packet.get("rxSnr", 0)
+                rssi = packet.get("rxRssi", 0)
 
             hop = ""
             hop_source = "packet"
@@ -1374,6 +1376,28 @@ def onReceive(packet, interface):
             hop_count, hop_source = resolve_mesh_hop_count(
                 message_from_id, rxNode, hop_away, hop_start, hop_limit, packet, transport_mechanism
             )
+            # Second chance: a richer MQTT duplicate may have arrived during resolve.
+            if hop_count == 0 and is_tunneled_mesh_packet(packet, transport_mechanism):
+                from modules.packet_dedup import apply_hop_enrichment
+
+                if apply_hop_enrichment(packet):
+                    if "hopsAway" in packet or "hops_away" in packet:
+                        hop_away = packet.get("hopsAway", packet.get("hops_away", 0)) or 0
+                    hop_start_val = packet.get("hopStart", packet.get("hop_start"))
+                    if hop_start_val is not None:
+                        hop_start = hop_start_val
+                    hop_limit_val = packet.get("hopLimit", packet.get("hop_limit"))
+                    if hop_limit_val is not None:
+                        hop_limit = hop_limit_val
+                    hop_count, hop_source = resolve_mesh_hop_count(
+                        message_from_id,
+                        rxNode,
+                        hop_away,
+                        hop_start,
+                        hop_limit,
+                        packet,
+                        transport_mechanism,
+                    )
 
             if (
                 hop_start == hop_limit
