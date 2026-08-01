@@ -64,7 +64,14 @@ def _connect() -> sqlite3.Connection:
 
 
 def clamp_radius_km(value: int) -> int:
-    return max(MIN_RADIUS_KM, min(MAX_RADIUS_KM, int(value)))
+    try:
+        import modules.settings as st
+
+        max_r = int(getattr(st, "blitz_watch_max_radius_km", MAX_RADIUS_KM))
+    except Exception:
+        max_r = MAX_RADIUS_KM
+    max_r = max(MIN_RADIUS_KM, min(50, max_r))  # hard ceiling
+    return max(MIN_RADIUS_KM, min(max_r, int(value)))
 
 
 def get_node_prefs(node_id: int) -> dict[str, Any]:
