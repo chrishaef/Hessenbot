@@ -109,10 +109,10 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "whoami": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
     "whois": lambda: handle_whois(message, deviceID, channel_number, message_from_id),
     "wiki": lambda: handle_wiki(message, isDM),
-    "wx": lambda: handle_wxc(message_from_id, deviceID),
-    "uv": lambda: handle_wx_extra(message_from_id, deviceID, "uv"),
-    "regen": lambda: handle_wx_extra(message_from_id, deviceID, "regen"),
-    "blitz": lambda: handle_wx_extra(message_from_id, deviceID, "blitz"),
+    "wx": lambda: handle_wxc(message_from_id, deviceID, message=message),
+    "uv": lambda: handle_wx_extra(message_from_id, deviceID, "uv", message),
+    "regen": lambda: handle_wx_extra(message_from_id, deviceID, "regen", message),
+    "blitz": lambda: handle_wx_extra(message_from_id, deviceID, "blitz", message),
     "metar": lambda: handle_metar(message_from_id, deviceID, message),
     "x:": lambda: handleShellCmd(message, message_from_id, channel_number, isDM, deviceID),
     "📍": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
@@ -394,7 +394,14 @@ def handle_dealert(message_from_id, deviceID):
         return get_nina_alerts()
     return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
 
-def handle_wxc(message_from_id, deviceID, days=None, vox=False):
+def handle_wxc(message_from_id, deviceID, days=None, vox=False, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !wx — Wettervorhersage (Open-Meteo) für deinen Standort.\n"
+            "Nutzt GPS der Node (NodeDB), sonst Mesh-Karte/Bot-Standort.\n"
+            "Verwandt: !uv · !regen · !blitz · !metar"
+        )
+
     from modules.wx_meteo import format_wx_info_header, get_wx_meteo
 
     location = get_node_location(message_from_id, deviceID)
@@ -406,7 +413,18 @@ def handle_wxc(message_from_id, deviceID, days=None, vox=False):
     return f"{header}\n{report}"
 
 
-def handle_wx_extra(message_from_id, deviceID, cmd: str):
+def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
+    if "?" in (message or ""):
+        helps = {
+            "uv": "🤖 !uv — UV-Index heute und morgen für deinen Standort (Open-Meteo).",
+            "regen": "🤖 !regen — stündlicher Regen für die nächsten Stunden (Open-Meteo).",
+            "blitz": (
+                "🤖 !blitz — Live-Blitze im Umkreis plus kurze Gewitter-Vorhersage.\n"
+                "Standort: GPS der Node, sonst Mesh-Karte/Bot-Standort."
+            ),
+        }
+        return helps.get(cmd, f"🤖 !{cmd} — Wetter-Zusatzbefehl.")
+
     if not my_settings.location_enabled:
         return "Standortmodul aus ([location] enabled = False)."
     if not getattr(my_settings, "use_meteo_wxApi", False):

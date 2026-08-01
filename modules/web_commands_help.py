@@ -223,6 +223,12 @@ def _sections() -> List[CommandSection]:
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
                 _cmd(
+                    f"{p}wx?",
+                    "Kurzhilfe zu !wx.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "use_meteo_wxApi", True),
+                ),
+                _cmd(
                     f"{p}metar",
                     "METAR des nächsten Flugplatzes zu deinem Standort.",
                     enabled=lambda: getattr(st, "location_enabled", False)
