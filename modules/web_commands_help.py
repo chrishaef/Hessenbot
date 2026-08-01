@@ -218,13 +218,13 @@ def _sections() -> List[CommandSection]:
             (
                 _cmd(
                     f"{p}wx",
-                    "Wettervorhersage für deinen Standort (Open-Meteo).",
+                    "Wettervorhersage (Open-Meteo). Optional Ort/Coords: !wx Friedberg · !wx 50.34 8.76",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
                 _cmd(
                     f"{p}wx?",
-                    "Kurzhilfe zu !wx.",
+                    "Kurzhilfe zu !wx (inkl. Ort/Koordinaten).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
@@ -248,28 +248,28 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}uv",
-                    "UV-Index heute und morgen für deinen Standort (Open-Meteo).",
+                    "UV-Index heute und morgen. Optional: !uv Friedberg · !uv 50.34 8.76",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}regen",
-                    "Stündlicher Regen für die nächsten Stunden (Open-Meteo).",
+                    "Stündlicher Regen. Optional: !regen Frankfurt · !regen 50.34 8.76",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}blitz",
-                    "Live-Blitze im Umkreis (DMI EU; optional Blitzortung.org) plus kurze Gewitter-Vorhersage.",
+                    "Live-Blitze + Gewitter-Vorhersage. Optional: !blitz Friedberg · !blitz 50.34 8.76",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}warning",
-                    "Aktive Warnungen für den Kreis deiner GPS-Position.",
+                    "Aktive NINA-Warnungen. Optional: !warning Friedberg · !warning 50.34 8.76",
                     enabled=lambda: getattr(st, "enableDEalerts", False),
                 ),
                 _cmd(
@@ -288,18 +288,18 @@ def _sections() -> List[CommandSection]:
             (
                 CommandEntry(
                     f"{p}rlist",
-                    "Repeater in der Nähe deines Standorts.",
+                    "Repeater in der Nähe. Optional: !rlist Friedberg · !rlist 50.34 8.76",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and bool(getattr(st, "repeater_lookup", False)),
                 ),
                 CommandEntry(
                     f"{p}sun",
-                    "Sonnenauf-/untergang.",
+                    "Sonnenauf-/untergang. Optional: !sun Frankfurt · !sun 50.34 8.76",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False),
                 ),
                 CommandEntry(
                     f"{p}moon",
-                    "Mondphase.",
+                    "Mondphase. Optional: !moon Frankfurt · !moon 50.34 8.76",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False),
                 ),
                 CommandEntry(
@@ -314,7 +314,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 CommandEntry(
                     f"{p}satpass",
-                    "Nächster Satellitenüberflug (N2YO-API-Key nötig).",
+                    "Satellitenüberflug. Optional Ort: !satpass Frankfurt · !satpass 25544 Frankfurt",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False)
                     and bool(getattr(st, "n2yoAPIKey", "")),
                 ),

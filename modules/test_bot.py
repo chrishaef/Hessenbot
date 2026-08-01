@@ -18,7 +18,7 @@ modules_path = os.path.join(parent_path, 'modules')
 
 CHECKALL = os.path.isfile(os.path.join(parent_path, '.checkall'))
 
-exclude = ['test_bot', 'udp', 'system', 'log', 'gpio', 'web']
+exclude = ['test_bot', 'test_location_args', 'udp', 'system', 'log', 'gpio', 'web']
 
 try:
     print("\nImporting Core Modules:")
@@ -988,6 +988,47 @@ class TestBot(unittest.TestCase):
     def test_getNextSatellitePass(self):
         from modules.space import getNextSatellitePass
         self.assertIsInstance(getNextSatellitePass('25544', lat, lon), str)
+
+    def test_parse_lat_lon_from_text(self):
+        from modules.locationdata import parse_lat_lon_from_text
+
+        self.assertEqual(parse_lat_lon_from_text("50.34 8.76"), (50.34, 8.76))
+        self.assertEqual(parse_lat_lon_from_text("50.34,8.76"), (50.34, 8.76))
+        self.assertEqual(parse_lat_lon_from_text("50,34 8,76"), (50.34, 8.76))
+        self.assertIsNone(parse_lat_lon_from_text("Friedberg"))
+
+    def test_extract_location_arg(self):
+        from modules.locationdata import extract_location_arg
+
+        self.assertEqual(extract_location_arg("!wx Friedberg", ("wx",)), "Friedberg")
+        self.assertEqual(
+            extract_location_arg("!satpass 25544 Frankfurt", ("satpass",), skip_numeric=True),
+            "Frankfurt",
+        )
+
+    def test_resolve_message_location_coords(self):
+        from modules.locationdata import resolve_message_location
+
+        lat_r, lon_r, source, label = resolve_message_location(
+            "!wx 50.34 8.76", 123, 1, command_tokens=("wx",)
+        )
+        self.assertEqual(source, "arg-coords")
+        self.assertAlmostEqual(lat_r, 50.34)
+
+    def test_format_location_source_note_arg(self):
+        self.assertEqual(
+            format_location_source_note(source="arg-place", label="Friedberg"),
+            "📍 Standort: Friedberg",
+        )
+        self.assertEqual(format_location_source_note(True), "📍 Standort bekannt")
+        self.assertIn("Bot-Standort", format_location_source_note(False))
+
+    def test_handle_wxc_help_mentions_place(self):
+        from mesh_bot import handle_wxc
+
+        help_text = handle_wxc(0, 1, message="!wx?")
+        self.assertIn("Friedberg", help_text)
+        self.assertIn("50.34", help_text)
 
 
 if __name__ == '__main__':

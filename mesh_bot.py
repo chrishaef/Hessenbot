@@ -81,27 +81,27 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "lheard": lambda: handle_lheard(message, message_from_id, deviceID, isDM),
     "map": lambda: mapHandler(message_from_id, deviceID, channel_number, message, snr, rssi, hop),
     "messages": lambda: handle_messages(message, deviceID, channel_number, msg_history, publicChannel, isDM),
-    "moon": lambda: handle_moon(message_from_id, deviceID, channel_number),
+    "moon": lambda: handle_moon(message_from_id, deviceID, channel_number, message=message),
     "motd": lambda: handle_motd(message, message_from_id, isDM),
     "ping": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "pinging": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "pong": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "readnews": lambda: handleNews(message_from_id, deviceID, message, isDM),
     "readrss": lambda: get_rss_feed(message),
-    "rlist": lambda: handle_repeaterQuery(message_from_id, deviceID, channel_number),
+    "rlist": lambda: handle_repeaterQuery(message_from_id, deviceID, channel_number, message=message),
     "satpass": lambda: handle_satpass(message_from_id, deviceID, message),
     "setemail": lambda: handle_email(message_from_id, message),
     "setsms": lambda: handle_sms( message_from_id, message),
     "sitrep": lambda: handle_lheard(message, message_from_id, deviceID, isDM),
     "sms:": lambda: handle_sms(message_from_id, message),
     "solar": lambda: drap_xray_conditions() + "\n" + solar_conditions() + "\n" + get_noaa_scales_summary(),
-    "sun": lambda: handle_sun(message_from_id, deviceID, channel_number),
+    "sun": lambda: handle_sun(message_from_id, deviceID, channel_number, message=message),
     "sysinfo": lambda: sysinfo(message, message_from_id, deviceID, isDM),
     "test": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "testing": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "trace": lambda: handle_trace(message, message_from_id, deviceID, channel_number),
     "warning": lambda: handle_warning(
-        message_from_id, deviceID, channel_number, isDM
+        message_from_id, deviceID, channel_number, isDM, message=message
     ),
     "dealert": lambda: handle_dealert(message_from_id, deviceID),
     "whereami": lambda: handle_whereami(message_from_id, deviceID, channel_number),
@@ -394,33 +394,61 @@ def handle_dealert(message_from_id, deviceID):
         return get_nina_alerts()
     return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
 
+def _resolve_cmd_location(message, message_from_id, deviceID, command_tokens, *, skip_numeric=False):
+    """Resolve lat/lon from message args or node. Returns (lat, lon, source, label) or error str."""
+    from modules.locationdata import resolve_message_location
+
+    lat, lon, source, label = resolve_message_location(
+        message or "",
+        message_from_id,
+        deviceID,
+        command_tokens=command_tokens,
+        skip_numeric=skip_numeric,
+    )
+    if source == "error":
+        return label
+    return lat, lon, source, label
+
+
 def handle_wxc(message_from_id, deviceID, days=None, vox=False, message=""):
     if "?" in (message or ""):
         return (
-            "🤖 !wx — Wettervorhersage (Open-Meteo) für deinen Standort.\n"
-            "Nutzt GPS der Node (NodeDB), sonst Mesh-Karte/Bot-Standort.\n"
+            "🤖 !wx — Wettervorhersage (Open-Meteo).\n"
+            "Ohne Angabe: GPS der Node, sonst Mesh-Karte/Bot-Standort.\n"
+            "Mit Ort/Coords: !wx Friedberg · !wx 50.34 8.76 · !wx 50,34 8,76\n"
             "Verwandt: !uv · !regen · !blitz · !metar"
         )
 
     from modules.wx_meteo import format_wx_info_header, get_wx_meteo
 
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("wx", "wxc"))
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    from_gps = location_source_as_from_gps(source)
     unit = 1 if my_settings.use_metric else 0
     report = get_wx_meteo(str(lat), str(lon), unit)
     if not report or report == ERROR_FETCHING_DATA:
         return report
-    header = format_wx_info_header(lat, lon, from_gps=from_gps)
+    header = format_wx_info_header(lat, lon, from_gps=from_gps, source=source, label=label)
     return f"{header}\n{report}"
 
 
 def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
     if "?" in (message or ""):
         helps = {
-            "uv": "🤖 !uv — UV-Index heute und morgen für deinen Standort (Open-Meteo).",
-            "regen": "🤖 !regen — stündlicher Regen für die nächsten Stunden (Open-Meteo).",
+            "uv": (
+                "🤖 !uv — UV-Index heute und morgen (Open-Meteo).\n"
+                "Optional: !uv Friedberg · !uv 50.34 8.76"
+            ),
+            "regen": (
+                "🤖 !regen — stündlicher Regen für die nächsten Stunden (Open-Meteo).\n"
+                "Optional: !regen Frankfurt · !regen 50.34 8.76"
+            ),
             "blitz": (
                 "🤖 !blitz — Live-Blitze im Umkreis plus kurze Gewitter-Vorhersage.\n"
-                "Standort: GPS der Node, sonst Mesh-Karte/Bot-Standort."
+                "Ohne Angabe: GPS der Node, sonst Mesh-Karte/Bot-Standort.\n"
+                "Optional: !blitz Friedberg · !blitz 50.34 8.76"
             ),
         }
         return helps.get(cmd, f"🤖 !{cmd} — Wetter-Zusatzbefehl.")
@@ -433,13 +461,17 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
         return f"🤖 !{cmd} ist in der Konfiguration deaktiviert (wxExtraCommands)."
     from modules.wx_extra import get_blitz, get_regen, get_uv
 
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    resolved = _resolve_cmd_location(message, message_from_id, deviceID, (cmd,))
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    from_gps = location_source_as_from_gps(source)
     if cmd == "blitz":
-        return get_blitz(str(lat), str(lon), from_gps=from_gps)
+        return get_blitz(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
     if cmd == "uv":
-        return get_uv(str(lat), str(lon), from_gps=from_gps)
+        return get_uv(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
     if cmd == "regen":
-        return get_regen(str(lat), str(lon), from_gps=from_gps)
+        return get_regen(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
     return "Unbekannter Wetter-Befehl."
 
 
@@ -500,12 +532,25 @@ def handle_metar(message_from_id, deviceID, message=""):
     return get_metar(str(lat), str(lon), from_gps=from_gps)
 
 
-def handle_warning(message_from_id, deviceID, channel_number, isDM):
+def handle_warning(message_from_id, deviceID, channel_number, isDM, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !warning — NINA-Warnungen für den Standort.\n"
+            "Optional: !warning Friedberg · !warning 50.34 8.76"
+        )
     if not my_settings.enableDEalerts:
         return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("warning", "dealert")
+    )
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    from_gps = location_source_as_from_gps(source)
     # include_detail only for real DMs — channel requests (even DM-responded) stay short
-    parts = build_warning_messages(lat, lon, from_gps, include_detail=isDM)
+    parts = build_warning_messages(
+        lat, lon, from_gps, include_detail=isDM, source=source, label=label
+    )
     if not parts:
         return WARNING_NONE_MSG
     dest = message_from_id if my_settings.useDMForResponse or isDM else 0
@@ -633,19 +678,32 @@ def handle_messages(message, deviceID, channel_number, msg_history, publicChanne
         return header + response
     return f"Keine 📭 Nachrichten auf {ch_label} im Verlauf"
 
-def handle_sun(message_from_id, deviceID, channel_number, vox=False):
+def handle_sun(message_from_id, deviceID, channel_number, vox=False, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !sun — Sonnenauf-/untergang und Azimut.\n"
+            "Optional: !sun Frankfurt · !sun 50.34 8.76"
+        )
     if vox:
         # return a default message if vox is enabled
         return get_sun(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-    return with_location_source_note(get_sun(str(lat), str(lon)), from_gps)
+    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("sun",))
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return with_location_source_note(
+        get_sun(str(lat), str(lon)),
+        location_source_as_from_gps(source),
+        source=source,
+        label=label,
+    )
 
 def handle_satpass(message_from_id, deviceID, message):
     if "?" in message:
         return (
-            "satpass [NORAD] — nächster sichtbarer Überflug (n2yo). "
-            "Ohne Nummer: erster Eintrag aus satList in config.ini. "
-            "Beispiel ISS: satpass 25544"
+            "satpass [NORAD] [Ort] — nächster sichtbarer Überflug (n2yo).\n"
+            "Ohne Nummer: erster Eintrag aus satList in config.ini.\n"
+            "Beispiel: !satpass 25544 · !satpass Frankfurt · !satpass 25544 Frankfurt"
         )
     norad = None
     for part in message.replace("!", " ").split():
@@ -655,9 +713,21 @@ def handle_satpass(message_from_id, deviceID, message):
     if norad is None:
         sat_list = getattr(my_settings, "satListConfig", ["25544"])
         norad = (sat_list[0] if sat_list else "25544").strip()
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    resolved = _resolve_cmd_location(
+        message,
+        message_from_id,
+        deviceID,
+        ("satpass",),
+        skip_numeric=True,
+    )
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
     return with_location_source_note(
-        getNextSatellitePass(norad, lat, lon), from_gps
+        getNextSatellitePass(norad, lat, lon),
+        location_source_as_from_gps(source),
+        source=source,
+        label=label,
     )
 
 def sysinfo(message, message_from_id, deviceID, isDM):
@@ -897,8 +967,16 @@ def handle_loc(message, message_from_id, deviceID, channel_number):
     return msg
 
 
-def handle_repeaterQuery(message_from_id, deviceID, channel_number):
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+def handle_repeaterQuery(message_from_id, deviceID, channel_number, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !rlist — Relais in der Nähe.\n"
+            "Optional: !rlist Friedberg · !rlist 50.34 8.76"
+        )
+    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("rlist",))
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
     # check api_throttle
     check_throttle = api_throttle(message_from_id, deviceID, apiName='repeaterQuery')
     if check_throttle:
@@ -909,13 +987,31 @@ def handle_repeaterQuery(message_from_id, deviceID, channel_number):
         body = getArtSciRepeaters(str(lat), str(lon))
     else:
         return "Repeater-Suche ist nicht aktiviert."
-    return with_location_source_note(body, from_gps)
+    return with_location_source_note(
+        body,
+        location_source_as_from_gps(source),
+        source=source,
+        label=label,
+    )
 
-def handle_moon(message_from_id, deviceID, channel_number, vox=False):
+def handle_moon(message_from_id, deviceID, channel_number, vox=False, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !moon — Mondphase und Auf-/Untergang.\n"
+            "Optional: !moon Frankfurt · !moon 50.34 8.76"
+        )
     if vox:
         return get_moon(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-    return with_location_source_note(get_moon(str(lat), str(lon)), from_gps)
+    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("moon",))
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return with_location_source_note(
+        get_moon(str(lat), str(lon)),
+        location_source_as_from_gps(source),
+        source=source,
+        label=label,
+    )
 
 def handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus):
     try:

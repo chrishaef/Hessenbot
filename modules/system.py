@@ -1375,24 +1375,43 @@ def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
     return [config_position[0], config_position[1], False]
 
 
-def format_location_source_note(from_gps) -> str:
-    """Clarify whether requester or bot location was used (same wording as !blitz)."""
-    if from_gps is True:
+def format_location_source_note(from_gps=None, *, source=None, label=None) -> str:
+    """Clarify location origin (GPS, bot fallback, or explicit place/coords argument)."""
+    src = source
+    if src is None:
+        if from_gps is True:
+            src = "gps"
+        elif from_gps is False:
+            src = "bot"
+    if src in ("arg-coords", "arg-place"):
+        if label:
+            return f"📍 Standort: {label}"
+        return "📍 Standort (Angabe)"
+    if src == "gps":
         return "📍 Standort bekannt"
-    if from_gps is False:
+    if src == "bot":
         return "📍 Standort unbekannt – Bot-Standort"
     return ""
 
 
-def with_location_source_note(text: str, from_gps) -> str:
-    """Append location-source note to a reply when from_gps is known."""
-    note = format_location_source_note(from_gps)
+def with_location_source_note(text: str, from_gps=None, *, source=None, label=None) -> str:
+    """Append location-source note to a reply when origin is known."""
+    note = format_location_source_note(from_gps, source=source, label=label)
     if not note:
         return text
     text = (text or "").rstrip()
     if not text:
         return note
     return f"{text}\n{note}"
+
+
+def location_source_as_from_gps(source: str):
+    """Map resolve_message_location source to legacy from_gps bool/None."""
+    if source == "gps":
+        return True
+    if source == "bot":
+        return False
+    return None
 
 async def get_closest_nodes(nodeInt=1,returnCount=3, channel=publicChannel):
         interface = globals()[f'interface{nodeInt}']

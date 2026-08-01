@@ -52,7 +52,7 @@ def _hour_label(iso_time: str) -> str:
         return iso_time[-5:] if len(iso_time) >= 5 else iso_time
 
 
-def get_uv(lat=0, lon=0, from_gps=None) -> str:
+def get_uv(lat=0, lon=0, from_gps=None, *, source=None, label=None) -> str:
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
@@ -77,7 +77,9 @@ def get_uv(lat=0, lon=0, from_gps=None) -> str:
         logger.error(f"Error fetching UV data: {e}")
         return ERROR_FETCHING_DATA
 
-    header = format_wx_info_header(lat_f, lon_f, from_gps=from_gps).replace("WX INFO", "UV")
+    header = format_wx_info_header(
+        lat_f, lon_f, from_gps=from_gps, source=source, label=label
+    ).replace("WX INFO", "UV")
     body = (
         f"Heute max {today:.1f} ({_uv_risk_de(today)}), "
         f"Morgen {tomorrow:.1f}. "
@@ -86,7 +88,7 @@ def get_uv(lat=0, lon=0, from_gps=None) -> str:
     return f"{header}\n{body}"
 
 
-def get_regen(lat=0, lon=0, hours: int = 18, from_gps=None) -> str:
+def get_regen(lat=0, lon=0, hours: int = 18, from_gps=None, *, source=None, label=None) -> str:
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
@@ -111,7 +113,9 @@ def get_regen(lat=0, lon=0, hours: int = 18, from_gps=None) -> str:
         logger.error(f"Error fetching rain data: {e}")
         return ERROR_FETCHING_DATA
 
-    header = format_wx_info_header(lat_f, lon_f, from_gps=from_gps).replace("WX INFO", "REGEN")
+    header = format_wx_info_header(
+        lat_f, lon_f, from_gps=from_gps, source=source, label=label
+    ).replace("WX INFO", "REGEN")
     lines: list[str] = []
     total = 0.0
     max_prob = 0
@@ -371,30 +375,31 @@ def _get_blitz_forecast(lat_f: float, lon_f: float, hours: int = 24) -> tuple[st
     return f"Modell {hours}h: kein Gewitter-Risiko.", False
 
 
-def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None) -> str:
+def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None, *, source=None, label=None) -> str:
     """Live-Einschläge (DMI / optional Blitzortung) + kurze Modell-Vorhersage.
 
-    ``from_gps`` (optional): True wenn der Standort der anfragenden Station bekannt
-    ist, False wenn auf den Bot-Standort zurückgegriffen wurde. Wird in der Antwort
-    angezeigt, damit klar ist, worauf sich die Distanzen beziehen.
+    ``from_gps`` / ``source`` / ``label``: Herkunft des Standorts (Node-GPS, Bot
+    oder explizites Orts-/Koordinaten-Argument).
     """
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
     lat_f, lon_f = coords
 
-    header = format_wx_info_header(lat_f, lon_f, from_gps=from_gps).replace("WX INFO", "BLITZ")
+    header = format_wx_info_header(
+        lat_f, lon_f, from_gps=from_gps, source=source, label=label
+    ).replace("WX INFO", "BLITZ")
 
     live_on, radius_km, bo_user, bo_pass = _blitz_settings()
     strikes: list[dict] = []
-    source = ""
+    source_name = ""
     if live_on:
         if bo_user and bo_pass:
             strikes = _fetch_blitzortung_strikes(lat_f, lon_f, radius_km, bo_user, bo_pass)
             if strikes:
-                source = "Blitzortung.org"
+                source_name = "Blitzortung.org"
         if not strikes:
-            strikes, source = _fetch_dmi_strikes(lat_f, lon_f, radius_km)
+            strikes, source_name = _fetch_dmi_strikes(lat_f, lon_f, radius_km)
 
     try:
         forecast, has_risk = _get_blitz_forecast(lat_f, lon_f, hours)
@@ -408,6 +413,6 @@ def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None) -> str:
 
     parts = [header]
     if live_on:
-        parts.append(_format_live_blitz(strikes, source, radius_km))
+        parts.append(_format_live_blitz(strikes, source_name, radius_km))
     parts.append(forecast)
     return "\n".join(parts)

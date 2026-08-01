@@ -18,6 +18,169 @@ import sqlite3
 trap_list_location = ("whereami", "wx", "rlist", "howfar", "map", "loc",)
 
 _place_name_cache: dict[tuple[float, float], tuple[float, str]] = {}
+_geocode_cache: dict[str, tuple[float, object]] = {}
+
+_OPEN_METEO_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+
+
+def _valid_lat_lon(lat: float, lon: float):
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    if int(lat) == 0 and int(lon) == 0:
+        return None
+    return (lat, lon)
+
+
+def parse_lat_lon_from_text(text: str):
+    """Parse lat/lon from message text. Supports ``50.34 8.76``, ``50.34,8.76``, ``50,34 8,76``."""
+    import re
+
+    if not text or not str(text).strip():
+        return None
+    s = str(text).strip()
+
+    # German decimals with whitespace separator: 50,34 8,76
+    m = re.fullmatch(r"(-?\d+),(\d+)\s+(-?\d+),(\d+)", s)
+    if m:
+        try:
+            lat = float(f"{m.group(1)}.{m.group(2)}")
+            lon = float(f"{m.group(3)}.{m.group(4)}")
+        except ValueError:
+            return None
+        return _valid_lat_lon(lat, lon)
+
+    # Dot decimals with comma/semicolon separator: 50.34, 8.76
+    m = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)", s)
+    if m:
+        try:
+            return _valid_lat_lon(float(m.group(1)), float(m.group(2)))
+        except ValueError:
+            return None
+
+    m = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)", s)
+    if m:
+        try:
+            return _valid_lat_lon(float(m.group(1)), float(m.group(2)))
+        except ValueError:
+            return None
+
+    return None
+
+
+def geocode_place_name(name: str, country: str = "DE", max_age: float = 86400):
+    """Forward-geocode a place name via Open-Meteo (cached). Returns (lat, lon, display_name)."""
+    query = (name or "").strip()
+    if not query:
+        return None
+    cache_key = f"{country.lower()}|{query.lower()}"
+    now = time.time()
+    cached = _geocode_cache.get(cache_key)
+    if cached and (now - cached[0]) < max_age:
+        return cached[1]
+
+    params = {
+        "name": query,
+        "count": 1,
+        "language": "de",
+        "format": "json",
+    }
+    if country:
+        params["countryCode"] = country
+    try:
+        resp = requests.get(_OPEN_METEO_GEOCODE_URL, params=params, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results") or []
+        if not results:
+            if country:
+                result = geocode_place_name(query, country="", max_age=max_age)
+                _geocode_cache[cache_key] = (now, result)
+                return result
+            _geocode_cache[cache_key] = (now, None)
+            return None
+        hit = results[0]
+        lat = float(hit["latitude"])
+        lon = float(hit["longitude"])
+        display = hit.get("name") or hit.get("admin1") or query
+        admin = hit.get("admin1") or ""
+        country_code = hit.get("country_code") or ""
+        if admin and admin.lower() != str(display).lower():
+            display = f"{display}, {admin}"
+        elif country_code and country_code.upper() != "DE":
+            display = f"{display} ({country_code.upper()})"
+        result = (lat, lon, str(display))
+        _geocode_cache[cache_key] = (now, result)
+        return result
+    except Exception as e:
+        logger.debug(f"Location: geocode_place_name failed for {query!r}: {e}")
+        _geocode_cache[cache_key] = (now, None)
+        return None
+
+
+def extract_location_arg(
+    message: str,
+    command_tokens=(),
+    *,
+    skip_numeric: bool = False,
+) -> str:
+    """Strip bang, command tokens and optional pure-digit tokens; return location query remainder."""
+    text = (message or "").strip()
+    if text.startswith("!"):
+        text = text[1:].strip()
+    tokens_l = {str(t).lower().rstrip("?") for t in (command_tokens or ())}
+    out = []
+    for part in text.replace("?", " ").split():
+        pl = part.lower().rstrip("?")
+        if pl in tokens_l:
+            continue
+        if skip_numeric and part.isdigit():
+            continue
+        out.append(part)
+    return " ".join(out).strip()
+
+
+def resolve_message_location(
+    message: str,
+    node_id,
+    device_id: int = 1,
+    *,
+    command_tokens=(),
+    skip_numeric: bool = False,
+):
+    """Resolve lat/lon from message args or node location.
+
+    Returns ``(lat, lon, source, label)`` where source is one of
+    ``arg-coords``, ``arg-place``, ``gps``, ``bot``, or ``error``
+    (then label is the error message and lat/lon are None).
+    """
+    query = extract_location_arg(
+        message or "",
+        command_tokens,
+        skip_numeric=skip_numeric,
+    )
+
+    if query:
+        coords = parse_lat_lon_from_text(query)
+        if coords:
+            lat, lon = coords
+            label = f"{lat:.2f}, {lon:.2f}"
+            return lat, lon, "arg-coords", label
+
+        # Pure number left over (e.g. satpass NORAD already skipped) → node fallback
+        if query.replace(" ", "").isdigit():
+            query = ""
+        else:
+            geo = geocode_place_name(query)
+            if not geo:
+                return None, None, "error", f"Ort nicht gefunden: {query}"
+            lat, lon, display = geo
+            return lat, lon, "arg-place", display
+
+    from modules.system import get_node_location_with_source
+
+    lat, lon, from_gps = get_node_location_with_source(node_id, device_id)
+    source = "gps" if from_gps else "bot"
+    return lat, lon, source, ""
 
 
 def get_place_name(lat=0, lon=0, max_age: float = 86400) -> str:
