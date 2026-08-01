@@ -250,6 +250,15 @@ blitzRadiusKm = 150
 # Optional: free Blitzortung.org data login (https://www.blitzortung.org) — leave empty for DMI only
 blitzortungUser =
 blitzortungPassword =
+# Auto Blitzwatch: warn nodes with fresh GPS when lightning is nearby (DM + channel)
+blitzWatchEnabled = True
+blitzWatchDefaultRadiusKm = 8
+blitzWatchMaxRadiusKm = 10
+blitzWatchCooldownMin = 60
+blitzWatchPollMin = 5
+# Empty = defaultChannel (general.defaultChannel)
+blitzWatchChannel =
+blitzwatch_db = data/blitzwatch.db
 
 # Use Germany/DE Alert Broadcast Data (NINA/Katwarn/DWD via warnung.bund.de)
 enableDEalerts = True

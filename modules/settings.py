@@ -358,6 +358,15 @@ try:
     blitz_radius_km = config['location'].getint('blitzRadiusKm', 150)
     blitzortung_user = config['location'].get('blitzortungUser', '').strip()
     blitzortung_password = config['location'].get('blitzortungPassword', '').strip()
+    # Automatic lightning proximity alerts (!blitzwatch)
+    blitz_watch_enabled = config['location'].getboolean('blitzWatchEnabled', True)
+    blitz_watch_default_radius_km = config['location'].getint('blitzWatchDefaultRadiusKm', 8)
+    blitz_watch_max_radius_km = config['location'].getint('blitzWatchMaxRadiusKm', 10)
+    blitz_watch_cooldown_sec = config['location'].getint('blitzWatchCooldownMin', 60) * 60
+    blitz_watch_poll_sec = config['location'].getint('blitzWatchPollMin', 5) * 60
+    _bw_ch = config['location'].get('blitzWatchChannel', '').strip()
+    blitz_watch_channel = int(_bw_ch) if _bw_ch.isdigit() else None
+    blitzwatch_db = config['location'].get('blitzwatch_db', 'data/blitzwatch.db')
     use_metric = config['location'].getboolean('useMetric', False) # default Imperial units
     repeater_lookup = config['location'].get('repeaterLookup', 'rbook') # default repeater lookup source
     n2yoAPIKey = config['location'].get('n2yoAPIKey', '') # default empty

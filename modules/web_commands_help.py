@@ -268,6 +268,12 @@ def _sections() -> List[CommandSection]:
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
+                    f"{p}blitzwatch",
+                    "Blitz-Nähe-Warnung: Status · on/off · 3km…10km (nur eigene Node).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
                     f"{p}warning",
                     "Aktive NINA-Warnungen. Optional: !warning Friedberg · !warning 50.34 8.76",
                     enabled=lambda: getattr(st, "enableDEalerts", False),

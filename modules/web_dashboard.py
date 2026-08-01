@@ -1590,12 +1590,13 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
                 f"<td>{r['shortName']}{local}</td>"
                 f"<td>{r['longName']}</td>"
                 f"<td>{r.get('location_html', '—')}</td>"
+                f"<td>{r.get('blitzwatch_html', '—')}</td>"
                 f'<td class="text-nowrap">{html_escape(str(r.get("lastHeard", "—")))}</td>'
                 "</tr>"
             )
         trs.append(
             '<tr class="nodedb-search-empty" hidden>'
-            '<td colspan="5" class="text-muted small">Keine Treffer für die Suche.</td></tr>'
+            '<td colspan="6" class="text-muted small">Keine Treffer für die Suche.</td></tr>'
         )
         parts.append(
             f"""
@@ -1611,6 +1612,7 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
         <th>Kurzname</th>
         <th>Name</th>
         <th>Standort</th>
+        <th>Blitzwatch</th>
         <th>Zuletzt gehört</th>
       </tr>
     </thead>

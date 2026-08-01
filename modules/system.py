@@ -116,6 +116,12 @@ if location_enabled:
 
         trap_list = trap_list + trap_list_wx_extra
         help_message = help_message + ", uv, regen, blitz"
+    if blitz_watch_enabled and location_enabled:
+        from modules.blitzwatch import initialize_blitzwatch_database, trap_list_blitzwatch
+
+        trap_list = trap_list + trap_list_blitzwatch
+        help_message = help_message + ", blitzwatch"
+        initialize_blitzwatch_database()
     if repeater_lookup != False:
         help_message = help_message + ", rlist"
 
@@ -3961,6 +3967,14 @@ async def watchdog():
 
                 if usAlerts or checklist_enabled or (enableDEalerts and deAlertAutoBroadcast):
                     handleAlertBroadcast(i)
+
+                if blitz_watch_enabled and location_enabled:
+                    try:
+                        from modules.blitzwatch import handleBlitzWatch
+
+                        handleBlitzWatch(i)
+                    except Exception as e:
+                        logger.error(f"System: Blitzwatch error: {e}")
 
                 intData = displayNodeTelemetry(0, i)
                 if intData != -1 and localTelemetryData[0][f'lastAlert{i}'] != intData:

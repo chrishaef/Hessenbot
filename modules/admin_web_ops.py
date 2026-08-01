@@ -137,7 +137,83 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
             }
         )
     rows.sort(key=lambda r: r.get("lastHeard_raw", 0), reverse=True)
+    _enrich_blitzwatch_rows(rows)
     return None, rows
+
+
+def _enrich_blitzwatch_rows(rows: List[Dict[str, Any]]) -> None:
+    """Attach blitzwatch_html / blitzwatch_active for NodeDB tables."""
+    import modules.settings as st
+
+    global_on = bool(getattr(st, "blitz_watch_enabled", True)) and bool(
+        getattr(st, "location_enabled", True)
+    )
+    prefs_map: Dict[int, Dict[str, Any]] = {}
+    if global_on:
+        try:
+            from modules.blitzwatch import get_all_prefs_map, get_node_prefs
+
+            prefs_map = get_all_prefs_map()
+        except Exception:
+            prefs_map = {}
+
+    for r in rows:
+        if r.get("is_self"):
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                '<span class="badge bg-secondary" title="Bot-Node ausgeschlossen">'
+                "—</span>"
+            )
+            continue
+        if not global_on:
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                '<span class="badge bg-secondary" title="Blitzwatch global aus">aus</span>'
+            )
+            continue
+        try:
+            nid = int(r["num"])
+        except (TypeError, ValueError, KeyError):
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = "—"
+            continue
+        prefs = prefs_map.get(nid)
+        if prefs is None:
+            try:
+                from modules.blitzwatch import get_node_prefs
+
+                prefs = get_node_prefs(nid)
+            except Exception:
+                prefs = {"enabled": True, "radius_km": 8}
+        # Active only with fresh NodeDB GPS (≤24h); map-only positions do not alert.
+        enabled = bool(prefs.get("enabled", True))
+        radius = prefs.get("radius_km", 8)
+        has_fresh = False
+        try:
+            from modules.system import _nodedb_fresh_position
+
+            has_fresh = bool(_nodedb_fresh_position(nid, 1, 2))
+        except Exception:
+            has_fresh = r.get("location_source") == "gps" and bool(r.get("has_gps"))
+        if not enabled:
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-secondary" title="Opt-out (!blitzwatch off)">'
+                f"aus</span>"
+            )
+        elif not has_fresh:
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-warning text-dark" '
+                f'title="Kein frisches GPS ≤24h — Radius {radius} km">'
+                f"bereit {radius}km</span>"
+            )
+        else:
+            r["blitzwatch_active"] = True
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-success" title="Blitzwatch aktiv">'
+                f"an {radius}km</span>"
+            )
 
 
 def nodedb_row_search_text(row: Dict[str, Any]) -> str:
@@ -158,6 +234,10 @@ def nodedb_row_search_text(row: Dict[str, Any]) -> str:
         if text and text != "—":
             parts.append(text)
     parts.append("gps" if row.get("has_gps") else "kein gps")
+    if row.get("blitzwatch_active"):
+        parts.append("blitzwatch an")
+    else:
+        parts.append("blitzwatch aus")
     return " ".join(parts).lower()
 
 

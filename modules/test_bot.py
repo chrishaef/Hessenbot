@@ -18,7 +18,7 @@ modules_path = os.path.join(parent_path, 'modules')
 
 CHECKALL = os.path.isfile(os.path.join(parent_path, '.checkall'))
 
-exclude = ['test_bot', 'test_location_args', 'udp', 'system', 'log', 'gpio', 'web']
+exclude = ['test_bot', 'test_location_args', 'test_blitzwatch', 'udp', 'system', 'log', 'gpio', 'web']
 
 try:
     print("\nImporting Core Modules:")
