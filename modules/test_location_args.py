@@ -1,4 +1,4 @@
-# Lightweight unit tests for place/coord message args (avoids full system/radio init).
+# Lightweight unit tests for place/coord/grid message args (avoids full system/radio init).
 import os
 import sys
 import types
@@ -16,6 +16,7 @@ for _name in ("maidenhead", "bs4", "geopy", "geopy.geocoders"):
             _mod.Nominatim = MagicMock()
         if _name == "maidenhead":
             _mod.to_maiden = MagicMock(return_value="JO40")
+            _mod.to_location = MagicMock(return_value=(50.020833, 8.041667))
         sys.modules[_name] = _mod
 if "geopy" in sys.modules:
     sys.modules["geopy"].geocoders = sys.modules["geopy.geocoders"]
@@ -33,11 +34,31 @@ class TestLocationArgs(unittest.TestCase):
         self.assertIsNone(parse_lat_lon_from_text("Friedberg"))
         self.assertIsNone(parse_lat_lon_from_text("91 8.76"))
 
+    def test_parse_maidenhead_from_text(self):
+        from modules.locationdata import parse_maidenhead_from_text
+
+        hit = parse_maidenhead_from_text("JO40AA")
+        self.assertIsNotNone(hit)
+        lat, lon, label = hit
+        self.assertEqual(label, "JO40AA")
+        self.assertAlmostEqual(lat, 50.020833, places=4)
+        self.assertAlmostEqual(lon, 8.041667, places=4)
+
+        hit4 = parse_maidenhead_from_text("jo40")
+        self.assertIsNotNone(hit4)
+        self.assertEqual(hit4[2], "JO40")
+
+        self.assertIsNotNone(parse_maidenhead_from_text("grid:JO40AA"))
+        self.assertIsNone(parse_maidenhead_from_text("Friedberg"))
+        self.assertIsNone(parse_maidenhead_from_text("JO"))
+        self.assertIsNone(parse_maidenhead_from_text("ZZ99AA"))
+
     def test_extract_location_arg(self):
         from modules.locationdata import extract_location_arg
 
         self.assertEqual(extract_location_arg("!wx Friedberg", ("wx",)), "Friedberg")
         self.assertEqual(extract_location_arg("!blitz 50.34 8.76", ("blitz",)), "50.34 8.76")
+        self.assertEqual(extract_location_arg("!wx JO40AA", ("wx",)), "JO40AA")
         self.assertEqual(
             extract_location_arg("!satpass 25544 Frankfurt", ("satpass",), skip_numeric=True),
             "Frankfurt",
@@ -55,6 +76,13 @@ class TestLocationArgs(unittest.TestCase):
         self.assertAlmostEqual(lat_r, 50.34)
         self.assertAlmostEqual(lon_r, 8.76)
         self.assertIn("50.34", label)
+
+        lat_r, lon_r, source, label = resolve_message_location(
+            "!wx JO40AA", 123, 1, command_tokens=("wx",)
+        )
+        self.assertEqual(source, "arg-grid")
+        self.assertEqual(label, "JO40AA")
+        self.assertAlmostEqual(lat_r, 50.020833, places=4)
 
         fake_system = types.ModuleType("modules.system")
         fake_system.get_node_location_with_source = lambda *a, **k: [50.1, 8.2, True]

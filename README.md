@@ -86,7 +86,7 @@ cp config.template config.ini
 - **METAR** (`!metar`, optional ICAO): nächstgelegener Flughafen
 - **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
 - **Standort-Auflösung** (für Wetter, Warnungen, Blitz, …): zuerst frische NodeDB-Position (≤ 24 h), dann [Mesh-Karte](https://map.meshhessen.de), sonst Bot-Standort aus `config.ini`
-- **Optional Ort/Koordinaten** bei vielen Standort-Befehlen: z. B. `!wx Fulda`, `!blitz Friedberg`, `!regen 50.55 9.68` (auch deutsches Dezimal-Komma `50,55 9,68`). Ohne Angabe bleibt die Node-/Bot-Auflösung. Nicht betroffen: `!metar` (ICAO), `!loc` (Node), `!whereami`, `!howfar`, `!howtall`
+- **Optional Ort/Koordinaten/Maidenhead-Grid** bei vielen Standort-Befehlen: z. B. `!wx Fulda`, `!blitz Friedberg`, `!regen 50.55 9.68` (auch deutsches Dezimal-Komma `50,55 9,68`), `!wx JO40AA`. Ohne Angabe bleibt die Node-/Bot-Auflösung. Nicht betroffen: `!metar` (ICAO), `!loc` (Node), `!whereami`, `!howfar`, `!howtall`
 
 ### Ping, Trace & DM-Zustellung
 
@@ -153,7 +153,7 @@ cp config.template config.ini
 | `!ack` | Wie Ping, Keyword ACK |
 | `!warning` / `!warning Fulda` | NINA/Katwarn für deinen Standort oder angegebenen Ort |
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
-| `!wx` / `!wx Fulda` | Wetter (Open-Meteo); optional Ort/Koordinaten |
+| `!wx` / `!wx Fulda` / `!wx JO40AA` | Wetter (Open-Meteo); optional Ort/Koordinaten/Grid |
 | `!uv` / `!regen` / `!blitz` | UV, Regen, Blitz — optional ebenfalls mit Ort/Koordinaten |
 | `!blitzwatch` / `on` / `off` / `5km` | Blitz-Nähe-Warnung: Status, Opt-out, Radius (eigene Node) |
 | `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |

@@ -19,7 +19,7 @@ def format_wx_info_header(lat, lon, from_gps=None, *, source=None, label=None) -
     else:
         if int(lat_f) == 0 and int(lon_f) == 0:
             header = "WX INFO @ QTH (kein Standort)"
-        elif source in ("arg-place", "arg-coords") and label:
+        elif source in ("arg-place", "arg-coords", "arg-grid") and label:
             header = f"WX INFO @ QTH {label}"
         else:
             try:

@@ -422,7 +422,7 @@ def handle_wxc(message_from_id, deviceID, days=None, vox=False, message=""):
         return (
             "🤖 !wx — Wettervorhersage (Open-Meteo).\n"
             "Ohne Angabe: GPS der Node, sonst Mesh-Karte/Bot-Standort.\n"
-            "Mit Ort/Coords: !wx Friedberg · !wx 50.34 8.76 · !wx 50,34 8,76\n"
+            "Mit Ort/Coords/Grid: !wx Friedberg · !wx 50.34 8.76 · !wx JO40AA\n"
             "Verwandt: !uv · !regen · !blitz · !metar"
         )
 
@@ -446,16 +446,16 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
         helps = {
             "uv": (
                 "🤖 !uv — UV-Index heute und morgen (Open-Meteo).\n"
-                "Optional: !uv Friedberg · !uv 50.34 8.76"
+                "Optional: !uv Friedberg · !uv 50.34 8.76 · !uv JO40AA"
             ),
             "regen": (
                 "🤖 !regen — stündlicher Regen für die nächsten Stunden (Open-Meteo).\n"
-                "Optional: !regen Frankfurt · !regen 50.34 8.76"
+                "Optional: !regen Frankfurt · !regen 50.34 8.76 · !regen JO40AA"
             ),
             "blitz": (
                 "🤖 !blitz — Live-Blitze im Umkreis plus kurze Gewitter-Vorhersage.\n"
                 "Ohne Angabe: GPS der Node, sonst Mesh-Karte/Bot-Standort.\n"
-                "Optional: !blitz Friedberg · !blitz 50.34 8.76"
+                "Optional: !blitz Friedberg · !blitz 50.34 8.76 · !blitz JO40AA"
             ),
         }
         return helps.get(cmd, f"🤖 !{cmd} — Wetter-Zusatzbefehl.")
@@ -543,7 +543,7 @@ def handle_warning(message_from_id, deviceID, channel_number, isDM, message=""):
     if "?" in (message or ""):
         return (
             "🤖 !warning — NINA-Warnungen für den Standort.\n"
-            "Optional: !warning Friedberg · !warning 50.34 8.76"
+            "Optional: !warning Friedberg · !warning 50.34 8.76 · !warning JO40AA"
         )
     if not my_settings.enableDEalerts:
         return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
@@ -689,7 +689,7 @@ def handle_sun(message_from_id, deviceID, channel_number, vox=False, message="")
     if "?" in (message or ""):
         return (
             "🤖 !sun — Sonnenauf-/untergang und Azimut.\n"
-            "Optional: !sun Frankfurt · !sun 50.34 8.76"
+            "Optional: !sun Frankfurt · !sun 50.34 8.76 · !sun JO40AA"
         )
     if vox:
         # return a default message if vox is enabled
@@ -710,7 +710,7 @@ def handle_satpass(message_from_id, deviceID, message):
         return (
             "satpass [NORAD] [Ort] — nächster sichtbarer Überflug (n2yo).\n"
             "Ohne Nummer: erster Eintrag aus satList in config.ini.\n"
-            "Beispiel: !satpass 25544 · !satpass Frankfurt · !satpass 25544 Frankfurt"
+            "Beispiel: !satpass 25544 · !satpass Frankfurt · !satpass JO40AA · !satpass 25544 Frankfurt"
         )
     norad = None
     for part in message.replace("!", " ").split():
@@ -978,7 +978,7 @@ def handle_repeaterQuery(message_from_id, deviceID, channel_number, message=""):
     if "?" in (message or ""):
         return (
             "🤖 !rlist — Relais in der Nähe.\n"
-            "Optional: !rlist Friedberg · !rlist 50.34 8.76"
+            "Optional: !rlist Friedberg · !rlist 50.34 8.76 · !rlist JO40AA"
         )
     resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("rlist",))
     if isinstance(resolved, str):
@@ -1005,7 +1005,7 @@ def handle_moon(message_from_id, deviceID, channel_number, vox=False, message=""
     if "?" in (message or ""):
         return (
             "🤖 !moon — Mondphase und Auf-/Untergang.\n"
-            "Optional: !moon Frankfurt · !moon 50.34 8.76"
+            "Optional: !moon Frankfurt · !moon 50.34 8.76 · !moon JO40AA"
         )
     if vox:
         return get_moon(str(my_settings.latitudeValue), str(my_settings.longitudeValue))

@@ -301,7 +301,7 @@ def _warning_location_line(lat, lon, from_gps=None, *, source=None, label=None) 
     from modules.system import format_location_source_note
 
     note = format_location_source_note(from_gps, source=source, label=label)
-    if source in ("arg-coords", "arg-place"):
+    if source in ("arg-coords", "arg-grid", "arg-place"):
         return note or "📍 Standort (Angabe)"
     if from_gps is True or source == "gps":
         return note or "📍 Standort bekannt"

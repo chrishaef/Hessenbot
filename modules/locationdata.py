@@ -67,6 +67,34 @@ def parse_lat_lon_from_text(text: str):
     return None
 
 
+def parse_maidenhead_from_text(text: str):
+    """Parse Maidenhead locator (``JO40``, ``JO40AA``, ``JO40AA00``) → center lat/lon + normalized grid.
+
+    Returns ``(lat, lon, grid_label)`` or ``None`` if not a valid locator.
+    """
+    import re
+
+    if not text or not str(text).strip():
+        return None
+    s = str(text).strip().upper()
+    # Optional prefixes used in FM/ham chat
+    s = re.sub(r"^(?:GRID|LOCATOR|QTH|MH)\s*[:=]?\s*", "", s)
+    s = s.replace(" ", "")
+
+    # Field+square required (4); optional subsquare (6) and extended square (8)
+    if not re.fullmatch(r"[A-R]{2}[0-9]{2}(?:[A-X]{2}(?:[0-9]{2})?)?", s):
+        return None
+    try:
+        lat, lon = mh.to_location(s, center=True)
+    except Exception as e:
+        logger.debug(f"Location: maidenhead parse failed for {s!r}: {e}")
+        return None
+    valid = _valid_lat_lon(float(lat), float(lon))
+    if not valid:
+        return None
+    return valid[0], valid[1], s
+
+
 def geocode_place_name(name: str, country: str = "DE", max_age: float = 86400):
     """Forward-geocode a place name via Open-Meteo (cached). Returns (lat, lon, display_name)."""
     query = (name or "").strip()
@@ -150,7 +178,7 @@ def resolve_message_location(
     """Resolve lat/lon from message args or node location.
 
     Returns ``(lat, lon, source, label)`` where source is one of
-    ``arg-coords``, ``arg-place``, ``gps``, ``bot``, or ``error``
+    ``arg-coords``, ``arg-grid``, ``arg-place``, ``gps``, ``bot``, or ``error``
     (then label is the error message and lat/lon are None).
     """
     query = extract_location_arg(
@@ -165,6 +193,11 @@ def resolve_message_location(
             lat, lon = coords
             label = f"{lat:.2f}, {lon:.2f}"
             return lat, lon, "arg-coords", label
+
+        grid = parse_maidenhead_from_text(query)
+        if grid:
+            lat, lon, grid_label = grid
+            return lat, lon, "arg-grid", grid_label
 
         # Pure number left over (e.g. satpass NORAD already skipped) → node fallback
         if query.replace(" ", "").isdigit():

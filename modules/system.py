@@ -1389,7 +1389,7 @@ def format_location_source_note(from_gps=None, *, source=None, label=None) -> st
             src = "gps"
         elif from_gps is False:
             src = "bot"
-    if src in ("arg-coords", "arg-place"):
+    if src in ("arg-coords", "arg-grid", "arg-place"):
         if label:
             return f"📍 Standort: {label}"
         return "📍 Standort (Angabe)"

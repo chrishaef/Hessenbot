@@ -1015,10 +1015,20 @@ class TestBot(unittest.TestCase):
         self.assertEqual(source, "arg-coords")
         self.assertAlmostEqual(lat_r, 50.34)
 
+        lat_r, lon_r, source, label = resolve_message_location(
+            "!wx JO40AA", 123, 1, command_tokens=("wx",)
+        )
+        self.assertEqual(source, "arg-grid")
+        self.assertEqual(label, "JO40AA")
+
     def test_format_location_source_note_arg(self):
         self.assertEqual(
             format_location_source_note(source="arg-place", label="Friedberg"),
             "📍 Standort: Friedberg",
+        )
+        self.assertEqual(
+            format_location_source_note(source="arg-grid", label="JO40AA"),
+            "📍 Standort: JO40AA",
         )
         self.assertEqual(format_location_source_note(True), "📍 Standort bekannt")
         self.assertIn("Bot-Standort", format_location_source_note(False))
@@ -1029,6 +1039,7 @@ class TestBot(unittest.TestCase):
         help_text = handle_wxc(0, 1, message="!wx?")
         self.assertIn("Friedberg", help_text)
         self.assertIn("50.34", help_text)
+        self.assertIn("JO40AA", help_text)
 
 
 if __name__ == '__main__':

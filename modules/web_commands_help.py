@@ -218,7 +218,7 @@ def _sections() -> List[CommandSection]:
             (
                 _cmd(
                     f"{p}wx",
-                    "Wettervorhersage (Open-Meteo). Optional Ort/Coords: !wx Friedberg · !wx 50.34 8.76",
+                    "Wettervorhersage (Open-Meteo). Optional Ort/Coords/Grid: !wx Friedberg · !wx 50.34 8.76 · !wx JO40AA",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
@@ -248,21 +248,21 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}uv",
-                    "UV-Index heute und morgen. Optional: !uv Friedberg · !uv 50.34 8.76",
+                    "UV-Index heute und morgen. Optional: !uv Friedberg · !uv 50.34 8.76 · !uv JO40AA",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}regen",
-                    "Stündlicher Regen. Optional: !regen Frankfurt · !regen 50.34 8.76",
+                    "Stündlicher Regen. Optional: !regen Frankfurt · !regen 50.34 8.76 · !regen JO40AA",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}blitz",
-                    "Live-Blitze + Gewitter-Vorhersage. Optional: !blitz Friedberg · !blitz 50.34 8.76",
+                    "Live-Blitze + Gewitter-Vorhersage. Optional: !blitz Friedberg · !blitz 50.34 8.76 · !blitz JO40AA",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
@@ -275,7 +275,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}warning",
-                    "Aktive NINA-Warnungen. Optional: !warning Friedberg · !warning 50.34 8.76",
+                    "Aktive NINA-Warnungen. Optional: !warning Friedberg · !warning 50.34 8.76 · !warning JO40AA",
                     enabled=lambda: getattr(st, "enableDEalerts", False),
                 ),
                 _cmd(
@@ -294,18 +294,18 @@ def _sections() -> List[CommandSection]:
             (
                 CommandEntry(
                     f"{p}rlist",
-                    "Repeater in der Nähe. Optional: !rlist Friedberg · !rlist 50.34 8.76",
+                    "Repeater in der Nähe. Optional: !rlist Friedberg · !rlist 50.34 8.76 · !rlist JO40AA",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and bool(getattr(st, "repeater_lookup", False)),
                 ),
                 CommandEntry(
                     f"{p}sun",
-                    "Sonnenauf-/untergang. Optional: !sun Frankfurt · !sun 50.34 8.76",
+                    "Sonnenauf-/untergang. Optional: !sun Frankfurt · !sun 50.34 8.76 · !sun JO40AA",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False),
                 ),
                 CommandEntry(
                     f"{p}moon",
-                    "Mondphase. Optional: !moon Frankfurt · !moon 50.34 8.76",
+                    "Mondphase. Optional: !moon Frankfurt · !moon 50.34 8.76 · !moon JO40AA",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False),
                 ),
                 CommandEntry(
@@ -320,7 +320,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 CommandEntry(
                     f"{p}satpass",
-                    "Satellitenüberflug. Optional Ort: !satpass Frankfurt · !satpass 25544 Frankfurt",
+                    "Satellitenüberflug. Optional Ort/Grid: !satpass Frankfurt · !satpass JO40AA · !satpass 25544 Frankfurt",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False)
                     and bool(getattr(st, "n2yoAPIKey", "")),
                 ),
