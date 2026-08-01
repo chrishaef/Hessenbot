@@ -85,7 +85,8 @@ cp config.template config.ini
 - **Wetter** über **Open-Meteo**: `!wx`, `!wxc`, `!uv`, `!regen`, `!blitz`
 - **METAR** (`!metar`, optional ICAO): nächstgelegener Flughafen
 - **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
-- **Standort-Auflösung** (für Wetter, Warnungen, Blitz): zuerst frische NodeDB-Position (≤ 24 h), dann [Mesh-Karte](https://map.meshhessen.de), sonst Bot-Standort aus `config.ini`
+- **Standort-Auflösung** (für Wetter, Warnungen, Blitz, …): zuerst frische NodeDB-Position (≤ 24 h), dann [Mesh-Karte](https://map.meshhessen.de), sonst Bot-Standort aus `config.ini`
+- **Optional Ort/Koordinaten** bei vielen Standort-Befehlen: z. B. `!wx Fulda`, `!blitz Friedberg`, `!regen 50.55 9.68` (auch deutsches Dezimal-Komma `50,55 9,68`). Ohne Angabe bleibt die Node-/Bot-Auflösung. Nicht betroffen: `!metar` (ICAO), `!loc` (Node), `!whereami`, `!howfar`, `!howtall`
 
 ### Ping, Trace & DM-Zustellung
 
@@ -97,11 +98,18 @@ cp config.template config.ini
 - **`wantAckOnDm`**: Mesh-ACK auf DM-Antworten; Fehlzustellungen (inkl. PKI) werden geloggt und im Admin/Dashboard ausgewertet
 - Konfiguration: `[messagingSettings]` in `config.ini` (`wantAckOnDm`, `dmDeliveryFailAlertThreshold`)
 
-### Blitz (`!blitz`)
+### Blitz (`!blitz`) und Blitzwatch
 
 - Live-Einschläge (DMI, optional Blitzortung.org) + kurze Modell-Vorhersage (Open-Meteo)
 - Ausgabe: Anzahl Einschläge, **Nächster**, **Weitester** und **Letzter** (zeitlich neuester) mit Distanz und Himmelsrichtung
-- Standort der anfragenden Station; in der Antwort wird angezeigt, ob der Standort bekannt ist oder der Bot-Standort genutzt wird
+- Standort der anfragenden Station oder optional `!blitz <Ort|Coords>`; in der Antwort wird die Standortquelle angezeigt
+- **Blitzwatch** (automatisch, wenn `blitzWatchEnabled = True`):
+  - prüft alle paar Minuten Live-Blitze gegen Nodes mit **frischem GPS (≤ 24 h)**
+  - Warnung per **DM** an betroffene Nodes und **eine** Kanalnachricht (Kurzname + Distanz)
+  - Standard: aktiv (Opt-out), Radius **8 km** (1–10 km), Cooldown **60 min** (Node + Kanal), Bot-Node ausgeschlossen
+  - Steuerung nur für die eigene Node: `!blitzwatch`, `!blitzwatch on|off`, `!blitzwatch 5km`
+  - Status in der NodeDB (Admin/öffentlich): z. B. **an 8km** / **bereit 8km** / **aus**
+  - Config/Admin: `[location]` `blitzWatchEnabled` und zugehörige Parameter (siehe `config.template`)
 
 ### Web-UI (Flask)
 
@@ -143,10 +151,11 @@ cp config.template config.ini
 | `!trace?` | Kurzhilfe zu `!trace` |
 | `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
 | `!ack` | Wie Ping, Keyword ACK |
-| `!warning` | NINA/Katwarn für **deinen** Standort |
+| `!warning` / `!warning Fulda` | NINA/Katwarn für deinen Standort oder angegebenen Ort |
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
-| `!wx` / `!wxc` | Wetter (Open-Meteo) |
-| `!uv` / `!regen` / `!blitz` | UV-Index, Regenradar, Blitz (Live + Vorhersage) |
+| `!wx` / `!wx Fulda` | Wetter (Open-Meteo); optional Ort/Koordinaten |
+| `!uv` / `!regen` / `!blitz` | UV, Regen, Blitz — optional ebenfalls mit Ort/Koordinaten |
+| `!blitzwatch` / `on` / `off` / `5km` | Blitz-Nähe-Warnung: Status, Opt-out, Radius (eigene Node) |
 | `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |
 | `!whereami` | Ortsname (Geocoding) + Höhe falls übertragen |
 | `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |
