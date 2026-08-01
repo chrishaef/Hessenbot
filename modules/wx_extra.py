@@ -52,7 +52,7 @@ def _hour_label(iso_time: str) -> str:
         return iso_time[-5:] if len(iso_time) >= 5 else iso_time
 
 
-def get_uv(lat=0, lon=0) -> str:
+def get_uv(lat=0, lon=0, from_gps=None) -> str:
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
@@ -77,7 +77,7 @@ def get_uv(lat=0, lon=0) -> str:
         logger.error(f"Error fetching UV data: {e}")
         return ERROR_FETCHING_DATA
 
-    header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "UV")
+    header = format_wx_info_header(lat_f, lon_f, from_gps=from_gps).replace("WX INFO", "UV")
     body = (
         f"Heute max {today:.1f} ({_uv_risk_de(today)}), "
         f"Morgen {tomorrow:.1f}. "
@@ -86,7 +86,7 @@ def get_uv(lat=0, lon=0) -> str:
     return f"{header}\n{body}"
 
 
-def get_regen(lat=0, lon=0, hours: int = 18) -> str:
+def get_regen(lat=0, lon=0, hours: int = 18, from_gps=None) -> str:
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
@@ -111,7 +111,7 @@ def get_regen(lat=0, lon=0, hours: int = 18) -> str:
         logger.error(f"Error fetching rain data: {e}")
         return ERROR_FETCHING_DATA
 
-    header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "REGEN")
+    header = format_wx_info_header(lat_f, lon_f, from_gps=from_gps).replace("WX INFO", "REGEN")
     lines: list[str] = []
     total = 0.0
     max_prob = 0
@@ -383,11 +383,7 @@ def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None) -> str:
         return NO_DATA_NOGPS
     lat_f, lon_f = coords
 
-    header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "BLITZ")
-    if from_gps is True:
-        header += "\n📍 Standort bekannt"
-    elif from_gps is False:
-        header += "\n📍 Standort unbekannt – Bot-Standort"
+    header = format_wx_info_header(lat_f, lon_f, from_gps=from_gps).replace("WX INFO", "BLITZ")
 
     live_on, radius_km, bo_user, bo_pass = _blitz_settings()
     strikes: list[dict] = []

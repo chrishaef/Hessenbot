@@ -1374,6 +1374,26 @@ def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
         return [fuzzed_position[0], fuzzed_position[1], False]
     return [config_position[0], config_position[1], False]
 
+
+def format_location_source_note(from_gps) -> str:
+    """Clarify whether requester or bot location was used (same wording as !blitz)."""
+    if from_gps is True:
+        return "📍 Standort bekannt"
+    if from_gps is False:
+        return "📍 Standort unbekannt – Bot-Standort"
+    return ""
+
+
+def with_location_source_note(text: str, from_gps) -> str:
+    """Append location-source note to a reply when from_gps is known."""
+    note = format_location_source_note(from_gps)
+    if not note:
+        return text
+    text = (text or "").rstrip()
+    if not text:
+        return note
+    return f"{text}\n{note}"
+
 async def get_closest_nodes(nodeInt=1,returnCount=3, channel=publicChannel):
         interface = globals()[f'interface{nodeInt}']
         node_list = []

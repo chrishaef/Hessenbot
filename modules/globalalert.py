@@ -298,9 +298,12 @@ def _split_mesh_chunks(text: str, max_len: int = None) -> list[str]:
 
 
 def _warning_location_line(lat, lon, from_gps: bool) -> str:
+    from modules.system import format_location_source_note
+
+    note = format_location_source_note(from_gps)
     if from_gps:
-        return "Standort: ✓"
-    return f"Location: ✗ Fallback {_short_coord(lat, lon)}"
+        return note or "📍 Standort bekannt"
+    return f"{note}\nFallback {_short_coord(lat, lon)}"
 
 
 def _fetch_warning_items(lat, lon) -> list[dict]:

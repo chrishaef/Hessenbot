@@ -75,24 +75,30 @@ def parse_metar_icao_from_message(message: str) -> str | None:
     return normalize_icao(parts[1])
 
 
-def format_metar_header(lat, lon, icao: str, station_name: str, dist_km: float) -> str:
+def format_metar_header(lat, lon, icao: str, station_name: str, dist_km: float, from_gps=None) -> str:
     """Erste Zeile für !metar: QTH wie bei !wx, nächster Flugplatz."""
     try:
         lat_f, lon_f = float(lat), float(lon)
     except (TypeError, ValueError):
-        return f"METAR @ {icao}"
-    qth = ""
-    if int(lat_f) != 0 or int(lon_f) != 0:
-        try:
-            from modules.locationdata import get_place_name
+        header = f"METAR @ {icao}"
+    else:
+        qth = ""
+        if int(lat_f) != 0 or int(lon_f) != 0:
+            try:
+                from modules.locationdata import get_place_name
 
-            place = get_place_name(lat_f, lon_f)
-            if place and place != "?":
-                qth = f"QTH {place} | "
-        except Exception:
-            pass
-    label = _station_label(station_name) or icao
-    return f"METAR @ {qth}{icao} {label} ({dist_km:.0f} km)"
+                place = get_place_name(lat_f, lon_f)
+                if place and place != "?":
+                    qth = f"QTH {place} | "
+            except Exception:
+                pass
+        label = _station_label(station_name) or icao
+        header = f"METAR @ {qth}{icao} {label} ({dist_km:.0f} km)"
+    if from_gps is True:
+        header += "\n📍 Standort bekannt"
+    elif from_gps is False:
+        header += "\n📍 Standort unbekannt – Bot-Standort"
+    return header
 
 
 def format_metar_header_icao(icao: str, station_name: str | None) -> str:
@@ -179,7 +185,7 @@ def get_metar_by_icao(icao: str) -> str:
     return _format_metar_response(header, station)
 
 
-def get_metar(lat=0, lon=0) -> str:
+def get_metar(lat=0, lon=0, from_gps=None) -> str:
     try:
         lat_f, lon_f = float(lat), float(lon)
     except (TypeError, ValueError):
@@ -198,5 +204,7 @@ def get_metar(lat=0, lon=0) -> str:
 
     station, dist_km = found
     icao = station.get("icaoId") or station.get("id") or "?"
-    header = format_metar_header(lat_f, lon_f, icao, station.get("name"), dist_km)
+    header = format_metar_header(
+        lat_f, lon_f, icao, station.get("name"), dist_km, from_gps=from_gps
+    )
     return _format_metar_response(header, station)

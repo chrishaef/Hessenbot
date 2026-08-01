@@ -8,23 +8,31 @@ from modules.settings import ERROR_FETCHING_DATA, NO_DATA_NOGPS
 from modules.locale_de import wmo_weather_de, wind_direction_de
 
 
-def format_wx_info_header(lat, lon) -> str:
+def format_wx_info_header(lat, lon, from_gps=None) -> str:
     """Erste Zeile für !wx: Standort, für den die Vorhersage gilt."""
     try:
         lat_f, lon_f = float(lat), float(lon)
     except (TypeError, ValueError):
-        return "WX INFO @ QTH ?"
-    if int(lat_f) == 0 and int(lon_f) == 0:
-        return "WX INFO @ QTH (kein Standort)"
-    try:
-        from modules.locationdata import get_place_name
+        header = "WX INFO @ QTH ?"
+    else:
+        if int(lat_f) == 0 and int(lon_f) == 0:
+            header = "WX INFO @ QTH (kein Standort)"
+        else:
+            try:
+                from modules.locationdata import get_place_name
 
-        place = get_place_name(lat_f, lon_f)
-    except Exception:
-        place = "?"
-    if place and place != "?":
-        return f"WX INFO @ QTH {place}"
-    return f"WX INFO @ QTH {lat_f:.2f}, {lon_f:.2f}"
+                place = get_place_name(lat_f, lon_f)
+            except Exception:
+                place = "?"
+            if place and place != "?":
+                header = f"WX INFO @ QTH {place}"
+            else:
+                header = f"WX INFO @ QTH {lat_f:.2f}, {lon_f:.2f}"
+    if from_gps is True:
+        header += "\n📍 Standort bekannt"
+    elif from_gps is False:
+        header += "\n📍 Standort unbekannt – Bot-Standort"
+    return header
 
 
 def get_weather_data(api_url, params):

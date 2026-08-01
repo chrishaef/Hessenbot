@@ -404,12 +404,12 @@ def handle_wxc(message_from_id, deviceID, days=None, vox=False, message=""):
 
     from modules.wx_meteo import format_wx_info_header, get_wx_meteo
 
-    location = get_node_location(message_from_id, deviceID)
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     unit = 1 if my_settings.use_metric else 0
-    report = get_wx_meteo(str(location[0]), str(location[1]), unit)
+    report = get_wx_meteo(str(lat), str(lon), unit)
     if not report or report == ERROR_FETCHING_DATA:
         return report
-    header = format_wx_info_header(location[0], location[1])
+    header = format_wx_info_header(lat, lon, from_gps=from_gps)
     return f"{header}\n{report}"
 
 
@@ -433,16 +433,13 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
         return f"🤖 !{cmd} ist in der Konfiguration deaktiviert (wxExtraCommands)."
     from modules.wx_extra import get_blitz, get_regen, get_uv
 
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     if cmd == "blitz":
-        b_lat, b_lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-        return get_blitz(str(b_lat), str(b_lon), from_gps=from_gps)
-
-    location = get_node_location(message_from_id, deviceID)
-    lat, lon = str(location[0]), str(location[1])
+        return get_blitz(str(lat), str(lon), from_gps=from_gps)
     if cmd == "uv":
-        return get_uv(lat, lon)
+        return get_uv(str(lat), str(lon), from_gps=from_gps)
     if cmd == "regen":
-        return get_regen(lat, lon)
+        return get_regen(str(lat), str(lon), from_gps=from_gps)
     return "Unbekannter Wetter-Befehl."
 
 
@@ -499,8 +496,8 @@ def handle_metar(message_from_id, deviceID, message=""):
     if icao:
         return get_metar_by_icao(icao)
 
-    location = get_node_location(message_from_id, deviceID)
-    return get_metar(str(location[0]), str(location[1]))
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    return get_metar(str(lat), str(lon), from_gps=from_gps)
 
 
 def handle_warning(message_from_id, deviceID, channel_number, isDM):
@@ -640,8 +637,8 @@ def handle_sun(message_from_id, deviceID, channel_number, vox=False):
     if vox:
         # return a default message if vox is enabled
         return get_sun(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    location = get_node_location(message_from_id, deviceID, channel_number)
-    return get_sun(str(location[0]), str(location[1]))
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    return with_location_source_note(get_sun(str(lat), str(lon)), from_gps)
 
 def handle_satpass(message_from_id, deviceID, message):
     if "?" in message:
@@ -658,8 +655,10 @@ def handle_satpass(message_from_id, deviceID, message):
     if norad is None:
         sat_list = getattr(my_settings, "satListConfig", ["25544"])
         norad = (sat_list[0] if sat_list else "25544").strip()
-    location = get_node_location(message_from_id, deviceID)
-    return getNextSatellitePass(norad, location[0], location[1])
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    return with_location_source_note(
+        getNextSatellitePass(norad, lat, lon), from_gps
+    )
 
 def sysinfo(message, message_from_id, deviceID, isDM):
     if "?" in message:
@@ -761,16 +760,16 @@ def handle_history(message, nodeid, deviceID, isDM, lheard=False):
     return msg
 
 def handle_whereami(message_from_id, deviceID, channel_number):
-    location = get_node_location(message_from_id, deviceID, channel_number)
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     # check api_throttle
     check_throttle = api_throttle(message_from_id, deviceID, apiName='whereami')
     if check_throttle:
         return check_throttle
-    msg = where_am_i(str(location[0]), str(location[1]))
+    msg = where_am_i(str(lat), str(lon))
     alt = get_node_altitude_m(message_from_id, deviceID)
     if alt is not None:
         msg += f"\n{format_node_altitude_line(alt)}"
-    return msg
+    return with_location_source_note(msg, from_gps)
 
 
 def handle_howfar(message, message_from_id, deviceID, isDM):
@@ -784,9 +783,11 @@ def handle_howfar(message, message_from_id, deviceID, isDM):
     check_throttle = api_throttle(message_from_id, deviceID, apiName="howfar")
     if check_throttle:
         return check_throttle
-    location = get_node_location(message_from_id, deviceID)
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     reset = "reset" in message.lower()
-    return distance(location[0], location[1], message_from_id, reset=reset)
+    return with_location_source_note(
+        distance(lat, lon, message_from_id, reset=reset), from_gps
+    )
 
 
 def handle_howtall(message, message_from_id, deviceID, isDM):
@@ -800,7 +801,7 @@ def handle_howtall(message, message_from_id, deviceID, isDM):
     check_throttle = api_throttle(message_from_id, deviceID, apiName="howtall")
     if check_throttle:
         return check_throttle
-    location = get_node_location(message_from_id, deviceID)
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     shadow = None
     parts = message.replace("!", " ").split()
     for i, part in enumerate(parts):
@@ -823,7 +824,9 @@ def handle_howtall(message, message_from_id, deviceID, isDM):
                 continue
     if shadow is None:
         return "Bitte Schattenlänge angeben, z. B. !howtall 2"
-    return measureHeight(location[0], location[1], shadow)
+    return with_location_source_note(
+        measureHeight(lat, lon, shadow), from_gps
+    )
 
 
 def handle_trace(message, message_from_id, deviceID, channel_number):
@@ -895,23 +898,24 @@ def handle_loc(message, message_from_id, deviceID, channel_number):
 
 
 def handle_repeaterQuery(message_from_id, deviceID, channel_number):
-    location = get_node_location(message_from_id, deviceID, channel_number)
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     # check api_throttle
     check_throttle = api_throttle(message_from_id, deviceID, apiName='repeaterQuery')
     if check_throttle:
         return check_throttle
     if repeater_lookup == "rbook":
-        return getRepeaterBook(str(location[0]), str(location[1]))
+        body = getRepeaterBook(str(lat), str(lon))
     elif repeater_lookup == "artsci":
-        return getArtSciRepeaters(str(location[0]), str(location[1]))
+        body = getArtSciRepeaters(str(lat), str(lon))
     else:
         return "Repeater-Suche ist nicht aktiviert."
+    return with_location_source_note(body, from_gps)
 
 def handle_moon(message_from_id, deviceID, channel_number, vox=False):
     if vox:
         return get_moon(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    location = get_node_location(message_from_id, deviceID, channel_number)
-    return get_moon(str(location[0]), str(location[1]))
+    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
+    return with_location_source_note(get_moon(str(lat), str(lon)), from_gps)
 
 def handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus):
     try:
