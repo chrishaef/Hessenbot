@@ -120,7 +120,7 @@ cp config.template config.ini
 
 ### Admin Mesh-Chat (DM & Kanal)
 
-- **Mesh-DM**: Feed scrollt nur nach unten, wenn du schon unten bist, der Peer gewechselt wird oder du selbst sendest — Hochscrollen bleibt stehen
+- **Mesh-DM**: Feed scrollt nur nach unten, wenn du schon unten bist, der Peer gewechselt wird oder du selbst sendest — Hochscrollen bleibt stehen. Suche findet bisherige Chats **und** Nodes aus der NodeDB (neue DM starten).
 - **Kanal**: Dropdown mit allen Kanälen der verbundenen Meshtastic-Instanz (`get_channels_with_hash` beim Bot-Start, Refresh beim Öffnen der Seite); Umschalten von Feed und Sendeziel; Startkanal = `messagesChannel` (typisch `#1 MeshHessen`, `#0` oft ShortSlow)
 
 ### Web-UI (Flask)

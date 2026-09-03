@@ -32,8 +32,12 @@
   let allDmMessages = [];
   let allChannelMessages = [];
   let selectedPeerId = "";
+  let selectedPeerLabel = "";
+  let selectedPeerNodeNum = "";
   let userSearchQuery = "";
   let forceDmScrollOnce = false;
+  let nodedbPeers = [];
+  let nodedbLoaded = false;
 
   const FULL_REFRESH_MS = 5 * 60 * 1000;
 
@@ -333,6 +337,7 @@
           time: m.time || "",
           timeShort: m.time_short || "",
           preview: (m.text || "").trim().slice(0, 72),
+          source: "chat",
         };
       } else if (m.peer_num && !cur.nodeNum) {
         cur.nodeNum = m.peer_num;
@@ -344,19 +349,109 @@
     });
   }
 
+  function loadNodedbPeers() {
+    if (!isDm || !cfg.apiNodes) return;
+    const iface = ifaceSelect ? ifaceSelect.value : String(cfg.interface || 1);
+    fetch(cfg.apiNodes + "?iface=" + encodeURIComponent(iface), {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        nodedbPeers = (data.nodes || []).map(function (n) {
+          const num = String(n.num || "");
+          return {
+            id: num,
+            nodeNum: num,
+            label: n.label || n.short || num,
+            short: n.short || "",
+            long: n.long || "",
+            search: String(n.search || [n.short, n.long, n.num, n.node_id, n.label].join(" ")).toLowerCase(),
+            source: "nodedb",
+          };
+        });
+        nodedbLoaded = true;
+        renderUserList();
+      })
+      .catch(function () {
+        nodedbPeers = [];
+        nodedbLoaded = true;
+        renderUserList();
+      });
+  }
+
+  function buildCombinedUsers() {
+    const chats = buildUserSummaries();
+    const q = userSearchQuery.trim().toLowerCase();
+    const chatNums = {};
+    chats.forEach(function (u) {
+      if (u.nodeNum) chatNums[String(u.nodeNum)] = true;
+      if (/^\d+$/.test(u.id)) chatNums[String(u.id)] = true;
+    });
+
+    let list;
+    if (!q) {
+      list = chats.slice();
+    } else {
+      list = chats.filter(function (u) {
+        return (u.label + " " + u.id + " " + (u.nodeNum || "") + " " + (u.preview || ""))
+          .toLowerCase()
+          .indexOf(q) !== -1;
+      });
+      nodedbPeers.forEach(function (n) {
+        if (chatNums[n.nodeNum]) return;
+        if (n.search.indexOf(q) === -1) return;
+        list.push({
+          id: n.id,
+          nodeNum: n.nodeNum,
+          label: n.label,
+          time: "",
+          timeShort: "NodeDB",
+          preview: "Neue DM starten",
+          source: "nodedb",
+        });
+      });
+    }
+
+    // Keep an actively selected NodeDB peer visible even without matching search
+    if (selectedPeerId && !list.some(function (u) { return u.id === selectedPeerId; })) {
+      const fromDb = nodedbPeers.find(function (n) {
+        return n.id === selectedPeerId || n.nodeNum === selectedPeerNodeNum;
+      });
+      if (fromDb || selectedPeerNodeNum) {
+        list.unshift({
+          id: selectedPeerId,
+          nodeNum: selectedPeerNodeNum || (fromDb && fromDb.nodeNum) || selectedPeerId,
+          label: selectedPeerLabel || (fromDb && fromDb.label) || selectedPeerId,
+          time: "",
+          timeShort: "NodeDB",
+          preview: "Neue DM starten",
+          source: "nodedb",
+        });
+      }
+    }
+    return list;
+  }
+
   function renderUserList() {
     if (!userListEl) return;
-    const q = userSearchQuery.trim().toLowerCase();
-    const users = buildUserSummaries().filter(function (u) {
-      if (!q) return true;
-      return (u.label + " " + u.id + " " + u.preview).toLowerCase().indexOf(q) !== -1;
-    });
+    const q = userSearchQuery.trim();
+    const users = buildCombinedUsers();
 
     userListEl.innerHTML = "";
     if (!users.length) {
       const li = document.createElement("li");
       li.className = "mesh-dm-user-empty";
-      li.textContent = q ? "Kein Treffer" : "Noch keine DMs";
+      if (q) {
+        li.textContent = nodedbLoaded
+          ? "Kein Treffer in Chats/NodeDB"
+          : "Suche … NodeDB wird geladen";
+      } else {
+        li.textContent = "Noch keine DMs — Node über Suche wählen";
+      }
       userListEl.appendChild(li);
       return;
     }
@@ -364,10 +459,15 @@
     users.forEach(function (u) {
       const li = document.createElement("li");
       li.className = "mesh-dm-user-item" + (u.id === selectedPeerId ? " is-active" : "");
+      if (u.source === "nodedb") li.className += " mesh-dm-user-item--nodedb";
       li.dataset.peerId = u.id;
       li.setAttribute("role", "option");
+      const badge =
+        u.source === "nodedb"
+          ? '<span class="mesh-dm-user-badge">NodeDB</span>'
+          : "";
       li.innerHTML =
-        '<span class="mesh-dm-user-name">' + escapeHtml(u.label) + "</span>" +
+        '<span class="mesh-dm-user-name">' + escapeHtml(u.label) + badge + "</span>" +
         '<span class="mesh-dm-user-meta">' +
         escapeHtml(u.timeShort || "") +
         "</span>" +
@@ -375,24 +475,26 @@
         escapeHtml(u.preview || "—") +
         "</span>";
       li.addEventListener("click", function () {
-        selectPeer(u.id, u.label);
+        selectPeer(u.id, u.label, false, u.nodeNum);
       });
       userListEl.appendChild(li);
     });
 
-    if (!selectedPeerId && users.length) {
-      selectPeer(users[0].id, users[0].label, true);
-    } else if (selectedPeerId && !users.some(function (u) {
-      return u.id === selectedPeerId;
-    })) {
-      selectPeer(users[0].id, users[0].label, true);
+    // Auto-select first chat only; never clobber an explicit NodeDB selection
+    if (!selectedPeerId && users.length && users[0].source === "chat") {
+      selectPeer(users[0].id, users[0].label, true, users[0].nodeNum);
     }
   }
 
-  function selectPeer(peerId, label, silent) {
+  function selectPeer(peerId, label, silent, nodeNum) {
     selectedPeerId = String(peerId || "");
+    selectedPeerLabel = label || selectedPeerId || "";
+    selectedPeerNodeNum = nodeNum
+      ? String(nodeNum)
+      : (/^\d+$/.test(selectedPeerId) ? selectedPeerId : "");
     if (activeLabelEl) {
-      activeLabelEl.textContent = label || selectedPeerId || "Bitte Nutzer wählen";
+      activeLabelEl.textContent =
+        selectedPeerLabel || selectedPeerId || "Bitte Nutzer wählen";
     }
     renderUserList();
     renderDmFeed(true);
@@ -520,13 +622,18 @@
       body.set("interface", ifaceSelect ? ifaceSelect.value : String(cfg.interface));
       if (isDm) {
         body.set("kind", "dm");
-        const users = buildUserSummaries();
-        let destNode = selectedPeerId;
-        for (let i = 0; i < users.length; i++) {
-          if (users[i].id === selectedPeerId && users[i].nodeNum) {
-            destNode = users[i].nodeNum;
-            break;
+        let destNode = selectedPeerNodeNum || "";
+        if (!destNode) {
+          const users = buildCombinedUsers();
+          for (let i = 0; i < users.length; i++) {
+            if (users[i].id === selectedPeerId && users[i].nodeNum) {
+              destNode = users[i].nodeNum;
+              break;
+            }
           }
+        }
+        if (!destNode && /^\d+$/.test(selectedPeerId)) {
+          destNode = selectedPeerId;
         }
         body.set("dest_node", destNode);
       }
@@ -662,6 +769,16 @@
           /* keep existing channel list */
         });
     });
+  }
+
+  if (ifaceSelect && isDm) {
+    ifaceSelect.addEventListener("change", function () {
+      loadNodedbPeers();
+    });
+  }
+
+  if (isDm) {
+    loadNodedbPeers();
   }
 
   poll(true);

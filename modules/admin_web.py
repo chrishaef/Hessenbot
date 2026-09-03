@@ -754,11 +754,14 @@ def create_app(
   <div class="mesh-dm-layout">
     <aside class="mesh-dm-sidebar">
       <div class="mesh-dm-sidebar-head">
-        <label class="mesh-chat-label" for="mesh-dm-user-search">Chats</label>
+        <label class="mesh-chat-label" for="mesh-dm-user-search">Chats &amp; NodeDB</label>
         <input type="search" id="mesh-dm-user-search" class="form-control form-control-sm"
-          placeholder="Nutzer suchen …" autocomplete="off" spellcheck="false">
+          placeholder="Name, ID oder Node suchen …" autocomplete="off" spellcheck="false">
+        <p class="mesh-dm-search-hint small text-muted mb-0">
+          Ohne Suche: bisherige DMs. Tippen: auch Nodes aus der NodeDB.
+        </p>
       </div>
-      <ul id="mesh-dm-user-list" class="mesh-dm-user-list" role="listbox" aria-label="DM-Chats"></ul>
+      <ul id="mesh-dm-user-list" class="mesh-dm-user-list" role="listbox" aria-label="DM-Chats und NodeDB"></ul>
     </aside>
     <div class="mesh-dm-panel">
       <div class="mesh-dm-panel-head">
@@ -777,7 +780,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=14"></script>
+<script src="/static/portal/mesh-chat.js?v=15"></script>
 """
         else:
             inner = f"""
@@ -799,7 +802,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=14"></script>
+<script src="/static/portal/mesh-chat.js?v=15"></script>
 """
         return _render_admin_template(
             inner,
