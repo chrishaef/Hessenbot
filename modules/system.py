@@ -1081,6 +1081,17 @@ def bot_place_name() -> str:
     return "Meshhessen"
 
 
+def bot_maidenhead() -> str:
+    """Maidenhead grid of the bot position (e.g. JO40AA)."""
+    try:
+        import maidenhead as mh
+
+        grid = mh.to_maiden(float(latitudeValue), float(longitudeValue))
+        return str(grid or "").strip().upper()[:10]
+    except Exception:
+        return ""
+
+
 _PING_TITLE = {
     "test": ("🎙", "Test"),
     "testing": ("🎙", "Test"),
@@ -1153,9 +1164,11 @@ def format_ping_qsl_response(
     key = (keyword or "test").strip().lower()
     emoji, title = _PING_TITLE.get(key, ("🎙", (keyword or "Test").strip() or "Test"))
     place = bot_place_name()
+    grid = bot_maidenhead()
+    loc = f"{place} {grid}".strip() if grid else place
     return (
         f"{emoji} {title} von {long_name}\n"
-        f"✅ vom Hessenbot in {place} gehört\n"
+        f"✅ vom Hessenbot in {loc} gehört\n"
         f"{_ping_signal_line(hop, snr, rssi)}"
     )
 
