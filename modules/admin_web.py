@@ -1074,25 +1074,40 @@ def create_app(
                     iface_id = post_iface
                     redirect_kw["iface"] = iface_id
                 action = (request.form.get("action") or "").strip()
-                if action == "save_channel":
-                    ok, msg = ops.apply_local_channel_settings(iface_id, request.form)
-                else:
-                    ok, msg = ops.apply_local_node_settings(iface_id, request.form)
+                try:
+                    if action == "save_channel":
+                        ok, msg = ops.apply_local_channel_settings(iface_id, request.form)
+                    else:
+                        ok, msg = ops.apply_local_node_settings(iface_id, request.form)
+                except Exception as e:
+                    from modules.log import logger
+
+                    logger.exception("Admin: Node Settings speichern fehlgeschlagen")
+                    ok, msg = False, f"Speichern fehlgeschlagen: {e!s}"
                 flash(msg, "success" if ok else "error")
                 return redirect(url_for("node_settings_index", **redirect_kw))
 
-            err, settings = ops.fetch_local_node_settings(iface_id)
-            if err or not settings:
-                body = f'<p class="alert alert-danger">{html_escape(err or "Unbekannter Fehler")}</p>'
-            else:
-                ch_err, channels = ops.fetch_local_channels(iface_id)
-                body = ops.build_node_settings_page_html(
-                    settings,
-                    channels,
-                    ch_err,
-                    iface_id=iface_id,
-                    ifaces=ifaces,
-                    form_action=url_for("node_settings_index"),
+            try:
+                err, settings = ops.fetch_local_node_settings(iface_id)
+                if err or not settings:
+                    body = f'<p class="alert alert-danger">{html_escape(err or "Unbekannter Fehler")}</p>'
+                else:
+                    ch_err, channels = ops.fetch_local_channels(iface_id)
+                    body = ops.build_node_settings_page_html(
+                        settings,
+                        channels,
+                        ch_err,
+                        iface_id=iface_id,
+                        ifaces=ifaces,
+                        form_action=url_for("node_settings_index"),
+                    )
+            except Exception as e:
+                from modules.log import logger
+
+                logger.exception("Admin: Node Settings laden fehlgeschlagen")
+                body = (
+                    '<p class="alert alert-danger">Seite konnte nicht geladen werden: '
+                    f"{html_escape(str(e))}</p>"
                 )
 
         return _render_admin_template(

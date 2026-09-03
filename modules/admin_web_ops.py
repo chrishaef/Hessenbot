@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1511,8 +1513,70 @@ def fetch_local_channels(iface_id: int) -> Tuple[Optional[str], Optional[List[Di
     return None, out
 
 
+def _parse_channel_psk(psk_raw: str) -> Tuple[Optional[bytes], Optional[str]]:
+    """Parse a PSK field into protobuf bytes, or (None, None) if unchanged.
+
+    meshtastic.util.fromPSK() returns a *str* for passphrases/unknown input.
+    Assigning that to ChannelSettings.psk raises TypeError → Flask 500, nothing saved.
+    """
+    s = (psk_raw or "").strip()
+    if not s:
+        return None, None
+
+    low = s.lower()
+    try:
+        from meshtastic import util as mesh_util
+
+        if low in ("none", "default", "random") or (
+            low.startswith("simple") and low[6:].isdigit()
+        ):
+            val = mesh_util.fromPSK(s)
+            if not isinstance(val, (bytes, bytearray)):
+                return None, "PSK ungültig."
+            return bytes(val), None
+    except Exception as e:
+        return None, f"PSK ungültig: {e!s}"
+
+    if s.startswith("0x") or s.startswith("0X"):
+        try:
+            raw = bytes.fromhex(re.sub(r"\s+", "", s[2:]))
+        except ValueError as e:
+            return None, f"PSK Hex ungültig: {e!s}"
+        return raw, None
+
+    body = s[7:].strip() if low.startswith("base64:") else s
+    hexish = re.sub(r"[\s:-]", "", body)
+    if re.fullmatch(r"[0-9a-fA-F]+", hexish) and len(hexish) in (32, 64):
+        return bytes.fromhex(hexish), None
+
+    try:
+        pad = body + ("=" * ((4 - len(body) % 4) % 4))
+        raw = base64.b64decode(pad, validate=False)
+        if len(raw) in (16, 32):
+            return raw, None
+        if low.startswith("base64:") and raw:
+            return raw, None
+    except Exception:
+        pass
+
+    return None, (
+        "PSK bitte als none, default, random, simpleN, 0x… (32/64 Hex-Zeichen) "
+        "oder base64:… angeben — kein Klartext (sonst Absturz beim Speichern)."
+    )
+
+
 def apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
     """Apply one channel slot from the Node Settings channel form."""
+    try:
+        return _apply_local_channel_settings(iface_id, form)
+    except Exception as e:
+        from modules.log import logger
+
+        logger.exception("Admin: Kanal speichern fehlgeschlagen")
+        return False, f"Kanal konnte nicht gespeichert werden: {e!s}"
+
+
+def _apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
     node, err = _local_node_for_iface(iface_id)
     if err:
         return False, err
@@ -1528,7 +1592,10 @@ def apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
     if not channels or idx >= len(channels):
         return False, "Kanal-Slot nicht auf dem Gerät vorhanden."
 
-    ch = channels[idx]
+    getter = getattr(node, "getChannelByChannelIndex", None)
+    ch = getter(idx) if callable(getter) else channels[idx]
+    if ch is None:
+        return False, "Kanal-Slot nicht auf dem Gerät vorhanden."
     settings = ch.settings
 
     name = (form.get("name") or "").strip()
@@ -1557,14 +1624,17 @@ def apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
     psk_raw = (form.get("psk") or "").strip()
     psk_changed = False
     if psk_raw:
-        try:
-            from meshtastic import util as mesh_util
-
-            new_psk = mesh_util.fromPSK(psk_raw)
-        except Exception as e:
-            return False, f"PSK ungültig: {e!s}"
-        settings.psk = new_psk
-        psk_changed = True
+        new_psk, psk_err = _parse_channel_psk(psk_raw)
+        if psk_err:
+            return False, psk_err
+        if new_psk is not None:
+            if len(new_psk) not in (1, 16, 32) and new_psk not in (b"", b"\x00"):
+                return False, (
+                    f"PSK hat {len(new_psk)} Bytes — erwartet 1 (none/default/simpleN), "
+                    "16 oder 32 Bytes."
+                )
+            settings.psk = new_psk
+            psk_changed = True
 
     settings.name = name
     settings.uplink_enabled = uplink
@@ -1589,7 +1659,9 @@ def apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
         try:
             from meshtastic import util as mesh_util
 
-            bits.append(f"PSK={mesh_util.pskToString(bytes(settings.psk) if settings.psk else b'')}")
+            bits.append(
+                f"PSK={mesh_util.pskToString(bytes(settings.psk) if settings.psk else b'')}"
+            )
         except Exception:
             bits.append("PSK=geändert")
     bits.append(f"Up={'an' if uplink else 'aus'}")
@@ -1667,7 +1739,8 @@ def build_channels_settings_html(
         <input class="form-control form-control-sm font-monospace" id="ch-psk-{idx}" name="psk"
                autocomplete="off" placeholder="leer = unverändert"
                title="none · default · random · base64:… · 0x…">
-        <div class="form-text"><code class="user-select-all">{psk_value or "—"}</code></div>
+        <div class="form-text">aktuell: <code class="user-select-all">{psk_value or "—"}</code>
+          · setzen: <code>none</code>/<code>default</code>/<code>simpleN</code>/<code>base64:…</code></div>
       </div>
       <div class="col-md-2">
         <div class="form-check mt-4">
