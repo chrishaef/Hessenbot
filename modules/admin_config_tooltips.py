@@ -273,6 +273,7 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("webAdmin", "impressumEmail"): "Kontakt-E-Mail für das Impressum.",
     ("webAdmin", "impressumPhone"): "Optionale Telefonnummer für das Impressum.",
     ("webAdmin", "impressumExtra"): "Optionaler Zusatztext auf der Impressumsseite (Haftungshinweise, Amateurfunk-Hinweis, …).",
+    ("webAdmin", "datenschutzExtra"): "Optionaler Zusatztext auf der Datenschutzseite (z. B. Hosting-Anbieter, Auftragsverarbeiter).",
 }
 
 # interface3…9 — gleiche Bedeutung wie interface2

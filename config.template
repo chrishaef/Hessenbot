@@ -535,3 +535,5 @@ impressumEmail =
 impressumPhone =
 # Optionaler Zusatztext (z. B. Hinweis Amateurfunk / Haftung)
 impressumExtra =
+# Optionaler Zusatztext für /datenschutz
+datenschutzExtra =

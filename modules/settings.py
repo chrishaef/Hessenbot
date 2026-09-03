@@ -160,6 +160,7 @@ if 'webAdmin' not in config:
         'impressumEmail': '',
         'impressumPhone': '',
         'impressumExtra': '',
+        'datenschutzExtra': '',
     }
     config.write(open(config_file, 'w'))
 elif 'publicUrl' not in config['webAdmin']:
@@ -173,6 +174,7 @@ _IMPRESSUM_KEYS = (
     'impressumEmail',
     'impressumPhone',
     'impressumExtra',
+    'datenschutzExtra',
 )
 if 'webAdmin' in config:
     _imp_added = False
@@ -592,6 +594,7 @@ try:
     web_admin_impressum_email = config['webAdmin'].get('impressumEmail', '').strip()
     web_admin_impressum_phone = config['webAdmin'].get('impressumPhone', '').strip()
     web_admin_impressum_extra = config['webAdmin'].get('impressumExtra', '').strip()
+    web_admin_datenschutz_extra = config['webAdmin'].get('datenschutzExtra', '').strip()
 
     # messaging settings
     responseDelay = config['messagingSettings'].getfloat('responseDelay', 0.7) # default 0.7

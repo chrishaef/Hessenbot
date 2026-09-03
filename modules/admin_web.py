@@ -249,7 +249,7 @@ def create_app(
 
     @app.route("/impressum")
     def impressum_page():
-        from modules.web_impressum import render_impressum_page_body
+        from modules.web_legal import render_impressum_page_body
         import modules.settings as st
 
         body = render_impressum_page_body(st)
@@ -257,6 +257,28 @@ def create_app(
             portal_shell_start(
                 title="Impressum – Hessenbot",
                 active_nav="impressum",
+                particles=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4">'
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
+        )
+
+    @app.route("/datenschutz")
+    def datenschutz_page():
+        from modules.web_legal import render_datenschutz_page_body
+        import modules.settings as st
+
+        body = render_datenschutz_page_body(st)
+        return (
+            portal_shell_start(
+                title="Datenschutz – Hessenbot",
+                active_nav="datenschutz",
                 particles=True,
                 admin_href=url_for(
                     "choose" if current_user.is_authenticated else "admin_login"
@@ -2062,6 +2084,7 @@ def create_app(
                 "impressumEmail": "",
                 "impressumPhone": "",
                 "impressumExtra": "",
+                "datenschutzExtra": "",
             }
             wrote = False
             for key, default in _ensure_keys.items():

@@ -158,6 +158,8 @@ def portal_footer() -> str:
   <span class="sep">·</span>
   <a href="/impressum">Impressum</a>
   <span class="sep">·</span>
+  <a href="/datenschutz">Datenschutz</a>
+  <span class="sep">·</span>
   <a href="{html_escape(github)}" target="_blank" rel="noopener noreferrer"
      title="Quellcode und Dokumentation auf GitHub">
     <i class="bi bi-github me-1"></i>GitHub

@@ -88,6 +88,7 @@ FIELD_LABELS = {
     ("webAdmin", "impressumEmail"): "Impressum: E-Mail",
     ("webAdmin", "impressumPhone"): "Impressum: Telefon (optional)",
     ("webAdmin", "impressumExtra"): "Impressum: Zusatztext (optional)",
+    ("webAdmin", "datenschutzExtra"): "Datenschutz: Zusatztext (optional)",
 }
 
 PASSWORD_KEYS = frozenset(
