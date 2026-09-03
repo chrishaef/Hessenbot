@@ -136,8 +136,8 @@ cp config.template config.ini
 
 **Admin-Bereich** (Tabs): Übersicht, DM, News, Messages, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, BBS, Umfragen, Einstellungen, Banliste, Logs.
 
-- **MOTD** und **News**: Text bearbeiten plus automatischer Versand (Rhythmus, Kanal, Interface) — unabhängig vom allgemeinen Scheduler
-- **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …)
+- **MOTD** und **News**: Text bearbeiten plus automatischer Versand — Zeitplan mit klarer UI („Alle N Tage/Stunden“, Uhrzeit nur wenn nötig, Live-Zusammenfassung)
+- **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …) mit derselben Intervall-UI
 - **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot) sowie **Mesh-Kanäle** (Name, Rolle, PSK, Up-/Downlink je Slot 0–7)
 - Einheitliche **Top-Navigation** (Statistik, Befehle, BBS, NodeDB, FAQ) in öffentlichem und Admin-Bereich
 - Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template))

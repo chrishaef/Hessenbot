@@ -1400,49 +1400,13 @@ def create_app(
         prev = "True" if st.scheduler_enabled else "False"
         chk_en = " checked" if st.scheduler_enabled else ""
         chk_sm = " checked" if st.schedulerMotd else ""
-
-        presets = [
-            ("day", "Täglich / alle N Tage (day)"),
-            ("hour", "Alle N Stunden (hour)"),
-            ("min", "Alle N Minuten (min)"),
-            ("mon", "Montags zur Uhrzeit (mon)"),
-            ("tue", "Dienstags zur Uhrzeit (tue)"),
-            ("wed", "Mittwochs zur Uhrzeit (wed)"),
-            ("thu", "Donnerstags zur Uhrzeit (thu)"),
-            ("fri", "Freitags zur Uhrzeit (fri)"),
-            ("sat", "Samstags zur Uhrzeit (sat)"),
-            ("sun", "Sonntags zur Uhrzeit (sun)"),
-            ("link", "bbslink — Intervall = Stunden (link)"),
-            ("weather", "Wetter — täglich zur Uhrzeit (weather)"),
-            ("news", "News — Intervall = Stunden (news)"),
-            ("readrss", "RSS — Intervall = Stunden (readrss)"),
-            ("mwx", "Marinewetter — täglich zur Uhrzeit (mwx)"),
-            ("sysinfo", "Sysinfo — Intervall = Stunden (sysinfo)"),
-            ("tide", "Gezeiten — täglich zur Uhrzeit (tide)"),
-            ("solar", "Sonne — täglich zur Uhrzeit (solar)"),
-            ("custom", "Eigene Logik (custom, modules/custom_scheduler.py)"),
-        ]
-        cur_raw = (st.schedulerValue or "").strip()
-        cur = cur_raw.lower()
-        opt_parts = [
-            '<select name="value" class="form-control mb-2" required>',
-            '<option value="">— Zeitplantyp wählen —</option>',
-        ]
-        matched = False
-        for v, lab in presets:
-            sel = " selected" if cur == v else ""
-            if sel:
-                matched = True
-            opt_parts.append(
-                f'<option value="{html_escape(v, quote=True)}"{sel}>{html_escape(lab)}</option>'
+        schedule_fields = Markup(
+            ops.scheduler_schedule_fields_html(
+                value=st.schedulerValue or "",
+                interval=st.schedulerInterval or "1",
+                sched_time=st.schedulerTime or "",
             )
-        if cur_raw and not matched:
-            opt_parts.append(
-                f'<option value="{html_escape(cur_raw.strip(), quote=True)}" selected>'
-                f"Freitext: {html_escape(cur_raw.strip())}</option>"
-            )
-        opt_parts.append("</select>")
-        schedule_select_html = Markup("".join(opt_parts))
+        )
 
         return _render_admin_template("""
   <form method="post">
@@ -1451,50 +1415,24 @@ def create_app(
       <input class="form-check-input" type="checkbox" name="enabled" id="sen"{{ chk_en|safe }}>
       <label class="form-check-label" for="sen">Scheduler aktiv</label>
     </div>
-    <div class="row mb-2">
-      <div class="col"><label>Interface (Radio)</label>
+    <div class="row mb-3">
+      <div class="col-md-6"><label class="form-label">Interface (Radio)</label>
         <input type="number" name="interface" class="form-control" min="1" max="9" value="{{ iface }}"></div>
-      <div class="col"><label>Kanal</label>
+      <div class="col-md-6"><label class="form-label">Kanal</label>
         <input type="number" name="channel" class="form-control" value="{{ chan }}"></div>
     </div>
     <div class="form-check mb-2">
       <input class="form-check-input" type="checkbox" name="schedulerMotd" id="sm"{{ chk_sm|safe }}>
       <label class="form-check-label" for="sm">MOTD als geplante Nachricht verwenden (statt Textfeld)</label>
     </div>
-    <label>Nachricht (nur wenn MOTD-Haken aus)</label>
+    <label class="form-label">Nachricht (nur wenn MOTD-Haken aus)</label>
     <textarea name="message" rows="3" class="form-control mb-3">{{ msg }}</textarea>
 
-    <label class="form-label fw-semibold">Zeitplantyp <span class="text-muted fw-normal">(config: value)</span></label>
-    {{ schedule_select|safe }}
+    {{ schedule_fields }}
 
-    <label class="form-label fw-semibold">Intervall <span class="text-muted fw-normal">(Zahl, config: interval)</span></label>
-    <input type="number" name="interval" class="form-control mb-2" min="1" step="1"
-           placeholder="z.B. 5" value="{{ ivl }}">
-    <p class="small text-muted mb-2">
-      <strong>day:</strong> ohne Uhrzeit = alle N Tage; mit Uhrzeit = alle N Tage zur gleichen Uhrzeit.
-      <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
-      <strong>mon … sun:</strong> Uhrzeit unten setzen (HH:MM).
-      <strong>link, news, readrss, sysinfo:</strong> Stunden.
-      <strong>weather, mwx, tide, solar:</strong> Uhrzeit Pflicht, Intervall oft egal (siehe Code).
+    <p class="small text-muted mb-3">
+      Unabhängig von MOTD-/News-Versand. Die graue Zusammenfassung zeigt, wie der Zeitplan gelesen wird.
     </p>
-
-    <label class="form-label fw-semibold">Uhrzeit <span class="text-muted fw-normal">(HH:MM, config: time)</span></label>
-    <input type="text" name="time" class="form-control mb-3" placeholder="z.B. 08:30" value="{{ tim }}"
-           pattern="[0-2][0-9]:[0-5][0-9]" title="Format 00:00 bis 23:59">
-
-    <details class="mb-3 p-3 rounded" style="background:#2a2a2a;border:1px solid #444;">
-      <summary class="fw-semibold">Kurzübersicht (technisch: modules/scheduler.py)</summary>
-      <table class="table table-sm table-dark mt-2 mb-0 small">
-        <thead><tr><th>value</th><th>Intervall</th><th>Uhrzeit</th></tr></thead>
-        <tbody>
-          <tr><td>day</td><td>Tage (1=täglich)</td><td>optional, sonst nur Tagesabstand</td></tr>
-          <tr><td>hour / min</td><td>Stunden bzw. Minuten</td><td>—</td></tr>
-          <tr><td>mon … sun</td><td>—</td><td>erforderlich</td></tr>
-          <tr><td>link, news, readrss, sysinfo</td><td>Stunden</td><td>—</td></tr>
-          <tr><td>weather, mwx, tide, solar</td><td>(siehe Log)</td><td>erforderlich</td></tr>
-        </tbody>
-      </table>
-    </details>
 
     <input type="submit" value="Speichern" class="btn btn-success w-100">
   </form>
@@ -1508,9 +1446,7 @@ def create_app(
             iface=st.schedulerInterface,
             chan=st.schedulerChannel,
             msg=st.schedulerMessage,
-            ivl=st.schedulerInterval,
-            tim=st.schedulerTime,
-            schedule_select=schedule_select_html,
+            schedule_fields=schedule_fields,
         )
 
     @app.route("/banlist", methods=["GET", "POST"])

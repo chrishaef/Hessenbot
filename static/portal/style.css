@@ -1768,3 +1768,15 @@ pre.admin-pre {
   width: 1%;
   vertical-align: top;
 }
+
+.schedule-ui {
+  background: var(--card-bg-muted, rgba(0, 0, 0, 0.08));
+  border-color: var(--card-border, #444) !important;
+}
+
+[data-bs-theme="dark"] .schedule-ui-summary.alert-secondary {
+  background: #2b3035;
+  border-color: #3d4449;
+  color: #dee2e6;
+}
+

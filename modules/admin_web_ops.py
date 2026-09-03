@@ -321,7 +321,7 @@ def save_motd_to_config(motd: str) -> None:
 
 
 BROADCAST_MODES = [
-    ("day", "Täglich zur Uhrzeit"),
+    ("day", "Alle N Tage zur Uhrzeit (1 = täglich)"),
     ("hour", "Alle N Stunden"),
     ("min", "Alle N Minuten"),
     ("mon", "Montags zur Uhrzeit"),
@@ -335,6 +335,7 @@ BROADCAST_MODES = [
 
 _WEEKDAY_MODES = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
 _TIME_REQUIRED_MODES = frozenset({"day"}) | _WEEKDAY_MODES
+_INTERVAL_MODES = frozenset({"day", "hour", "min"})
 
 
 def parse_broadcast_schedule_form(form) -> Tuple[bool, int, int, str, str, str]:
@@ -351,7 +352,7 @@ def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Op
     mode = (mode or "").strip().lower()
     if mode in _TIME_REQUIRED_MODES and not sched_time:
         return "Bitte eine Uhrzeit (HH:MM) angeben."
-    if mode in ("hour", "min"):
+    if mode in _INTERVAL_MODES:
         try:
             if int(interval or "0") < 1:
                 return "Intervall muss mindestens 1 sein."
@@ -370,6 +371,50 @@ def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Op
     return None
 
 
+def _schedule_ui_block(
+    *,
+    mode_name: str,
+    mode_select_html: str,
+    interval_name: str,
+    interval_value: str,
+    time_name: str,
+    time_value: str,
+    heading: str = "Wann und wie oft?",
+) -> str:
+    """Shared adaptive interval/time controls (MOTD/News/Scheduler)."""
+    ivl = html.escape(str(interval_value or "1"))
+    tim = html.escape(str(time_value or ""))
+    return f"""
+<div class="schedule-ui border rounded p-3 mb-3" data-schedule-ui>
+  <h3 class="h6 mb-3">{html.escape(heading)}</h3>
+  <label class="form-label">Art des Zeitplans</label>
+  {mode_select_html}
+  <div class="row g-3 align-items-end mt-1" data-schedule-interval-row>
+    <div class="col-sm-6 col-md-4">
+      <label class="form-label" for="sched-interval-{html.escape(interval_name)}">Alle</label>
+      <div class="input-group">
+        <input type="number" class="form-control" name="{html.escape(interval_name)}"
+               id="sched-interval-{html.escape(interval_name)}"
+               data-schedule-interval min="1" step="1" value="{ivl}">
+        <span class="input-group-text" data-schedule-unit>Tage</span>
+      </div>
+    </div>
+  </div>
+  <div class="mt-3" data-schedule-time-row>
+    <label class="form-label" for="sched-time-{html.escape(time_name)}">Uhrzeit</label>
+    <input type="time" class="form-control" style="max-width: 12rem"
+           name="{html.escape(time_name)}" id="sched-time-{html.escape(time_name)}"
+           data-schedule-time value="{tim}"
+           title="Format HH:MM">
+    <div class="form-text">Nur bei tages- oder uhrzeitbasierten Plänen nötig.</div>
+  </div>
+  <p class="schedule-ui-summary alert alert-secondary small py-2 px-3 mb-0 mt-3"
+     data-schedule-summary role="status">…</p>
+</div>
+<script src="/static/portal/schedule-ui.js?v=1"></script>
+"""
+
+
 def broadcast_schedule_form_html(
     *,
     enabled: bool,
@@ -382,44 +427,138 @@ def broadcast_schedule_form_html(
 ) -> str:
     chk = " checked" if enabled else ""
     cur = (mode or "day").strip().lower()
-    opts = ['<select name="bc_mode" class="form-select mb-2" required>']
-    for val, label in BROADCAST_MODES:
+    opts = [
+        '<select name="bc_mode" class="form-select" required data-schedule-mode>'
+    ]
+    opts.append('<optgroup label="Intervall / Uhrzeit">')
+    for val, label in BROADCAST_MODES[:3]:
         sel = " selected" if cur == val else ""
         opts.append(
             f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(label)}</option>'
         )
-    opts.append("</select>")
-    ivl = html.escape(str(interval or "1"))
-    tim = html.escape(str(sched_time or ""))
+    opts.append("</optgroup>")
+    opts.append('<optgroup label="Wochentag">')
+    for val, label in BROADCAST_MODES[3:]:
+        sel = " selected" if cur == val else ""
+        opts.append(
+            f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(label)}</option>'
+        )
+    opts.append("</optgroup></select>")
+
+    # Normalize HH:MM for type=time (needs HH:MM)
+    tim = (sched_time or "").strip()
+    if tim and len(tim) >= 4 and ":" in tim:
+        parts = tim.split(":")
+        try:
+            tim = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+        except ValueError:
+            pass
+
+    schedule_block = _schedule_ui_block(
+        mode_name="bc_mode",
+        mode_select_html="".join(opts),
+        interval_name="bc_interval",
+        interval_value=str(interval or "1"),
+        time_name="bc_time",
+        time_value=tim,
+    )
     sec = html.escape(config_section)
     return f"""
 <hr class="my-4">
 <h2 class="h5 mb-3">Automatischer Versand</h2>
-<p class="text-muted small">Einstellungen in <code>config.ini</code> → <code>[{sec}]</code>.
+<p class="text-muted small mb-3">Einstellungen in <code>config.ini</code> → <code>[{sec}]</code>.
 Unabhängig vom allgemeinen Scheduler.</p>
 <div class="form-check mb-3">
   <input class="form-check-input" type="checkbox" name="bc_enabled" id="bc_en"{chk}>
   <label class="form-check-label" for="bc_en">Automatisch senden</label>
 </div>
-<div class="row mb-2">
+<div class="row mb-3">
   <div class="col-md-6"><label class="form-label">Interface (Radio)</label>
     <input type="number" name="bc_interface" class="form-control" min="1" max="9" value="{iface}"></div>
   <div class="col-md-6"><label class="form-label">Kanal</label>
     <input type="number" name="bc_channel" class="form-control" value="{channel}"></div>
 </div>
-<label class="form-label">Rhythmus</label>
-{"".join(opts)}
-<label class="form-label">Intervall</label>
-<input type="number" name="bc_interval" class="form-control mb-2" min="1" step="1" value="{ivl}">
-<p class="small text-muted mb-2">
-  <strong>day:</strong> Intervall = alle N Tage (1 = täglich), Uhrzeit erforderlich.
-  <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
-  <strong>Mo–So:</strong> Uhrzeit erforderlich.
-</p>
-<label class="form-label">Uhrzeit (HH:MM)</label>
-<input type="text" name="bc_time" class="form-control mb-3" placeholder="z. B. 09:00" value="{tim}"
-       pattern="[0-2][0-9]:[0-5][0-9]" title="Format 00:00 bis 23:59">
+{schedule_block}
 """
+
+
+def scheduler_value_select_html(current_raw: str) -> str:
+    """Grouped <select name=value> for the general scheduler."""
+    cur_raw = (current_raw or "").strip()
+    cur = cur_raw.lower()
+
+    groups = [
+        (
+            "Nachricht senden",
+            [
+                ("day", "Alle N Tage zur Uhrzeit (1 = täglich)"),
+                ("hour", "Alle N Stunden"),
+                ("min", "Alle N Minuten"),
+                ("mon", "Montags zur Uhrzeit"),
+                ("tue", "Dienstags zur Uhrzeit"),
+                ("wed", "Mittwochs zur Uhrzeit"),
+                ("thu", "Donnerstags zur Uhrzeit"),
+                ("fri", "Freitags zur Uhrzeit"),
+                ("sat", "Samstags zur Uhrzeit"),
+                ("sun", "Sonntags zur Uhrzeit"),
+            ],
+        ),
+        (
+            "Special Jobs",
+            [
+                ("weather", "Wetter — täglich zur Uhrzeit"),
+                ("news", "News — alle N Stunden"),
+                ("readrss", "RSS — alle N Stunden"),
+                ("sysinfo", "Sysinfo — alle N Stunden"),
+                ("solar", "Sonne — täglich zur Uhrzeit"),
+                ("link", "bbslink — alle N Stunden"),
+                ("custom", "Eigene Logik (custom_scheduler.py)"),
+            ],
+        ),
+    ]
+
+    parts = [
+        '<select name="value" class="form-select" required data-schedule-mode>',
+        '<option value="">— Zeitplantyp wählen —</option>',
+    ]
+    matched = False
+    for group_label, items in groups:
+        parts.append(f'<optgroup label="{html.escape(group_label)}">')
+        for val, lab in items:
+            sel = " selected" if cur == val else ""
+            if sel:
+                matched = True
+            parts.append(
+                f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(lab)}</option>'
+            )
+        parts.append("</optgroup>")
+    if cur_raw and not matched:
+        parts.append(
+            f'<option value="{html.escape(cur_raw, quote=True)}" selected>'
+            f"Freitext: {html.escape(cur_raw)}</option>"
+        )
+    parts.append("</select>")
+    return "".join(parts)
+
+
+def scheduler_schedule_fields_html(*, value: str, interval: str, sched_time: str) -> str:
+    """Adaptive interval/time block for the Scheduler tab."""
+    tim = (sched_time or "").strip()
+    if tim and len(tim) >= 4 and ":" in tim:
+        parts = tim.split(":")
+        try:
+            tim = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+        except ValueError:
+            pass
+    return _schedule_ui_block(
+        mode_name="value",
+        mode_select_html=scheduler_value_select_html(value),
+        interval_name="interval",
+        interval_value=str(interval or "1"),
+        time_name="time",
+        time_value=tim,
+        heading="Wann und wie oft?",
+    )
 
 
 def save_motd_broadcast_to_config(
