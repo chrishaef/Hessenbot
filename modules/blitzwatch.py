@@ -1,4 +1,4 @@
-# Blitz proximity watch: alert nodes with fresh GPS when lightning is nearby.
+# Blitz proximity watch: Home (GPS or fixed) + up to 3 extra locations.
 from __future__ import annotations
 
 import re
@@ -14,11 +14,16 @@ trap_list_blitzwatch = ("blitzwatch",)
 DEFAULT_RADIUS_KM = 8
 MIN_RADIUS_KM = 1
 MAX_RADIUS_KM = 10
+MAX_EXTRA_LOCATIONS = 3
 COOLDOWN_SEC = 3600
 POLL_SEC = 300
 META_CHANNEL_TS = "last_channel_alert_ts"
+HOME_MODE_GPS = "gps"
+HOME_MODE_FIXED = "fixed"
 
 _last_poll_ts = 0.0
+
+_RADIUS_TOKEN_RE = re.compile(r"^(\d+)\s*km?$", re.IGNORECASE)
 
 
 def _db_path() -> str:
@@ -26,6 +31,27 @@ def _db_path() -> str:
 
     rel = getattr(st, "blitzwatch_db", "data/blitzwatch.db") or "data/blitzwatch.db"
     return path_in_repo(rel)
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    c = conn.cursor()
+    c.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in c.fetchall()}
+
+
+def _ensure_home_columns(conn: sqlite3.Connection) -> None:
+    cols = _table_columns(conn, "blitzwatch")
+    c = conn.cursor()
+    if "home_mode" not in cols:
+        c.execute(
+            "ALTER TABLE blitzwatch ADD COLUMN home_mode TEXT NOT NULL DEFAULT 'gps'"
+        )
+    if "home_lat" not in cols:
+        c.execute("ALTER TABLE blitzwatch ADD COLUMN home_lat REAL")
+    if "home_lon" not in cols:
+        c.execute("ALTER TABLE blitzwatch ADD COLUMN home_lon REAL")
+    if "home_label" not in cols:
+        c.execute("ALTER TABLE blitzwatch ADD COLUMN home_label TEXT")
 
 
 def initialize_blitzwatch_database() -> bool:
@@ -39,7 +65,25 @@ def initialize_blitzwatch_database() -> bool:
                 node_id INTEGER PRIMARY KEY,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 radius_km INTEGER NOT NULL DEFAULT 8,
-                last_alert_ts REAL NOT NULL DEFAULT 0
+                last_alert_ts REAL NOT NULL DEFAULT 0,
+                home_mode TEXT NOT NULL DEFAULT 'gps',
+                home_lat REAL,
+                home_lon REAL,
+                home_label TEXT
+            )"""
+        )
+        _ensure_home_columns(conn)
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS blitzwatch_locations (
+                id INTEGER PRIMARY KEY,
+                node_id INTEGER NOT NULL,
+                slot INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lon REAL NOT NULL,
+                radius_km INTEGER NOT NULL,
+                last_alert_ts REAL NOT NULL DEFAULT 0,
+                UNIQUE(node_id, slot)
             )"""
         )
         c.execute(
@@ -74,90 +118,296 @@ def clamp_radius_km(value: int) -> int:
     return max(MIN_RADIUS_KM, min(max_r, int(value)))
 
 
-def get_node_prefs(node_id: int) -> dict[str, Any]:
-    """Return prefs; missing row → default enabled with default radius."""
+def _default_radius() -> int:
     import modules.settings as st
 
-    default_r = clamp_radius_km(
+    return clamp_radius_km(
         int(getattr(st, "blitz_watch_default_radius_km", DEFAULT_RADIUS_KM))
     )
+
+
+def _prefs_from_row(row: tuple | None, *, in_db: bool) -> dict[str, Any]:
+    default_r = _default_radius()
+    if not row:
+        return {
+            "enabled": True,
+            "radius_km": default_r,
+            "last_alert_ts": 0.0,
+            "home_mode": HOME_MODE_GPS,
+            "home_lat": None,
+            "home_lon": None,
+            "home_label": None,
+            "in_db": False,
+        }
+    (
+        enabled,
+        radius_km,
+        last_alert_ts,
+        home_mode,
+        home_lat,
+        home_lon,
+        home_label,
+    ) = row
+    mode = (home_mode or HOME_MODE_GPS).lower()
+    if mode not in (HOME_MODE_GPS, HOME_MODE_FIXED):
+        mode = HOME_MODE_GPS
+    return {
+        "enabled": bool(enabled),
+        "radius_km": clamp_radius_km(radius_km if radius_km is not None else default_r),
+        "last_alert_ts": float(last_alert_ts or 0),
+        "home_mode": mode,
+        "home_lat": float(home_lat) if home_lat is not None else None,
+        "home_lon": float(home_lon) if home_lon is not None else None,
+        "home_label": (home_label or None),
+        "in_db": in_db,
+    }
+
+
+def get_node_prefs(node_id: int) -> dict[str, Any]:
+    """Return prefs; missing row → default enabled with default radius."""
     try:
         conn = _connect()
         c = conn.cursor()
         c.execute(
-            "SELECT enabled, radius_km, last_alert_ts FROM blitzwatch WHERE node_id=?",
+            """SELECT enabled, radius_km, last_alert_ts,
+                      home_mode, home_lat, home_lon, home_label
+               FROM blitzwatch WHERE node_id=?""",
             (int(node_id),),
         )
         row = c.fetchone()
         conn.close()
         if row:
-            return {
-                "enabled": bool(row[0]),
-                "radius_km": clamp_radius_km(row[1]),
-                "last_alert_ts": float(row[2] or 0),
-                "in_db": True,
-            }
+            return _prefs_from_row(row, in_db=True)
     except Exception as e:
         logger.debug(f"Blitzwatch: get_node_prefs: {e}")
         initialize_blitzwatch_database()
-    return {
-        "enabled": True,
-        "radius_km": default_r,
-        "last_alert_ts": 0.0,
-        "in_db": False,
-    }
+    return _prefs_from_row(None, in_db=False)
 
 
-def set_node_enabled(node_id: int, enabled: bool) -> dict[str, Any]:
+def _upsert_node_row(
+    node_id: int,
+    *,
+    enabled: int | None = None,
+    radius_km: int | None = None,
+    last_alert_ts: float | None = None,
+    home_mode: str | None = None,
+    home_lat: float | None = ...,
+    home_lon: float | None = ...,
+    home_label: str | None = ...,
+) -> dict[str, Any]:
+    """Upsert blitzwatch row; Ellipsis means leave existing / default home fields alone."""
     prefs = get_node_prefs(node_id)
-    radius = prefs["radius_km"]
-    last = prefs["last_alert_ts"]
+    en = prefs["enabled"] if enabled is None else bool(enabled)
+    rad = prefs["radius_km"] if radius_km is None else clamp_radius_km(radius_km)
+    last = prefs["last_alert_ts"] if last_alert_ts is None else float(last_alert_ts)
+    mode = prefs["home_mode"] if home_mode is None else home_mode
+    lat = prefs["home_lat"] if home_lat is ... else home_lat
+    lon = prefs["home_lon"] if home_lon is ... else home_lon
+    label = prefs["home_label"] if home_label is ... else home_label
+
     conn = _connect()
     c = conn.cursor()
     c.execute(
-        """INSERT INTO blitzwatch (node_id, enabled, radius_km, last_alert_ts)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(node_id) DO UPDATE SET enabled=excluded.enabled""",
-        (int(node_id), 1 if enabled else 0, radius, last),
+        """INSERT INTO blitzwatch (
+               node_id, enabled, radius_km, last_alert_ts,
+               home_mode, home_lat, home_lon, home_label
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(node_id) DO UPDATE SET
+             enabled=excluded.enabled,
+             radius_km=excluded.radius_km,
+             last_alert_ts=excluded.last_alert_ts,
+             home_mode=excluded.home_mode,
+             home_lat=excluded.home_lat,
+             home_lon=excluded.home_lon,
+             home_label=excluded.home_label""",
+        (
+            int(node_id),
+            1 if en else 0,
+            rad,
+            last,
+            mode,
+            lat,
+            lon,
+            label,
+        ),
     )
     conn.commit()
     conn.close()
     return get_node_prefs(node_id)
 
 
+def set_node_enabled(node_id: int, enabled: bool) -> dict[str, Any]:
+    return _upsert_node_row(node_id, enabled=1 if enabled else 0)
+
+
 def set_node_radius(node_id: int, radius_km: int) -> dict[str, Any]:
-    prefs = get_node_prefs(node_id)
+    """Set home radius and enable watch."""
+    return _upsert_node_row(node_id, enabled=1, radius_km=radius_km)
+
+
+def set_home_fixed(
+    node_id: int, lat: float, lon: float, label: str, *, radius_km: int | None = None
+) -> dict[str, Any]:
+    return _upsert_node_row(
+        node_id,
+        enabled=1,
+        radius_km=radius_km,
+        home_mode=HOME_MODE_FIXED,
+        home_lat=float(lat),
+        home_lon=float(lon),
+        home_label=(label or f"{lat:.2f}, {lon:.2f}")[:80],
+    )
+
+
+def set_home_gps(node_id: int) -> dict[str, Any]:
+    return _upsert_node_row(
+        node_id,
+        home_mode=HOME_MODE_GPS,
+        home_lat=None,
+        home_lon=None,
+        home_label=None,
+    )
+
+
+def mark_home_alerted(node_id: int, when: float | None = None) -> None:
+    ts = float(when if when is not None else time.time())
+    _upsert_node_row(node_id, last_alert_ts=ts)
+
+
+# Backwards-compatible alias used by older tests / callers
+mark_node_alerted = mark_home_alerted
+
+
+def list_locations(node_id: int) -> list[dict[str, Any]]:
+    try:
+        conn = _connect()
+        c = conn.cursor()
+        c.execute(
+            """SELECT slot, label, lat, lon, radius_km, last_alert_ts
+               FROM blitzwatch_locations
+               WHERE node_id=?
+               ORDER BY slot""",
+            (int(node_id),),
+        )
+        rows = c.fetchall()
+        conn.close()
+        return [
+            {
+                "slot": int(slot),
+                "label": label,
+                "lat": float(lat),
+                "lon": float(lon),
+                "radius_km": clamp_radius_km(radius_km),
+                "last_alert_ts": float(last_alert_ts or 0),
+            }
+            for slot, label, lat, lon, radius_km, last_alert_ts in rows
+        ]
+    except Exception as e:
+        logger.debug(f"Blitzwatch: list_locations: {e}")
+        initialize_blitzwatch_database()
+        return []
+
+
+def count_locations(node_id: int) -> int:
+    try:
+        conn = _connect()
+        c = conn.cursor()
+        c.execute(
+            "SELECT COUNT(*) FROM blitzwatch_locations WHERE node_id=?",
+            (int(node_id),),
+        )
+        n = int(c.fetchone()[0])
+        conn.close()
+        return n
+    except Exception:
+        return 0
+
+
+def _next_free_slot(node_id: int) -> int | None:
+    used = {loc["slot"] for loc in list_locations(node_id)}
+    for slot in range(1, MAX_EXTRA_LOCATIONS + 1):
+        if slot not in used:
+            return slot
+    return None
+
+
+def add_location(
+    node_id: int,
+    lat: float,
+    lon: float,
+    label: str,
+    radius_km: int | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Add extra location in next free slot. Returns (loc, error)."""
+    initialize_blitzwatch_database()
+    slot = _next_free_slot(node_id)
+    if slot is None:
+        return None, f"Maximal {MAX_EXTRA_LOCATIONS} Zusatzorte. Erst mit del N löschen."
+    radius = clamp_radius_km(
+        radius_km if radius_km is not None else get_node_prefs(node_id)["radius_km"]
+    )
+    lab = (label or f"{lat:.2f}, {lon:.2f}")[:80]
+    conn = _connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO blitzwatch_locations
+           (node_id, slot, label, lat, lon, radius_km, last_alert_ts)
+           VALUES (?, ?, ?, ?, ?, ?, 0)""",
+        (int(node_id), slot, lab, float(lat), float(lon), radius),
+    )
+    conn.commit()
+    conn.close()
+    # Ensure node row exists and watch is on
+    set_node_enabled(node_id, True)
+    locs = [x for x in list_locations(node_id) if x["slot"] == slot]
+    return (locs[0] if locs else None), None
+
+
+def delete_location(node_id: int, slot: int) -> bool:
+    if slot < 1 or slot > MAX_EXTRA_LOCATIONS:
+        return False
+    conn = _connect()
+    c = conn.cursor()
+    c.execute(
+        "DELETE FROM blitzwatch_locations WHERE node_id=? AND slot=?",
+        (int(node_id), int(slot)),
+    )
+    deleted = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def set_location_radius(node_id: int, slot: int, radius_km: int) -> dict[str, Any] | None:
+    if slot < 1 or slot > MAX_EXTRA_LOCATIONS:
+        return None
     radius = clamp_radius_km(radius_km)
     conn = _connect()
     c = conn.cursor()
     c.execute(
-        """INSERT INTO blitzwatch (node_id, enabled, radius_km, last_alert_ts)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(node_id) DO UPDATE SET
-             radius_km=excluded.radius_km,
-             enabled=1""",
-        (int(node_id), 1, radius, prefs["last_alert_ts"]),
+        """UPDATE blitzwatch_locations SET radius_km=?
+           WHERE node_id=? AND slot=?""",
+        (radius, int(node_id), int(slot)),
     )
+    ok = c.rowcount > 0
     conn.commit()
     conn.close()
-    return get_node_prefs(node_id)
+    if not ok:
+        return None
+    for loc in list_locations(node_id):
+        if loc["slot"] == slot:
+            return loc
+    return None
 
 
-def mark_node_alerted(node_id: int, when: float | None = None) -> None:
+def mark_location_alerted(node_id: int, slot: int, when: float | None = None) -> None:
     ts = float(when if when is not None else time.time())
-    prefs = get_node_prefs(node_id)
     conn = _connect()
     c = conn.cursor()
     c.execute(
-        """INSERT INTO blitzwatch (node_id, enabled, radius_km, last_alert_ts)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(node_id) DO UPDATE SET last_alert_ts=excluded.last_alert_ts""",
-        (
-            int(node_id),
-            1 if prefs["enabled"] else 0,
-            prefs["radius_km"],
-            ts,
-        ),
+        """UPDATE blitzwatch_locations SET last_alert_ts=?
+           WHERE node_id=? AND slot=?""",
+        (ts, int(node_id), int(slot)),
     )
     conn.commit()
     conn.close()
@@ -188,23 +438,79 @@ def set_meta(key: str, value: str) -> None:
 
 
 def get_all_prefs_map() -> dict[int, dict[str, Any]]:
-    """node_id → prefs for UI enrichment."""
+    """node_id → prefs (+ extra_count) for UI enrichment."""
     out: dict[int, dict[str, Any]] = {}
     try:
         conn = _connect()
         c = conn.cursor()
-        c.execute("SELECT node_id, enabled, radius_km, last_alert_ts FROM blitzwatch")
-        for node_id, enabled, radius_km, last_alert_ts in c.fetchall():
-            out[int(node_id)] = {
-                "enabled": bool(enabled),
-                "radius_km": clamp_radius_km(radius_km),
-                "last_alert_ts": float(last_alert_ts or 0),
-                "in_db": True,
-            }
+        c.execute(
+            """SELECT node_id, enabled, radius_km, last_alert_ts,
+                      home_mode, home_lat, home_lon, home_label
+               FROM blitzwatch"""
+        )
+        for row in c.fetchall():
+            node_id = int(row[0])
+            prefs = _prefs_from_row(row[1:], in_db=True)
+            out[node_id] = prefs
+        c.execute(
+            "SELECT node_id, COUNT(*) FROM blitzwatch_locations GROUP BY node_id"
+        )
+        counts = {int(nid): int(n) for nid, n in c.fetchall()}
         conn.close()
+        for nid, prefs in out.items():
+            prefs["extra_count"] = counts.get(nid, 0)
+        for nid, n in counts.items():
+            if nid not in out:
+                prefs = get_node_prefs(nid)
+                prefs["extra_count"] = n
+                out[nid] = prefs
     except Exception as e:
         logger.debug(f"Blitzwatch: get_all_prefs_map: {e}")
     return out
+
+
+def _parse_radius_token(token: str) -> int | None:
+    m = _RADIUS_TOKEN_RE.fullmatch((token or "").strip())
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def _radius_set_message(raw: int, clamped: int) -> str | None:
+    try:
+        import modules.settings as st
+
+        max_r = int(getattr(st, "blitz_watch_max_radius_km", MAX_RADIUS_KM))
+    except Exception:
+        max_r = MAX_RADIUS_KM
+    max_r = max(MIN_RADIUS_KM, min(50, max_r))
+    if raw > max_r:
+        return f"Radius auf Maximum {max_r} km gesetzt (AN)."
+    if raw < MIN_RADIUS_KM:
+        return f"Radius auf Minimum {MIN_RADIUS_KM} km gesetzt (AN)."
+    return None
+
+
+def _resolve_explicit_location(
+    message: str,
+    node_id: int,
+    device_id: int,
+    command_tokens: tuple[str, ...],
+) -> tuple[tuple[float, float, str] | None, str | None]:
+    """Resolve Ort/Coords/Grid; require explicit arg (no GPS fallback)."""
+    from modules.locationdata import resolve_message_location
+
+    lat, lon, source, label = resolve_message_location(
+        message,
+        node_id,
+        device_id,
+        command_tokens=command_tokens,
+    )
+    if source == "error":
+        return None, label
+    if source in ("gps", "bot") or lat is None or lon is None:
+        return None, "Standort fehlt (Ort, Koordinaten oder Maidenhead-Grid)."
+    return (float(lat), float(lon), label or f"{lat:.2f}, {lon:.2f}"), None
 
 
 def format_status(node_id: int, *, has_fresh_gps: bool) -> str:
@@ -212,22 +518,71 @@ def format_status(node_id: int, *, has_fresh_gps: bool) -> str:
 
     global_on = bool(getattr(st, "blitz_watch_enabled", True))
     prefs = get_node_prefs(node_id)
+    locs = list_locations(node_id)
     lines = ["🤖 !blitzwatch — Blitz-Nähe-Warnung"]
     if not global_on:
         lines.append("Global: AUS (Admin/Config)")
     else:
         lines.append("Global: AN")
     lines.append(f"Deine Node: {'AN' if prefs['enabled'] else 'AUS'}")
-    lines.append(f"Radius: {prefs['radius_km']} km (max {MAX_RADIUS_KM} km)")
-    if not has_fresh_gps:
-        lines.append("Standort: kein frisches GPS (≤24h) — keine Warnungen möglich")
+
+    if prefs["home_mode"] == HOME_MODE_FIXED and prefs["home_lat"] is not None:
+        home_s = f"Fix {prefs['home_label'] or f'{prefs['home_lat']:.2f}, {prefs['home_lon']:.2f}'}"
+    elif has_fresh_gps:
+        home_s = "GPS (≤24h)"
     else:
-        lines.append("Standort: GPS bekannt (≤24h)")
+        home_s = "GPS fehlt (≤24h)"
+    lines.append(f"Home: {home_s} · {prefs['radius_km']} km")
+
+    if locs:
+        for loc in locs:
+            lines.append(f"{loc['slot']}: {loc['label']} · {loc['radius_km']} km")
+    else:
+        lines.append(f"Zusatzorte: keine (max {MAX_EXTRA_LOCATIONS})")
+
     if prefs["last_alert_ts"]:
         ago = int((time.time() - prefs["last_alert_ts"]) / 60)
-        lines.append(f"Letzte Warnung: vor {ago} min")
-    lines.append("Befehle: on · off · 3km … 10km · ?")
+        lines.append(f"Letzte Home-Warnung: vor {ago} min")
+
+    lines.append(
+        "Befehle: on · off · 5km · home … · add … · N 5km · del N · list · ?"
+    )
     return "\n".join(lines)
+
+
+def format_location_list(node_id: int, *, has_fresh_gps: bool) -> str:
+    prefs = get_node_prefs(node_id)
+    locs = list_locations(node_id)
+    lines = ["🤖 Blitzwatch Standorte"]
+    if prefs["home_mode"] == HOME_MODE_FIXED and prefs["home_lat"] is not None:
+        lines.append(
+            f"Home (Fix): {prefs['home_label']} · {prefs['radius_km']} km"
+        )
+    else:
+        gps = "GPS ok" if has_fresh_gps else "kein GPS"
+        lines.append(f"Home ({gps}): {prefs['radius_km']} km")
+    if not locs:
+        lines.append("Keine Zusatzorte.")
+    else:
+        for loc in locs:
+            lines.append(f"{loc['slot']}: {loc['label']} · {loc['radius_km']} km")
+    free = MAX_EXTRA_LOCATIONS - len(locs)
+    lines.append(f"Frei: {free}/{MAX_EXTRA_LOCATIONS}")
+    return "\n".join(lines)
+
+
+def _usage() -> str:
+    return (
+        "🤖 !blitzwatch — Nutzung:\n"
+        "on / off — alle Warnungen\n"
+        "3km…10km — Home-Radius\n"
+        "home <Ort|Coords|Grid> — Home Fix\n"
+        "home gps — Home wieder GPS\n"
+        "add [Nkm] <Ort|Coords|Grid> — Zusatzort\n"
+        "N 5km — Radius Slot N\n"
+        "del N — Slot löschen\n"
+        "list — Standorte"
+    )
 
 
 def handle_blitzwatch_command(message: str, message_from_id: int, deviceID: int = 1) -> str:
@@ -243,73 +598,145 @@ def handle_blitzwatch_command(message: str, message_from_id: int, deviceID: int 
     initialize_blitzwatch_database()
     fresh = _nodedb_fresh_position(message_from_id, deviceID, 2)
     has_gps = bool(fresh)
+    nid = int(message_from_id)
 
     text = (message or "").strip()
     if text.startswith("!"):
         text = text[1:].strip()
-    # Drop command token
     parts = text.replace("?", " ? ").split()
     args = [p for p in parts if p.lower().rstrip("?") != "blitzwatch"]
 
-    if not args or args[0] in ("?", "status", "help"):
-        return format_status(message_from_id, has_fresh_gps=has_gps)
+    if not args or args[0].lower() in ("?", "status", "help", "hilfe"):
+        return format_status(nid, has_fresh_gps=has_gps)
 
     token = args[0].lower().strip()
+
     if token in ("on", "an", "ein"):
-        set_node_enabled(message_from_id, True)
-        return format_status(message_from_id, has_fresh_gps=has_gps)
+        set_node_enabled(nid, True)
+        return format_status(nid, has_fresh_gps=has_gps)
 
     if token in ("off", "aus"):
-        set_node_enabled(message_from_id, False)
+        set_node_enabled(nid, False)
         return (
             "Blitzwatch für deine Node: AUS.\n"
             "Mit !blitzwatch on wieder einschalten."
         )
 
-    # Radius: 5, 5km, 5 km
-    m = re.fullmatch(r"(\d+)\s*km?", token)
-    if not m and len(args) >= 2:
-        m = re.fullmatch(r"(\d+)", token) if args[1].lower().startswith("km") else None
-    if m:
-        radius = clamp_radius_km(int(m.group(1)))
-        if int(m.group(1)) > MAX_RADIUS_KM:
-            set_node_radius(message_from_id, radius)
+    if token in ("list", "liste", "ls"):
+        return format_location_list(nid, has_fresh_gps=has_gps)
+
+    # home gps | home 5km | home <location>
+    if token == "home":
+        rest = args[1:]
+        if not rest:
             return (
-                f"Radius auf Maximum {MAX_RADIUS_KM} km gesetzt (AN).\n"
-                + format_status(message_from_id, has_fresh_gps=has_gps)
+                "Home setzen: !blitzwatch home <Ort|Coords|Grid>\n"
+                "oder: !blitzwatch home gps · home 5km"
             )
-        if int(m.group(1)) < MIN_RADIUS_KM:
-            set_node_radius(message_from_id, radius)
-            return (
-                f"Radius auf Minimum {MIN_RADIUS_KM} km gesetzt (AN).\n"
-                + format_status(message_from_id, has_fresh_gps=has_gps)
-            )
-        set_node_radius(message_from_id, radius)
-        return (
-            f"Blitzwatch Radius: {radius} km (AN).\n"
-            + format_status(message_from_id, has_fresh_gps=has_gps)
+        if rest[0].lower() in ("gps", "node", "gerät", "geraet"):
+            set_home_gps(nid)
+            return "Home: wieder GPS.\n" + format_status(nid, has_fresh_gps=has_gps)
+
+        r_tok = _parse_radius_token(rest[0])
+        if r_tok is not None and len(rest) == 1:
+            raw = r_tok
+            clamped = clamp_radius_km(raw)
+            set_node_radius(nid, clamped)
+            note = _radius_set_message(raw, clamped)
+            prefix = (note + "\n") if note else f"Home-Radius: {clamped} km (AN).\n"
+            return prefix + format_status(nid, has_fresh_gps=has_gps)
+
+        resolved, err = _resolve_explicit_location(
+            message, nid, deviceID, ("blitzwatch", "home")
+        )
+        if err:
+            return err
+        assert resolved is not None
+        lat, lon, label = resolved
+        set_home_fixed(nid, lat, lon, label)
+        return f"Home Fix: {label} · {get_node_prefs(nid)['radius_km']} km\n" + format_status(
+            nid, has_fresh_gps=has_gps
         )
 
-    return (
-        "🤖 !blitzwatch — Nutzung:\n"
-        "on / off — Warnung ein/aus\n"
-        "3km … 10km — Radius setzen\n"
-        "!blitzwatch — Status"
-    )
+    # add [Nkm] <location>
+    if token == "add":
+        rest = args[1:]
+        if not rest:
+            return "Zusatzort: !blitzwatch add <Ort|Coords|Grid>\noder: add 5km <…>"
+        radius_override: int | None = None
+        loc_msg = message
+        r_tok = _parse_radius_token(rest[0])
+        if r_tok is not None:
+            if len(rest) < 2:
+                return "Nach dem Radius fehlt der Standort (Ort/Coords/Grid)."
+            radius_override = clamp_radius_km(r_tok)
+            # Rebuild message without the radius token for resolver
+            loc_msg = "!blitzwatch add " + " ".join(rest[1:])
+        resolved, err = _resolve_explicit_location(
+            loc_msg, nid, deviceID, ("blitzwatch", "add")
+        )
+        if err:
+            return err
+        assert resolved is not None
+        lat, lon, label = resolved
+        loc, add_err = add_location(nid, lat, lon, label, radius_override)
+        if add_err:
+            return add_err
+        assert loc is not None
+        return (
+            f"Zusatzort {loc['slot']}: {loc['label']} · {loc['radius_km']} km\n"
+            + format_location_list(nid, has_fresh_gps=has_gps)
+        )
+
+    # del N / rm N
+    if token in ("del", "rm", "delete", "remove", "lösche", "loesche"):
+        if len(args) < 2 or not args[1].isdigit():
+            return "Löschen: !blitzwatch del N  (N = 1…3)"
+        slot = int(args[1])
+        if delete_location(nid, slot):
+            return f"Zusatzort {slot} gelöscht.\n" + format_location_list(
+                nid, has_fresh_gps=has_gps
+            )
+        return f"Kein Zusatzort {slot}."
+
+    # N 5km — slot radius
+    if token.isdigit() and len(args) >= 2:
+        slot = int(token)
+        if 1 <= slot <= MAX_EXTRA_LOCATIONS:
+            r_tok = _parse_radius_token(args[1])
+            if r_tok is None and len(args) >= 3 and args[2].lower().startswith("km"):
+                r_tok = int(args[1]) if args[1].isdigit() else None
+            if r_tok is not None:
+                loc = set_location_radius(nid, slot, r_tok)
+                if not loc:
+                    return f"Kein Zusatzort {slot}. Mit add anlegen."
+                note = _radius_set_message(r_tok, loc["radius_km"])
+                prefix = (
+                    (note + "\n")
+                    if note
+                    else f"Slot {slot}: Radius {loc['radius_km']} km.\n"
+                )
+                return prefix + format_location_list(nid, has_fresh_gps=has_gps)
+
+    # Home radius: 5, 5km, 5 km
+    m = _RADIUS_TOKEN_RE.fullmatch(token)
+    if not m and len(args) >= 2 and token.isdigit() and args[1].lower().startswith("km"):
+        m = re.fullmatch(r"(\d+)", token)
+    if m:
+        raw = int(m.group(1))
+        radius = clamp_radius_km(raw)
+        set_node_radius(nid, radius)
+        note = _radius_set_message(raw, radius)
+        prefix = (note + "\n") if note else f"Home-Radius: {radius} km (AN).\n"
+        return prefix + format_status(nid, has_fresh_gps=has_gps)
+
+    return _usage()
 
 
-def _collect_watch_candidates(deviceID: int) -> list[dict[str, Any]]:
-    """Nodes with fresh NodeDB GPS, not bot self, watch enabled."""
-    import modules.settings as st
+def _bot_node_ids(deviceID: int) -> set[int]:
     import modules.system as sysmod
-    from modules.system import _nodedb_fresh_position, get_name_from_number
-
-    cooldown = int(getattr(st, "blitz_watch_cooldown_sec", COOLDOWN_SEC))
-    now = time.time()
-    candidates: list[dict[str, Any]] = []
 
     my_ids: set[int] = set()
-    seen: set[int] = set()
     try:
         iface_order = [deviceID] + [i for i in range(1, 10) if i != deviceID]
         for i in iface_order:
@@ -319,8 +746,21 @@ def _collect_watch_candidates(deviceID: int) -> list[dict[str, Any]]:
             if mid:
                 my_ids.add(int(mid))
     except Exception as e:
-        logger.debug(f"Blitzwatch: collect candidates: {e}")
-        return []
+        logger.debug(f"Blitzwatch: bot ids: {e}")
+    return my_ids
+
+
+def _collect_watch_candidates(deviceID: int) -> list[dict[str, Any]]:
+    """Watch points: home (GPS or fixed) + extra slots, per enabled node."""
+    import modules.settings as st
+    import modules.system as sysmod
+    from modules.system import _nodedb_fresh_position, get_name_from_number
+
+    cooldown = int(getattr(st, "blitz_watch_cooldown_sec", COOLDOWN_SEC))
+    now = time.time()
+    candidates: list[dict[str, Any]] = []
+    my_ids = _bot_node_ids(deviceID)
+    seen: set[int] = set()
 
     for i in range(1, 10):
         if not sysmod.__dict__.get(f"interface{i}_enabled"):
@@ -337,27 +777,65 @@ def _collect_watch_candidates(deviceID: int) -> list[dict[str, Any]]:
                 continue
             if nid in my_ids or nid in seen:
                 continue
-            fresh = _nodedb_fresh_position(nid, i, 2)
-            if not fresh:
-                continue
+            seen.add(nid)
+
             prefs = get_node_prefs(nid)
             if not prefs["enabled"]:
                 continue
-            if prefs["last_alert_ts"] and (now - prefs["last_alert_ts"]) < cooldown:
-                continue
-            seen.add(nid)
-            lat, lon = float(fresh[0]), float(fresh[1])
-            short = get_name_from_number(nid, "short", i)
-            candidates.append(
-                {
-                    "node_id": nid,
-                    "lat": lat,
-                    "lon": lon,
-                    "radius_km": prefs["radius_km"],
-                    "short": short or str(nid),
-                    "iface": i,
-                }
-            )
+
+            short = get_name_from_number(nid, "short", i) or str(nid)
+            extras = list_locations(nid)
+
+            # Home watch point
+            home_lat = home_lon = None
+            home_label = "dir"
+            kind = "home"
+            if prefs["home_mode"] == HOME_MODE_FIXED and prefs["home_lat"] is not None:
+                home_lat = float(prefs["home_lat"])
+                home_lon = float(prefs["home_lon"])
+                home_label = prefs["home_label"] or "Home"
+            else:
+                fresh = _nodedb_fresh_position(nid, i, 2)
+                if fresh:
+                    home_lat = float(fresh[0])
+                    home_lon = float(fresh[1])
+                    home_label = "dir"
+
+            if home_lat is not None and home_lon is not None:
+                last = float(prefs["last_alert_ts"] or 0)
+                if not last or (now - last) >= cooldown:
+                    candidates.append(
+                        {
+                            "node_id": nid,
+                            "kind": kind,
+                            "slot": 0,
+                            "lat": home_lat,
+                            "lon": home_lon,
+                            "radius_km": prefs["radius_km"],
+                            "label": home_label,
+                            "short": short,
+                            "iface": i,
+                        }
+                    )
+
+            for loc in extras:
+                last = float(loc["last_alert_ts"] or 0)
+                if last and (now - last) < cooldown:
+                    continue
+                candidates.append(
+                    {
+                        "node_id": nid,
+                        "kind": "extra",
+                        "slot": loc["slot"],
+                        "lat": loc["lat"],
+                        "lon": loc["lon"],
+                        "radius_km": loc["radius_km"],
+                        "label": loc["label"],
+                        "short": short,
+                        "iface": i,
+                    }
+                )
+
     return candidates
 
 
@@ -373,8 +851,23 @@ def _channel_for_alerts() -> int:
         return int(getattr(st, "publicChannel", 0))
 
 
+def _dm_where_phrase(hit: dict[str, Any]) -> str:
+    if hit.get("kind") == "home" and hit.get("label") in (None, "", "dir"):
+        return "von dir"
+    label = hit.get("label") or "Standort"
+    return f"bei {label}"
+
+
+def _channel_where_phrase(hit: dict[str, Any]) -> str:
+    short = hit.get("short") or str(hit.get("node_id"))
+    if hit.get("kind") == "home" and hit.get("label") in (None, "", "dir"):
+        return f"von {short}"
+    label = hit.get("label") or "Standort"
+    return f"von {short} bei {label}"
+
+
 def run_blitzwatch_cycle(deviceID: int = 1) -> None:
-    """Poll lightning and notify affected nodes (DM) + one channel message."""
+    """Poll lightning and notify affected watch points (DM) + one channel message."""
     global _last_poll_ts
     import modules.settings as st
     from modules.system import send_message
@@ -424,15 +917,16 @@ def run_blitzwatch_cycle(deviceID: int = 1) -> None:
 
     ch = _channel_for_alerts()
 
-    # DMs to all hit nodes
+    # DMs — one per hit watch-point (same node may get several if multiple slots hit)
     for h in hits:
         strike = h["strike"]
         age = strike.get("age_min")
         age_s = f", vor {age} min" if age is not None else ""
         dir_s = f" {strike['dir']}" if strike.get("dir") else ""
+        where = _dm_where_phrase(h)
         dm = (
             f"⚡ Blitzwarnung: Einschlag ~{strike['km']:.1f} km{dir_s} "
-            f"von dir{age_s}.\n"
+            f"{where}{age_s}.\n"
             f"!blitzwatch off zum Abschalten · !blitz für Details"
         )
         iface = int(h.get("iface") or deviceID)
@@ -440,21 +934,32 @@ def run_blitzwatch_cycle(deviceID: int = 1) -> None:
             send_message(dm, ch, h["node_id"], iface)
         except Exception as e:
             logger.warning(f"Blitzwatch: DM to {h['node_id']} failed: {e}")
-        mark_node_alerted(h["node_id"], now)
+
+        if h.get("kind") == "extra":
+            mark_location_alerted(h["node_id"], int(h["slot"]), now)
+        else:
+            mark_home_alerted(h["node_id"], now)
 
     # One channel message
     if channel_ok:
-        parts = [
-            f"{h['short']} ~{h['strike']['km']:.0f} km"
-            + (f" {h['strike']['dir']}" if h["strike"].get("dir") else "")
-            for h in hits
-        ]
         if len(hits) == 1:
-            ch_msg = f"⚡ Blitz ~{hits[0]['strike']['km']:.1f} km"
-            if hits[0]["strike"].get("dir"):
-                ch_msg += f" {hits[0]['strike']['dir']}"
-            ch_msg += f" von {hits[0]['short']}"
+            h0 = hits[0]
+            ch_msg = f"⚡ Blitz ~{h0['strike']['km']:.1f} km"
+            if h0["strike"].get("dir"):
+                ch_msg += f" {h0['strike']['dir']}"
+            ch_msg += f" {_channel_where_phrase(h0)}"
         else:
+            parts = []
+            for h in hits:
+                bit = f"{h['short']}"
+                if h.get("kind") == "extra" or (
+                    h.get("kind") == "home" and h.get("label") not in (None, "", "dir")
+                ):
+                    bit += f"/{h.get('label', '?')}"
+                bit += f" ~{h['strike']['km']:.0f} km"
+                if h["strike"].get("dir"):
+                    bit += f" {h['strike']['dir']}"
+                parts.append(bit)
             ch_msg = "⚡ Blitznähe: " + ", ".join(parts)
         try:
             send_message(ch_msg, ch, 0, deviceID)
@@ -463,7 +968,7 @@ def run_blitzwatch_cycle(deviceID: int = 1) -> None:
             logger.warning(f"Blitzwatch: channel send failed: {e}")
 
     logger.info(
-        f"Blitzwatch: {len(hits)} Node(s) alerted"
+        f"Blitzwatch: {len(hits)} point(s) alerted"
         + (f" source={source}" if source else "")
     )
 

@@ -21,6 +21,8 @@ Python-Module für `mesh_bot.py` und das Flask-Web-Portal. Konfiguration erfolgt
 | `globalalert.py` | NINA/Katwarn/DWD — `!warning`, `!dealert` |
 | `meteo_wx.py` | Open-Meteo — `!wx`, `!wxc`, `!uv`, `!regen` |
 | `blitz.py` | Blitz live + Vorhersage — `!blitz` |
+| `blitzwatch.py` | Nähe-Warnung — Home (GPS/Fix) + bis 3 Zusatzorte, `!blitzwatch` |
+| `wx_extra.py` | Gemeinsame Blitz-/UV-/Regen-Helfer |
 | `metar.py` | METAR-Flughafenwetter |
 | `geocode.py` | Ortsauflösung, `!whereami`, Mesh-Karte |
 
@@ -30,7 +32,8 @@ Python-Module für `mesh_bot.py` und das Flask-Web-Portal. Konfiguration erfolgt
 |-------|---------|
 | `admin_web.py` | Flask-App: `/`, `/admin`, BBS, Logs, Einstellungen |
 | `web_dashboard.py` | Statistik-Dashboard, Log-Auswertung |
-| `web_commands_help.py` | Befehlsliste für `/befehle` |
+| `web_commands_help.py` | Befehlsliste für `/befehle` (inkl. Blitzwatch-Anleitung) |
+| `web_faq_help.py` | FAQ für `/faq` |
 | `admin_config_tooltips.py` | Tooltips im Admin-Einstellungs-Editor |
 
 Aktivierung: `[webAdmin] enabled = True` in `config.ini`. Details: [logs/README.md](../logs/README.md).

@@ -214,7 +214,8 @@ def _sections() -> List[CommandSection]:
         CommandSection(
             "Wetter & Warnungen (DE/EU)",
             "bi-cloud-lightning-rain",
-            "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD).",
+            "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD). "
+            "Blitzwatch: automatische Nähe-Warnung — Erklärung unter der Befehlsliste.",
             (
                 _cmd(
                     f"{p}wx",
@@ -269,7 +270,37 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}blitzwatch",
-                    "Blitz-Nähe-Warnung: Status · on/off · 3km…10km (nur eigene Node).",
+                    "Status der Blitz-Nähe-Warnung (Home + Zusatzorte). Details: Abschnitt unten auf dieser Seite.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch on|off",
+                    "Warnung für deine Node ein- bzw. ausschalten (gilt für Home und alle Zusatzorte).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch 5km",
+                    "Home-Radius setzen (1–10 km). Wird auch als Standard für neue Zusatzorte genutzt.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch home …",
+                    "Home als Fix setzen (Ort/Coords/Grid), z. B. home Friedberg · home JO40AA. home gps = wieder Node-GPS.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch add …",
+                    "Bis zu 3 Zusatzorte (z. B. Relais/Equipment). Optional mit Radius: add 5km Kassel.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch 2 5km · del 2 · list",
+                    "Radius für Slot 2 setzen · Slot löschen · Standorte auflisten.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "blitz_watch_enabled", True),
                 ),
@@ -638,6 +669,127 @@ def _render_entry_row(entry: CommandEntry) -> str:
     return f"<tr><td class=\"cmd-help-cmd\"><code>{cmd}</code></td><td>{desc}{ex}</td></tr>"
 
 
+def _blitzwatch_enabled() -> bool:
+    try:
+        return bool(getattr(st, "location_enabled", False)) and bool(
+            getattr(st, "blitz_watch_enabled", True)
+        )
+    except Exception:
+        return False
+
+
+def _render_blitzwatch_guide() -> str:
+    """Ausführliche Nutzerhilfe unter der Befehlsliste (nur wenn Blitzwatch aktiv)."""
+    if not _blitzwatch_enabled():
+        return ""
+    p = html_escape(_prefix())
+    return f"""
+<div class="portal-card p-4 mt-4 mb-2" id="blitzwatch">
+  <h2 class="h4 section-title mb-3">
+    <i class="bi bi-lightning-charge text-success me-2"></i>Blitzwatch — so funktioniert’s
+  </h2>
+  <p class="text-muted mb-3">
+    <strong>Blitzwatch</strong> warnt dich automatisch, wenn Live-Blitze in der Nähe eines
+    überwachten Standorts einschlagen. Anders als <code>{p}blitz</code> (einmalige Abfrage)
+    läuft die Überwachung im Hintergrund. Standardmäßig ist sie für deine Node
+    <strong>an</strong> (Opt-out mit <code>{p}blitzwatch off</code>).
+  </p>
+
+  <h3 class="h6 text-success mt-3 mb-2">Was wird überwacht?</h3>
+  <ul class="text-muted small mb-3">
+    <li>
+      <strong>Home</strong> — dein eigener Standort: standardmäßig die
+      <strong>frische GPS-Position</strong> deiner Node (≤ 24 h alt), oder ein
+      <strong>fester Ort</strong>, den du setzt.
+    </li>
+    <li>
+      <strong>Bis zu 3 Zusatzorte</strong> — z. B. Relais, Antennenstandorte oder Equipment,
+      unabhängig von deinem aktuellen GPS.
+    </li>
+    <li>
+      Jeder Punkt hat einen <strong>eigenen Radius</strong> (typisch 1–10 km) und einen
+      <strong>eigenen Cooldown</strong> (ca. 60 Min.), damit eine Warnung am Home die
+      Anlagen-Orte nicht blockiert.
+    </li>
+  </ul>
+
+  <h3 class="h6 text-success mt-3 mb-2">Standortangaben</h3>
+  <p class="text-muted small mb-2">
+    Wie bei Wetter und <code>{p}blitz</code> akzeptiert Blitzwatch:
+  </p>
+  <ul class="text-muted small mb-3">
+    <li>Ortsname — z. B. <code>Friedberg</code>, <code>Frankfurt</code></li>
+    <li>Koordinaten — z. B. <code>50.34 8.76</code></li>
+    <li>Maidenhead-Grid — z. B. <code>JO40</code> oder <code>JO40AA</code></li>
+  </ul>
+
+  <h3 class="h6 text-success mt-3 mb-2">Steuerung (Mesh-Befehle)</h3>
+  <div class="table-responsive mb-3">
+    <table class="table table-sm table-hover cmd-help-table mb-0">
+      <thead><tr><th>Befehl</th><th>Wirkung</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch</code></td>
+          <td>Status: AN/AUS, Home, Zusatzorte 1–3, Radien</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch on</code> · <code>off</code></td>
+          <td>Alle Warnungen für deine Node ein- bzw. ausschalten</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch 5km</code></td>
+          <td>Home-Radius (wird auch Default für neue Zusatzorte)</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch home Friedberg</code></td>
+          <td>Home auf festen Ort setzen (auch Coords/Grid)</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch home gps</code></td>
+          <td>Home wieder an Node-GPS koppeln</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch home 8km</code></td>
+          <td>Nur Home-Radius ändern</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch add JO40AA</code></td>
+          <td>Zusatzort im nächsten freien Slot (1–3)</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch add 5km Kassel</code></td>
+          <td>Zusatzort mit eigenem Radius anlegen</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch 2 5km</code></td>
+          <td>Radius für Slot&nbsp;2 setzen</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch del 2</code></td>
+          <td>Slot&nbsp;2 löschen (Nummern bleiben stabil)</td>
+        </tr>
+        <tr>
+          <td class="cmd-help-cmd"><code>{p}blitzwatch list</code></td>
+          <td>Home und Zusatzorte kompakt auflisten</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="h6 text-success mt-3 mb-2">Warnungen</h3>
+  <ul class="text-muted small mb-0">
+    <li>Bei Treffer erhältst du eine <strong>Direktnachricht (DM)</strong> vom Bot
+      (z. B. „von dir“ oder „bei &lt;Ortsname&gt;“).</li>
+    <li>Zusätzlich erscheint meist eine kurze <strong>Kanalmeldung</strong>
+      (Kurzname + Distanz; bei Zusatzorten mit Label).</li>
+    <li>Details live nachschlagen: <code>{p}blitz</code> (optional mit Ort).</li>
+    <li>Ohne frisches GPS und ohne Fix/Zusatzorte kann Home nicht warnen —
+      Zusatzorte funktionieren trotzdem.</li>
+  </ul>
+</div>
+"""
+
+
 def render_commands_page_body() -> str:
     """HTML body (inside portal wrapper) for /befehle."""
     p = html_escape(_prefix())
@@ -711,4 +863,5 @@ def render_commands_page_body() -> str:
         parts.append(
             '<p class="text-muted portal-card p-4">Keine Befehlsmodule aktiv — prüfe <code>config.ini</code>.</p>'
         )
+    parts.append(_render_blitzwatch_guide())
     return "\n".join(parts)

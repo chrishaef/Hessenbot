@@ -104,11 +104,18 @@ cp config.template config.ini
 - Ausgabe: Anzahl Einschläge, **Nächster**, **Weitester** und **Letzter** (zeitlich neuester) mit Distanz und Himmelsrichtung
 - Standort der anfragenden Station oder optional `!blitz <Ort|Coords>`; in der Antwort wird die Standortquelle angezeigt
 - **Blitzwatch** (automatisch, wenn `blitzWatchEnabled = True`):
-  - prüft alle paar Minuten Live-Blitze gegen Nodes mit **frischem GPS (≤ 24 h)**
-  - Warnung per **DM** an betroffene Nodes und **eine** Kanalnachricht (Kurzname + Distanz)
-  - Standard: aktiv (Opt-out), Radius **8 km** (1–10 km), Cooldown **60 min** (Node + Kanal), Bot-Node ausgeschlossen
-  - Steuerung nur für die eigene Node: `!blitzwatch`, `!blitzwatch on|off`, `!blitzwatch 5km`
-  - Status in der NodeDB (Admin/öffentlich): z. B. **an 8km** / **bereit 8km** / **aus**
+  - prüft alle paar Minuten Live-Blitze gegen **Home** (frisches GPS ≤ 24 h oder Fix-Standort) und bis zu **3 Zusatzorte** (z. B. Relais/Equipment)
+  - Standortangaben wie bei Wetter/`!blitz`: Ort, Koordinaten, Maidenhead-Grid
+  - Warnung per **DM** (pro Treffer-Punkt) und **eine** Kanalnachricht (Kurzname + Distanz + Label)
+  - Standard: aktiv (Opt-out), Home-Radius **8 km** (1–10 km), Cooldown **60 min** **pro Watch-Punkt** (+ Kanal), Bot-Node ausgeschlossen
+  - Steuerung nur für die eigene Node:
+    - `!blitzwatch` / `list` — Status
+    - `on` / `off` — alle Warnungen
+    - `5km` — Home-Radius (Default für neue Zusatzorte)
+    - `home <Ort|Coords|Grid>` / `home gps` — Home Fix bzw. wieder GPS
+    - `add [Nkm] <…>` — Zusatzort (max. 3); `N 5km` — Radius Slot N; `del N` — löschen
+  - Nutzerhilfe im Web: öffentliche Seite **`/befehle#blitzwatch`** (Steuerung + Funktionsweise)
+  - Status in der NodeDB (Admin/öffentlich): z. B. **an 8km** / **an 8km+2** / **bereit 8km** / **aus**
   - Config/Admin: `[location]` `blitzWatchEnabled` und zugehörige Parameter (siehe `config.template`)
 
 ### Web-UI (Flask)
@@ -116,7 +123,7 @@ cp config.template config.ini
 | URL | Inhalt |
 |-----|--------|
 | `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard 24h, DM-Zustellung 24h) |
-| `/befehle` | Befehlsliste inkl. `!trace` |
+| `/befehle` | Befehlsliste inkl. `!trace` und ausführlicher **Blitzwatch**-Hilfe (`#blitzwatch`) |
 | `/faq` | Hilfe & PKI-Check |
 | `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Einstellungen, … |
 
@@ -155,7 +162,7 @@ cp config.template config.ini
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
 | `!wx` / `!wx Fulda` / `!wx JO40AA` | Wetter (Open-Meteo); optional Ort/Koordinaten/Grid |
 | `!uv` / `!regen` / `!blitz` | UV, Regen, Blitz — optional ebenfalls mit Ort/Koordinaten |
-| `!blitzwatch` / `on` / `off` / `5km` | Blitz-Nähe-Warnung: Status, Opt-out, Radius (eigene Node) |
+| `!blitzwatch` / `on` / `off` / `5km` / `home` / `add` / `del` | Blitz-Nähe: Home + bis 3 Zusatzorte (Ort/Coords/Grid) |
 | `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |
 | `!whereami` | Ortsname (Geocoding) + Höhe falls übertragen |
 | `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |

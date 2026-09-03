@@ -184,10 +184,24 @@ def _enrich_blitzwatch_rows(rows: List[Dict[str, Any]]) -> None:
 
                 prefs = get_node_prefs(nid)
             except Exception:
-                prefs = {"enabled": True, "radius_km": 8}
-        # Active only with fresh NodeDB GPS (≤24h); map-only positions do not alert.
+                prefs = {
+                    "enabled": True,
+                    "radius_km": 8,
+                    "home_mode": "gps",
+                    "extra_count": 0,
+                }
         enabled = bool(prefs.get("enabled", True))
         radius = prefs.get("radius_km", 8)
+        home_mode = (prefs.get("home_mode") or "gps").lower()
+        home_fixed = home_mode == "fixed" and prefs.get("home_lat") is not None
+        extra_count = int(prefs.get("extra_count") or 0)
+        if "extra_count" not in prefs:
+            try:
+                from modules.blitzwatch import count_locations
+
+                extra_count = count_locations(nid)
+            except Exception:
+                extra_count = 0
         has_fresh = False
         try:
             from modules.system import _nodedb_fresh_position
@@ -195,13 +209,32 @@ def _enrich_blitzwatch_rows(rows: List[Dict[str, Any]]) -> None:
             has_fresh = bool(_nodedb_fresh_position(nid, 1, 2))
         except Exception:
             has_fresh = r.get("location_source") == "gps" and bool(r.get("has_gps"))
+        home_active = home_fixed or has_fresh
+        any_active = enabled and (home_active or extra_count > 0)
+        # "bereit": enabled but only GPS-home and no GPS, and no extras
+        only_waiting_gps = (
+            enabled
+            and not home_fixed
+            and not has_fresh
+            and extra_count == 0
+        )
+        tip_extra = f", {extra_count} Zusatzort(e)" if extra_count else ""
         if not enabled:
             r["blitzwatch_active"] = False
             r["blitzwatch_html"] = (
                 f'<span class="badge bg-secondary" title="Opt-out (!blitzwatch off)">'
                 f"aus</span>"
             )
-        elif not has_fresh:
+        elif any_active:
+            r["blitzwatch_active"] = True
+            home_tip = "Fix" if home_fixed else f"GPS {radius}km"
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-success" '
+                f'title="Blitzwatch aktiv — Home {home_tip}{tip_extra}">'
+                f"an {radius}km"
+                f'{f"+{extra_count}" if extra_count else ""}</span>'
+            )
+        elif only_waiting_gps:
             r["blitzwatch_active"] = False
             r["blitzwatch_html"] = (
                 f'<span class="badge bg-warning text-dark" '
@@ -209,10 +242,9 @@ def _enrich_blitzwatch_rows(rows: List[Dict[str, Any]]) -> None:
                 f"bereit {radius}km</span>"
             )
         else:
-            r["blitzwatch_active"] = True
+            r["blitzwatch_active"] = False
             r["blitzwatch_html"] = (
-                f'<span class="badge bg-success" title="Blitzwatch aktiv">'
-                f"an {radius}km</span>"
+                f'<span class="badge bg-secondary" title="Blitzwatch inaktiv">aus</span>'
             )
 
 

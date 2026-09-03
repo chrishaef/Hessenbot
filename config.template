@@ -250,10 +250,11 @@ blitzRadiusKm = 150
 # Optional: free Blitzortung.org data login (https://www.blitzortung.org) — leave empty for DMI only
 blitzortungUser =
 blitzortungPassword =
-# Auto Blitzwatch: warn nodes with fresh GPS when lightning is nearby (DM + channel)
+# Auto Blitzwatch: Home (GPS or fixed) + up to 3 extra locations; DM + channel alerts
 blitzWatchEnabled = True
 blitzWatchDefaultRadiusKm = 8
 blitzWatchMaxRadiusKm = 10
+# Cooldown per watch point (home / each extra slot) and for the channel message
 blitzWatchCooldownMin = 60
 blitzWatchPollMin = 5
 # Empty = defaultChannel (general.defaultChannel)

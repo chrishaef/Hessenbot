@@ -116,6 +116,17 @@ def _sections() -> List[FaqSection]:
                         "Ohne Argument: METAR des nächsten Flugplatzes zu deiner Position."
                     ),
                 ),
+                FaqEntry(
+                    "Blitzwatch: Home und Zusatzorte",
+                    (
+                        "Automatische Blitz-Nähe-Warnung für deinen Standort (GPS oder Fix) "
+                        "und bis zu <strong>3 Zusatzorte</strong> (Relais/Equipment). "
+                        "Steuerung per <code>!blitzwatch</code>, "
+                        "<code>home …</code>, <code>add …</code>, <code>del N</code>. "
+                        "Ausführliche Erklärung unter "
+                        '<a href="/befehle#blitzwatch">Befehle → Blitzwatch</a>.'
+                    ),
+                ),
             ),
         ),
         FaqSection(
