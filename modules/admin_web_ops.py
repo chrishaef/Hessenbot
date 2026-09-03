@@ -731,58 +731,99 @@ def list_radio_channels(
 ) -> List[Dict[str, Any]]:
     """Channels from Meshtastic instance(s): [{'number', 'label', 'role'}], sorted.
 
-    Reads ``build_channel_cache()`` (filled at bot init / reconnect from
-    ``node.get_channels_with_hash()``). Optionally refresh from the radio first.
+    Prefers live protobuf slots (real names / preset for unnamed PRIMARY).
     """
-    seen: Dict[int, Dict[str, Any]] = {}
-    cache = []
+    sm = None
     try:
         sm = _system_mod()
-        if refresh:
-            cache = sm.refresh_channel_cache()
-        else:
-            cache = sm.build_channel_cache()
+        if refresh and hasattr(sm, "refresh_channel_cache"):
+            sm.refresh_channel_cache()
     except Exception:
-        cache = []
-    for entry in cache or []:
-        if iface_id is not None and int(entry.get("interface_id") or 0) != int(iface_id):
-            continue
-        for name, info in (entry.get("channels") or {}).items():
-            num = info.get("number") if isinstance(info, dict) else None
-            if num is None:
-                continue
+        sm = None
+
+    seen: Dict[int, Dict[str, Any]] = {}
+
+    iface_ids: List[int] = []
+    if iface_id is not None:
+        iface_ids = [int(iface_id)]
+    else:
+        try:
+            iface_ids = iter_radio_interfaces()
+        except Exception:
+            iface_ids = []
+        if not iface_ids:
+            iface_ids = list(range(1, 10))
+
+    for iid in iface_ids:
+        slots = []
+        if sm is not None and hasattr(sm, "read_interface_channel_slots"):
             try:
-                num = int(num)
-            except (TypeError, ValueError):
+                slots = sm.read_interface_channel_slots(iid)
+            except Exception:
+                slots = []
+        for slot in slots or []:
+            if slot.get("role_name") not in ("PRIMARY", "SECONDARY"):
                 continue
-            raw_name = (name or "").strip()
-            if raw_name and not raw_name.startswith("Channel"):
-                label = raw_name
-            else:
-                label = f"Kanal {num}"
-            role = ""
-            # Prefer named / non-generic over placeholder
+            num = int(slot["index"])
+            label = (slot.get("label") or slot.get("name") or f"Kanal {num}").strip()
             prev = seen.get(num)
             if prev is None or (
                 prev["label"].startswith("Kanal ") and not label.startswith("Kanal ")
             ):
-                seen[num] = {"number": num, "label": label, "role": role}
+                seen[num] = {
+                    "number": num,
+                    "label": label,
+                    "role": slot.get("role_name") or "",
+                }
 
-    # Sensible fallbacks when radio cache empty (typical Meshhessen setup)
-    if 0 not in seen:
-        seen[0] = {"number": 0, "label": "ShortSlow", "role": "PRIMARY"}
-    try:
-        import modules.settings as st
+    if not seen:
+        # Cache fallback (names from last successful read)
+        cache = []
+        try:
+            if sm is not None:
+                cache = sm.build_channel_cache()
+        except Exception:
+            cache = []
+        for entry in cache or []:
+            if iface_id is not None and int(entry.get("interface_id") or 0) != int(iface_id):
+                continue
+            for name, info in (entry.get("channels") or {}).items():
+                if not isinstance(info, dict):
+                    continue
+                num = info.get("number")
+                if num is None:
+                    continue
+                try:
+                    num = int(num)
+                except (TypeError, ValueError):
+                    continue
+                label = (info.get("label") or name or "").strip()
+                if not label or label.startswith("Channel"):
+                    label = f"Kanal {num}"
+                prev = seen.get(num)
+                if prev is None or (
+                    prev["label"].startswith("Kanal ") and not label.startswith("Kanal ")
+                ):
+                    seen[num] = {
+                        "number": num,
+                        "label": label,
+                        "role": info.get("role") or "",
+                    }
 
-        msg_ch = int(getattr(st, "messages_channel", 1) or 1)
-    except Exception:
-        msg_ch = 1
-    if msg_ch not in seen:
-        seen[msg_ch] = {
-            "number": msg_ch,
-            "label": "MeshHessen" if msg_ch == 1 else f"Kanal {msg_ch}",
-            "role": "SECONDARY",
-        }
+    if not seen:
+        seen[0] = {"number": 0, "label": "Kanal 0", "role": "PRIMARY"}
+        try:
+            import modules.settings as st
+
+            msg_ch = int(getattr(st, "messages_channel", 1) or 1)
+        except Exception:
+            msg_ch = 1
+        if msg_ch not in seen:
+            seen[msg_ch] = {
+                "number": msg_ch,
+                "label": f"Kanal {msg_ch}",
+                "role": "SECONDARY",
+            }
 
     return [seen[n] for n in sorted(seen)]
 
@@ -1427,59 +1468,46 @@ _CHANNEL_ROLE_LABELS: Dict[int, str] = {
 
 
 def fetch_local_channels(iface_id: int) -> Tuple[Optional[str], Optional[List[Dict[str, Any]]]]:
-    """Read mesh channel slots 0–7 from the connected local node."""
+    """Read mesh channel slots 0–7 from the connected local node protobuf."""
     node, err = _local_node_for_iface(iface_id)
     if err:
         return err, None
 
+    sm = _system_mod()
+    slots = []
     try:
-        from meshtastic import util as mesh_util
+        slots = sm.read_interface_channel_slots(int(iface_id))
     except Exception as e:
-        return f"Meshtastic-Util nicht verfügbar: {e!s}", None
+        return f"Kanäle konnten nicht gelesen werden: {e!s}", None
 
-    raw = getattr(node, "channels", None)
-    if not raw:
+    if not slots:
         return (
             "Keine Kanäle vom Gerät gelesen — Verbindung prüfen oder Bot neu starten.",
             None,
         )
 
     out: List[Dict[str, Any]] = []
-    for i, ch in enumerate(list(raw)[:8]):
-        if ch is None:
-            continue
-        try:
-            settings = ch.settings
-            role = int(ch.role)
-            name = str(settings.name or "").strip()
-            psk_bytes = bytes(settings.psk) if settings.psk else b""
-            psk_label = mesh_util.pskToString(psk_bytes)
-            out.append(
-                {
-                    "index": i,
-                    "name": name,
-                    "role": role,
-                    "role_name": _CHANNEL_ROLE_LABELS.get(role, str(role)),
-                    "psk_label": psk_label,
-                    "uplink": bool(settings.uplink_enabled),
-                    "downlink": bool(settings.downlink_enabled),
-                    "empty": role == 0 and not name and psk_label in ("unencrypted", ""),
-                }
-            )
-        except Exception as e:
-            out.append(
-                {
-                    "index": i,
-                    "name": "",
-                    "role": 0,
-                    "role_name": "?",
-                    "psk_label": "?",
-                    "uplink": False,
-                    "downlink": False,
-                    "empty": True,
-                    "error": str(e),
-                }
-            )
+    for slot in slots:
+        name = slot.get("name") or ""
+        # Show preset-derived label in the name field when firmware name is empty
+        name_field = name or (
+            slot.get("label") if slot.get("role_name") == "PRIMARY" else ""
+        )
+        out.append(
+            {
+                "index": int(slot["index"]),
+                "name": name,
+                "name_display": name_field,
+                "label": slot.get("label") or "",
+                "role": int(slot.get("role") or 0),
+                "role_name": slot.get("role_name") or "",
+                "psk_label": slot.get("psk_kind") or "",
+                "psk_value": slot.get("psk") or "",
+                "uplink": bool(slot.get("uplink")),
+                "downlink": bool(slot.get("downlink")),
+                "empty": int(slot.get("role") or 0) == 0 and not name,
+            }
+        )
     return None, out
 
 
@@ -1599,7 +1627,9 @@ def build_channels_settings_html(
     for ch in channels:
         idx = int(ch["index"])
         name = html.escape(ch.get("name") or "")
+        name_ph = html.escape(ch.get("label") or "z. B. MeshHessen")
         psk_label = html.escape(str(ch.get("psk_label") or "—"))
+        psk_value = html.escape(str(ch.get("psk_value") or ""))
         up_chk = " checked" if ch.get("uplink") else ""
         down_chk = " checked" if ch.get("downlink") else ""
         role_opts = _channel_role_options(idx, int(ch.get("role") or 0))
@@ -1612,8 +1642,8 @@ def build_channels_settings_html(
             f"""
 <div class="card border-secondary-subtle mb-3">
   <div class="card-header py-2 d-flex align-items-center justify-content-between">
-    <span><strong>#{idx}</strong> {badge}</span>
-    <span class="small text-muted">PSK aktuell: <code>{psk_label}</code></span>
+    <span><strong>#{idx}</strong> {html.escape(ch.get("label") or "")} {badge}</span>
+    <span class="small text-muted">PSK: <code>{psk_label}</code></span>
   </div>
   <div class="card-body py-3">
     <form method="post" class="row g-2 align-items-end">
@@ -1621,9 +1651,10 @@ def build_channels_settings_html(
       <input type="hidden" name="iface_id" value="{iface_id}">
       <input type="hidden" name="channel_index" value="{idx}">
       <div class="col-md-3">
-        <label class="form-label" for="ch-name-{idx}">Name</label>
+        <label class="form-label" for="ch-name-{idx}">Name (Firmware)</label>
         <input class="form-control form-control-sm" id="ch-name-{idx}" name="name"
-               maxlength="12" value="{name}" placeholder="z. B. MeshHessen">
+               maxlength="12" value="{name}" placeholder="{name_ph}">
+        <div class="form-text">Leer bei Primary = Anzeige über LoRa-Preset</div>
       </div>
       <div class="col-md-2">
         <label class="form-label" for="ch-role-{idx}">Rolle</label>
@@ -1632,11 +1663,11 @@ def build_channels_settings_html(
         </select>
       </div>
       <div class="col-md-3">
-        <label class="form-label" for="ch-psk-{idx}">PSK (optional)</label>
-        <input class="form-control form-control-sm" id="ch-psk-{idx}" name="psk"
+        <label class="form-label" for="ch-psk-{idx}">PSK ändern</label>
+        <input class="form-control form-control-sm font-monospace" id="ch-psk-{idx}" name="psk"
                autocomplete="off" placeholder="leer = unverändert"
                title="none · default · random · base64:… · 0x…">
-        <div class="form-text">none / default / random / base64:…</div>
+        <div class="form-text"><code class="user-select-all">{psk_value or "—"}</code></div>
       </div>
       <div class="col-md-2">
         <div class="form-check mt-4">
@@ -1666,10 +1697,10 @@ def build_channels_settings_html(
 <hr class="my-4">
 <h5 class="mb-2">Mesh-Kanäle</h5>
 <p class="small text-muted mb-3">
-  Liest die Kanal-Tabelle der Meshtastic-Instanz (Slots 0–7) und schreibt einzelne Slots
-  mit <code>writeChannel</code> — wie <code>meshtastic --ch-set</code>.
-  <strong>PSK:</strong> der echte Schlüssel wird nie angezeigt; Feld leer lassen = unverändert.
-  Falsches PSK oder Umbenennen von #0/#1 kann den Bot vom Mesh trennen.
+  Liest die Kanal-Tabelle direkt aus der Meshtastic-Instanz (Protobuf, Slots 0–7).
+  Primärkanal (#0) hat in der Firmware oft <strong>keinen Namen</strong> — die App zeigt dann den
+  LoRa-Preset (z. B. ShortSlow). Der PSK erscheint als <code>none</code>/<code>default</code>/<code>simpleN</code>
+  oder <code>base64:…</code> (lokaler Admin). Feld „PSK ändern“ leer lassen = unverändert.
 </p>
 <div class="alert alert-warning small">
   Typisch Meshhessen: <strong>#0 ShortSlow</strong> (PRIMARY) · <strong>#1 MeshHessen</strong> (SECONDARY).

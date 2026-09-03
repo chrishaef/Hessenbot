@@ -313,6 +313,112 @@ for i in range(1, 10):
 # Fetch channel list from each device
 _channel_cache = None
 
+
+def _modem_preset_label(node) -> str:
+    """Human LoRa preset name (ShortSlow, LongFast, …) for unnamed PRIMARY channels."""
+    try:
+        from meshtastic.protobuf import config_pb2
+
+        preset = int(node.localConfig.lora.modem_preset)
+        raw = config_pb2.Config.LoRaConfig.ModemPreset.Name(preset)
+        return raw.replace("_", " ").title().replace(" ", "")
+    except Exception:
+        return ""
+
+
+def _psk_admin_string(psk) -> str:
+    """PSK as used by the Meshtastic CLI: none / default / simpleN / base64:…"""
+    try:
+        raw = bytes(psk) if psk else b""
+    except Exception:
+        return ""
+    if not raw or raw == b"\x00":
+        return "none"
+    if len(raw) == 1:
+        if raw[0] == 1:
+            return "default"
+        if raw[0] > 1:
+            return f"simple{raw[0] - 1}"
+    try:
+        from meshtastic import util as mesh_util
+
+        return mesh_util.toStr(raw)
+    except Exception:
+        import base64
+
+        return "base64:" + base64.b64encode(raw).decode("ascii")
+
+
+def _channel_display_name(name: str, index: int, role: int | str, preset_label: str) -> str:
+    n = (name or "").strip()
+    if n and not n.lower().startswith("channel"):
+        return n
+    role_s = str(role).upper() if not isinstance(role, int) else (
+        {0: "DISABLED", 1: "PRIMARY", 2: "SECONDARY"}.get(role, "")
+    )
+    if role_s == "PRIMARY" and preset_label:
+        return preset_label
+    return f"Kanal {index}"
+
+
+def read_interface_channel_slots(iface_id: int) -> list:
+    """Live channel slots 0–7 from the connected node's protobuf (not the hash cache).
+
+    Each item: index, name, label, role, role_name, psk, psk_kind, uplink, downlink.
+    """
+    iface = globals().get(f"interface{iface_id}")
+    if not iface or not globals().get(f"interface{iface_id}_enabled"):
+        return []
+    node = getattr(iface, "localNode", None)
+    if node is None:
+        try:
+            node = iface.getNode("^local")
+        except Exception:
+            return []
+    raw = getattr(node, "channels", None)
+    if not raw:
+        return []
+    preset = _modem_preset_label(node)
+    role_names = {0: "DISABLED", 1: "PRIMARY", 2: "SECONDARY"}
+    out = []
+    for i, ch in enumerate(list(raw)[:8]):
+        if ch is None:
+            continue
+        try:
+            settings = ch.settings
+            role_i = int(ch.role)
+            try:
+                idx = int(ch.index)
+            except Exception:
+                idx = i
+            if idx < 0:
+                idx = i
+            name = str(getattr(settings, "name", "") or "").strip()
+            psk_bytes = bytes(settings.psk) if getattr(settings, "psk", None) else b""
+            try:
+                from meshtastic import util as mesh_util
+
+                psk_kind = mesh_util.pskToString(psk_bytes)
+            except Exception:
+                psk_kind = ""
+            out.append(
+                {
+                    "index": idx if 0 <= idx <= 7 else i,
+                    "name": name,
+                    "label": _channel_display_name(name, idx if idx >= 0 else i, role_i, preset),
+                    "role": role_i,
+                    "role_name": role_names.get(role_i, str(role_i)),
+                    "psk": _psk_admin_string(psk_bytes),
+                    "psk_kind": psk_kind,
+                    "uplink": bool(getattr(settings, "uplink_enabled", False)),
+                    "downlink": bool(getattr(settings, "downlink_enabled", False)),
+                }
+            )
+        except Exception as e:
+            logger.debug(f"System: channel slot {i} parse failed: {e}")
+    return out
+
+
 def build_channel_cache(force_refresh: bool = False):
     """
     Build and cache channel_list from interfaces once (or when forced).
@@ -326,33 +432,50 @@ def build_channel_cache(force_refresh: bool = False):
         if not globals().get(f'interface{i}') or not globals().get(f'interface{i}_enabled'):
             continue
         try:
-            node = globals()[f'interface{i}'].getNode('^local')
-            # Try to use the node-provided channel/hash table if available
-            try:
-                ch_hash_table_raw = node.get_channels_with_hash()
-                #print(f"System: Device{i} Channel Hash Table: {ch_hash_table_raw}")
-            except Exception:
-                logger.warning(f"System: API version error update API `pip3 install --upgrade meshtastic[cli]`")
-                ch_hash_table_raw = []
-
             channel_dict = {}
-            # Use the hash table as the source of truth for channels
-            if isinstance(ch_hash_table_raw, list):
-                for entry in ch_hash_table_raw:
-                    channel_name = entry.get("name", "").strip()
-                    channel_number = entry.get("index")
-                    ch_hash = entry.get("hash")
-                    role = entry.get("role", "")
-                    # Always add PRIMARY/SECONDARY channels, even if name is empty
-                    if role in ("PRIMARY", "SECONDARY"):
-                        channel_dict[channel_name if channel_name else f"Channel{channel_number}"] = {
-                            "number": channel_number,
-                            "hash": ch_hash
-                        }
-            elif isinstance(ch_hash_table_raw, dict):
-                for channel_name, ch_hash in ch_hash_table_raw.items():
-                    channel_dict[channel_name] = {"number": None, "hash": ch_hash}
-            # Always add the interface, even if no named channels
+            slots = read_interface_channel_slots(i)
+            if slots:
+                for slot in slots:
+                    if slot["role_name"] not in ("PRIMARY", "SECONDARY"):
+                        continue
+                    label = slot["label"] or slot["name"] or f"Channel{slot['index']}"
+                    # Unique dict key: prefer real name, else label+index
+                    key = slot["name"] or f"{label}#{slot['index']}"
+                    channel_dict[key] = {
+                        "number": slot["index"],
+                        "hash": None,
+                        "label": label,
+                        "role": slot["role_name"],
+                    }
+            else:
+                # Fallback: hash table (older API / channels not yet loaded)
+                node = globals()[f'interface{i}'].getNode('^local')
+                try:
+                    ch_hash_table_raw = node.get_channels_with_hash()
+                except Exception:
+                    logger.warning(f"System: API version error update API `pip3 install --upgrade meshtastic[cli]`")
+                    ch_hash_table_raw = []
+                preset = _modem_preset_label(node)
+                if isinstance(ch_hash_table_raw, list):
+                    for entry in ch_hash_table_raw:
+                        channel_name = (entry.get("name") or "").strip()
+                        channel_number = entry.get("index")
+                        ch_hash = entry.get("hash")
+                        role = entry.get("role", "")
+                        if role in ("PRIMARY", "SECONDARY"):
+                            label = _channel_display_name(
+                                channel_name, channel_number, role, preset
+                            )
+                            key = channel_name or f"{label}#{channel_number}"
+                            channel_dict[key] = {
+                                "number": channel_number,
+                                "hash": ch_hash,
+                                "label": label,
+                                "role": role,
+                            }
+                elif isinstance(ch_hash_table_raw, dict):
+                    for channel_name, ch_hash in ch_hash_table_raw.items():
+                        channel_dict[channel_name] = {"number": None, "hash": ch_hash}
             cache.append({"interface_id": i, "channels": channel_dict})
             logger.debug(f"System: Fetched Channel List from Device{i} (cached)")
         except Exception as e:
@@ -386,7 +509,8 @@ def resolve_channel_name(channel_number, rxNode=1, interface_obj=None):
                 try:
                     if isinstance(info, dict):
                         if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
-                            return (chan_name, info.get('number') or info.get('hash'))
+                            display = (info.get("label") or chan_name or "").strip()
+                            return (display, info.get('number') or info.get('hash'))
                     else:
                         if str(info) == str(channel_number):
                             return (chan_name, info)
@@ -402,7 +526,8 @@ def resolve_channel_name(channel_number, rxNode=1, interface_obj=None):
                     try:
                         if isinstance(info, dict):
                             if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
-                                return (chan_name, info.get('number') or info.get('hash'))
+                                display = (info.get("label") or chan_name or "").strip()
+                                return (display, info.get('number') or info.get('hash'))
                     except Exception:
                         continue
     except Exception as e:
