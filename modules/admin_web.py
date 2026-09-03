@@ -1996,6 +1996,46 @@ def create_app(
             active_tab="channeltest",
         )
 
+    @app.route("/blitzwatch", methods=["GET", "POST"])
+    @login_required
+    @limiter.limit("40 per minute", methods=["POST"])
+    def blitzwatch_admin_index():
+        from modules import admin_web_ops as ops
+        from modules import blitzwatch as bw
+        import modules.settings as st
+
+        edit_nid = None
+        try:
+            q = request.args.get("node", type=int)
+            if q and q > 0:
+                edit_nid = q
+        except Exception:
+            edit_nid = None
+
+        if request.method == "POST":
+            ok, msg, redir = ops.apply_blitzwatch_admin_form(request.form)
+            flash(msg, "success" if ok else "error")
+            if redir:
+                return redirect(url_for("blitzwatch_admin_index", node=redir))
+            return redirect(url_for("blitzwatch_admin_index"))
+
+        watchers = bw.list_admin_watchers()
+        body = ops.build_blitzwatch_admin_html(
+            watchers,
+            edit_nid=edit_nid,
+            form_action=url_for("blitzwatch_admin_index"),
+            global_on=bool(getattr(st, "blitz_watch_enabled", True)),
+            location_on=bool(getattr(st, "location_enabled", True)),
+        )
+        return _render_admin_template(
+            """
+  {{ body }}
+""",
+            title="Blitzwatch",
+            active_tab="blitzwatch",
+            body=Markup(body),
+        )
+
     @app.route("/umfragen")
     @login_required
     def polls_index():

@@ -215,7 +215,7 @@ def _sections() -> List[CommandSection]:
             "Wetter & Warnungen (DE/EU)",
             "bi-cloud-lightning-rain",
             "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD). "
-            "Blitzwatch: automatische Nähe-Warnung — Erklärung unter der Befehlsliste.",
+            "Blitzwatch: !blitzwatch (Status), !blitzwatch? (Einstellen) — Details unten.",
             (
                 _cmd(
                     f"{p}wx",
@@ -270,37 +270,19 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}blitzwatch",
-                    "Status der Blitz-Nähe-Warnung (Home + Zusatzorte). Details: Abschnitt unten auf dieser Seite.",
+                    "Status: Warnung AN/AUS, Home und Zusatzorte. Einstellen: !blitzwatch?",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "blitz_watch_enabled", True),
                 ),
                 _cmd(
-                    f"{p}blitzwatch on|off",
-                    "Warnung für deine Node ein- bzw. ausschalten (gilt für Home und alle Zusatzorte).",
+                    f"{p}blitzwatch?",
+                    "Hilfe zum Einstellen (Home-Radius, Ort, Zusatzorte).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "blitz_watch_enabled", True),
                 ),
                 _cmd(
-                    f"{p}blitzwatch 5km",
-                    "Home-Radius setzen (1–10 km). Wird auch als Standard für neue Zusatzorte genutzt.",
-                    enabled=lambda: getattr(st, "location_enabled", False)
-                    and getattr(st, "blitz_watch_enabled", True),
-                ),
-                _cmd(
-                    f"{p}blitzwatch home …",
-                    "Home als Fix setzen (Ort/Coords/Grid), z. B. home Friedberg · home JO40AA. home gps = wieder Node-GPS.",
-                    enabled=lambda: getattr(st, "location_enabled", False)
-                    and getattr(st, "blitz_watch_enabled", True),
-                ),
-                _cmd(
-                    f"{p}blitzwatch add …",
-                    "Bis zu 3 Zusatzorte (z. B. Relais/Equipment). Optional mit Radius: add 5km Kassel.",
-                    enabled=lambda: getattr(st, "location_enabled", False)
-                    and getattr(st, "blitz_watch_enabled", True),
-                ),
-                _cmd(
-                    f"{p}blitzwatch 2 5km · del 2 · list",
-                    "Radius für Slot 2 setzen · Slot löschen · Standorte auflisten.",
+                    f"{p}blitzwatch on · off",
+                    "Warnung für deine Node ein- bzw. ausschalten.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "blitz_watch_enabled", True),
                 ),
@@ -724,53 +706,34 @@ def _render_blitzwatch_guide() -> str:
   </ul>
 
   <h3 class="h6 text-success mt-3 mb-2">Steuerung (Mesh-Befehle)</h3>
+  <p class="text-muted small mb-2">
+    <code>{p}blitzwatch</code> zeigt den Status.
+    <code>{p}blitzwatch?</code> listet die Einstell-Befehle.
+  </p>
   <div class="table-responsive mb-3">
     <table class="table table-sm table-hover cmd-help-table mb-0">
-      <thead><tr><th>Befehl</th><th>Wirkung</th></tr></thead>
+      <thead><tr><th>Gruppe</th><th>Beispiele</th></tr></thead>
       <tbody>
         <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch</code></td>
-          <td>Status: AN/AUS, Home, Zusatzorte 1–3, Radien</td>
+          <td>Ein / Aus</td>
+          <td><code>{p}blitzwatch on</code> · <code>{p}blitzwatch off</code></td>
         </tr>
         <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch on</code> · <code>off</code></td>
-          <td>Alle Warnungen für deine Node ein- bzw. ausschalten</td>
+          <td>Home</td>
+          <td>
+            <code>{p}blitzwatch 8km</code> — Radius (1–10 km)<br>
+            <code>{p}blitzwatch home Friedberg</code> — fester Ort (auch Coords/Grid)<br>
+            <code>{p}blitzwatch home gps</code> — wieder Node-GPS
+          </td>
         </tr>
         <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch 5km</code></td>
-          <td>Home-Radius (wird auch Default für neue Zusatzorte)</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch home Friedberg</code></td>
-          <td>Home auf festen Ort setzen (auch Coords/Grid)</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch home gps</code></td>
-          <td>Home wieder an Node-GPS koppeln</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch home 8km</code></td>
-          <td>Nur Home-Radius ändern</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch add JO40AA</code></td>
-          <td>Zusatzort im nächsten freien Slot (1–3)</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch add 5km Kassel</code></td>
-          <td>Zusatzort mit eigenem Radius anlegen</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch 2 5km</code></td>
-          <td>Radius für Slot&nbsp;2 setzen</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch del 2</code></td>
-          <td>Slot&nbsp;2 löschen (Nummern bleiben stabil)</td>
-        </tr>
-        <tr>
-          <td class="cmd-help-cmd"><code>{p}blitzwatch list</code></td>
-          <td>Home und Zusatzorte kompakt auflisten</td>
+          <td>Zusatzorte (max. 3)</td>
+          <td>
+            <code>{p}blitzwatch add Kassel</code> · <code>add 5km JO40AA</code><br>
+            <code>{p}blitzwatch del 1</code> — Slot löschen<br>
+            <code>{p}blitzwatch 1 5km</code> — Radius für Slot 1<br>
+            <code>{p}blitzwatch list</code> — Standorte
+          </td>
         </tr>
       </tbody>
     </table>

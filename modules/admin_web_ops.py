@@ -1965,3 +1965,305 @@ def build_node_settings_page_html(
             channels, iface_id=iface_id, form_action=form_action
         )
     return body
+
+
+def _bw_node_caption(nid: int) -> Tuple[str, str, str]:
+    hex_id = f"!{int(nid):08x}"
+    short = ""
+    long_n = ""
+    try:
+        import modules.nodedb as ndb
+
+        short = ndb.get_node_short_name(int(nid)) or ""
+        long_n = ndb.get_node_long_name(int(nid)) or ""
+    except Exception:
+        pass
+    return hex_id, short, long_n
+
+
+def _bw_parse_node_id(raw: str) -> Optional[int]:
+    s = normalize_ban_node_id(raw)
+    if not s:
+        return None
+    try:
+        n = int(s)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def apply_blitzwatch_admin_form(form) -> Tuple[bool, str, Optional[int]]:
+    """Apply one admin Blitzwatch POST. Returns (ok, flash, redirect_node_id)."""
+    from modules import blitzwatch as bw
+
+    bw.initialize_blitzwatch_database()
+    action = (form.get("action") or "").strip()
+    nid = _bw_parse_node_id(form.get("node_id") or "")
+    if action == "add_node":
+        if not nid:
+            return False, "Ungültige Knoten-ID (Dezimal oder !xxxxxxxx).", None
+        bw.set_node_enabled(nid, True)
+        return True, f"Knoten {nid} angelegt (Warnung AN, Default-Radius).", nid
+
+    if not nid:
+        return False, "Knoten-ID fehlt.", None
+
+    if action == "reset":
+        bw.reset_watch_for_node(nid)
+        return True, f"Einstellungen für {nid} gelöscht (wieder Defaults).", None
+
+    if action == "save_prefs":
+        enabled = form.get("enabled") in ("1", "on", "true", "yes")
+        try:
+            radius = int((form.get("radius_km") or "8").strip())
+        except ValueError:
+            return False, "Radius muss eine ganze Zahl sein.", nid
+        bw._upsert_node_row(nid, enabled=enabled, radius_km=radius)
+        return True, f"Node {nid}: Warnung {'AN' if enabled else 'AUS'}, Home-Radius {bw.clamp_radius_km(radius)} km.", nid
+
+    if action == "home_gps":
+        bw.set_home_gps(nid)
+        return True, f"Home für {nid} wieder GPS.", nid
+
+    if action == "home_place":
+        place = (form.get("place") or "").strip()
+        if not place:
+            return False, "Ort, Koordinaten oder Maidenhead angeben.", nid
+        resolved, err = bw._resolve_explicit_location(
+            f"!blitzwatch home {place}", nid, 1, ("blitzwatch", "home")
+        )
+        if err:
+            return False, err, nid
+        assert resolved is not None
+        lat, lon, label = resolved
+        bw.set_home_fixed(nid, lat, lon, label)
+        return True, f"Home-Fix für {nid}: {label}.", nid
+
+    if action == "add_extra":
+        place = (form.get("place") or "").strip()
+        if not place:
+            return False, "Zusatzort: Ort, Koordinaten oder Grid angeben.", nid
+        radius_raw = (form.get("extra_radius_km") or "").strip()
+        radius_override = None
+        if radius_raw:
+            try:
+                radius_override = int(radius_raw)
+            except ValueError:
+                return False, "Radius Zusatzort ungültig.", nid
+        loc_msg = f"!blitzwatch add {place}"
+        resolved, err = bw._resolve_explicit_location(
+            loc_msg, nid, 1, ("blitzwatch", "add")
+        )
+        if err:
+            return False, err, nid
+        assert resolved is not None
+        lat, lon, label = resolved
+        loc, add_err = bw.add_location(nid, lat, lon, label, radius_override)
+        if add_err:
+            return False, add_err, nid
+        return True, f"Zusatzort {loc['slot']}: {loc['label']}.", nid
+
+    if action == "del_extra":
+        try:
+            slot = int(form.get("slot") or "0")
+        except ValueError:
+            return False, "Slot ungültig.", nid
+        if bw.delete_location(nid, slot):
+            return True, f"Zusatzort {slot} gelöscht.", nid
+        return False, f"Kein Zusatzort {slot}.", nid
+
+    if action == "extra_radius":
+        try:
+            slot = int(form.get("slot") or "0")
+            radius = int(form.get("radius_km") or "0")
+        except ValueError:
+            return False, "Slot/Radius ungültig.", nid
+        loc = bw.set_location_radius(nid, slot, radius)
+        if not loc:
+            return False, f"Kein Zusatzort {slot}.", nid
+        return True, f"Ort {slot}: Radius {loc['radius_km']} km.", nid
+
+    return False, "Unbekannte Aktion.", nid
+
+
+def build_blitzwatch_admin_html(
+    watchers: List[Dict[str, Any]],
+    *,
+    edit_nid: Optional[int],
+    form_action: str,
+    global_on: bool,
+    location_on: bool,
+) -> str:
+    from modules import blitzwatch as bw
+
+    if not location_on or not global_on:
+        return (
+            '<p class="alert alert-warning">Blitzwatch ist in der Config aus '
+            '(<code>[location] enabled</code> / <code>blitzWatchEnabled</code>). '
+            "Globale Schalter unter Einstellungen.</p>"
+        )
+
+    rows = []
+    for w in watchers:
+        nid = int(w["node_id"])
+        hex_id, short, long_n = _bw_node_caption(nid)
+        name = html.escape(" · ".join(x for x in (short, long_n) if x) or "—")
+        en = bool(w.get("enabled"))
+        badge = (
+            '<span class="badge bg-success">AN</span>'
+            if en
+            else '<span class="badge bg-secondary">AUS</span>'
+        )
+        if w.get("home_mode") == "fixed" and w.get("home_lat") is not None:
+            home = html.escape(str(w.get("home_label") or "Fix"))
+        else:
+            home = "GPS"
+        extras = int(w.get("extra_count") or 0)
+        sel = " table-active" if edit_nid == nid else ""
+        rows.append(
+            f'<tr class="{sel}">'
+            f"<td><code>{nid}</code><br><code class=\"small\">{html.escape(hex_id)}</code></td>"
+            f"<td>{name}</td>"
+            f"<td>{badge}</td>"
+            f"<td>{home} · {int(w.get('radius_km') or 8)} km</td>"
+            f"<td>{extras}</td>"
+            f'<td><a class="btn btn-sm btn-outline-primary" href="{html.escape(form_action)}?node={nid}">Bearbeiten</a></td>'
+            "</tr>"
+        )
+
+    table = (
+        '<div class="table-scroll mb-4"><table class="table table-sm table-bordered nodes-table">'
+        "<thead><tr><th>Node</th><th>Name</th><th>Warnung</th><th>Home</th>"
+        "<th>Zusatz</th><th></th></tr></thead>"
+        f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"6\" class=\"text-muted\">Noch keine gespeicherten Nutzer — Defaults gelten ohne DB-Zeile.</td></tr>'}</tbody>"
+        "</table></div>"
+    )
+
+    add_form = f"""
+<form method="post" class="row g-2 align-items-end mb-4">
+  <input type="hidden" name="action" value="add_node">
+  <div class="col-md-6">
+    <label class="form-label">Knoten hinzufügen</label>
+    <input class="form-control" name="node_id" placeholder="Dezimal oder !xxxxxxxx" required>
+  </div>
+  <div class="col-md-3">
+    <button type="submit" class="btn btn-outline-success">Anlegen (AN)</button>
+  </div>
+</form>
+"""
+
+    detail = ""
+    if edit_nid:
+        prefs = bw.get_node_prefs(edit_nid)
+        locs = bw.list_locations(edit_nid)
+        hex_id, short, long_n = _bw_node_caption(edit_nid)
+        title = " · ".join(x for x in (short, long_n) if x) or hex_id
+        en_chk = " checked" if prefs.get("enabled") else ""
+        home_lab = html.escape(prefs.get("home_label") or "")
+        last = prefs.get("last_alert_ts") or 0
+        last_s = "—"
+        if last:
+            ago = int((time.time() - float(last)) / 60)
+            last_s = f"vor {ago} min"
+
+        extra_rows = []
+        for loc in locs:
+            slot = int(loc["slot"])
+            extra_rows.append(
+                f"""
+<div class="d-flex flex-wrap gap-2 align-items-end mb-2">
+  <div class="flex-grow-1 small">
+    <strong>Ort {slot}</strong> {html.escape(loc["label"])}
+    <span class="text-muted">({loc["lat"]:.4f}, {loc["lon"]:.4f})</span>
+  </div>
+  <form method="post" class="d-flex gap-1">
+    <input type="hidden" name="action" value="extra_radius">
+    <input type="hidden" name="node_id" value="{edit_nid}">
+    <input type="hidden" name="slot" value="{slot}">
+    <input class="form-control form-control-sm" style="width:5rem" name="radius_km"
+           type="number" min="1" max="50" value="{int(loc["radius_km"])}">
+    <button class="btn btn-sm btn-outline-primary" type="submit">km</button>
+  </form>
+  <form method="post" onsubmit="return confirm('Ort {slot} löschen?');">
+    <input type="hidden" name="action" value="del_extra">
+    <input type="hidden" name="node_id" value="{edit_nid}">
+    <input type="hidden" name="slot" value="{slot}">
+    <button class="btn btn-sm btn-outline-danger" type="submit">Löschen</button>
+  </form>
+</div>"""
+            )
+        if not extra_rows:
+            extra_rows.append('<p class="text-muted small mb-2">Keine Zusatzorte.</p>')
+
+        detail = f"""
+<hr class="my-4">
+<h5 class="mb-2">Bearbeiten: {html.escape(title)}</h5>
+<p class="small text-muted mb-3"><code>{edit_nid}</code> · <code>{html.escape(hex_id)}</code>
+  · letzte Home-Warnung: {html.escape(last_s)}</p>
+<form method="post" class="row g-2 align-items-end mb-3">
+  <input type="hidden" name="action" value="save_prefs">
+  <input type="hidden" name="node_id" value="{edit_nid}">
+  <div class="col-auto">
+    <div class="form-check mt-4">
+      <input class="form-check-input" type="checkbox" name="enabled" id="bwEn" value="1"{en_chk}>
+      <label class="form-check-label" for="bwEn">Warnung AN</label>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">Home-Radius (km)</label>
+    <input class="form-control" type="number" min="1" max="50" name="radius_km"
+           value="{int(prefs.get("radius_km") or 8)}">
+  </div>
+  <div class="col-md-3">
+    <button class="btn btn-primary" type="submit">Speichern</button>
+  </div>
+</form>
+<p class="small mb-2">Home: <strong>{'Fix ' + home_lab if prefs.get("home_mode") == "fixed" and home_lab else "GPS"}</strong></p>
+<div class="row g-2 mb-3">
+  <div class="col-md-7">
+    <form method="post" class="d-flex gap-2">
+      <input type="hidden" name="action" value="home_place">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <input class="form-control" name="place" placeholder="Ort, 50.34 8.76 oder JO40AA" required>
+      <button class="btn btn-outline-primary" type="submit">Home-Fix setzen</button>
+    </form>
+  </div>
+  <div class="col-md-3">
+    <form method="post">
+      <input type="hidden" name="action" value="home_gps">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <button class="btn btn-outline-secondary" type="submit">Home = GPS</button>
+    </form>
+  </div>
+</div>
+<h6 class="mt-3">Zusatzorte (max. {bw.MAX_EXTRA_LOCATIONS})</h6>
+{''.join(extra_rows)}
+<form method="post" class="row g-2 align-items-end mt-2">
+  <input type="hidden" name="action" value="add_extra">
+  <input type="hidden" name="node_id" value="{edit_nid}">
+  <div class="col-md-5">
+    <label class="form-label">Neuer Zusatzort</label>
+    <input class="form-control" name="place" placeholder="Ort / Coords / Grid" required>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">Radius km</label>
+    <input class="form-control" name="extra_radius_km" type="number" min="1" max="50" placeholder="wie Home">
+  </div>
+  <div class="col-md-3">
+    <button class="btn btn-outline-success" type="submit">Hinzufügen</button>
+  </div>
+</form>
+<form method="post" class="mt-4" onsubmit="return confirm('Alle Blitzwatch-Daten dieses Knotens löschen?');">
+  <input type="hidden" name="action" value="reset">
+  <input type="hidden" name="node_id" value="{edit_nid}">
+  <button class="btn btn-sm btn-outline-danger" type="submit">Eintrag zurücksetzen</button>
+</form>
+"""
+
+    return f"""
+<p class="small text-muted">Gespeicherte Nutzer-Einstellungen (SQLite). Nodes ohne Eintrag nutzen Defaults (Warnung AN, Default-Radius).
+  Globale Optionen: <a href="/einstellungen">Einstellungen</a> → location / blitzWatch.</p>
+{add_form}
+{table}
+{detail}
+"""

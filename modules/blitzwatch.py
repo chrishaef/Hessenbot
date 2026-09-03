@@ -378,6 +378,36 @@ def delete_location(node_id: int, slot: int) -> bool:
     return deleted
 
 
+def reset_watch_for_node(node_id: int) -> bool:
+    """Remove stored prefs and extra locations (back to defaults)."""
+    initialize_blitzwatch_database()
+    nid = int(node_id)
+    conn = _connect()
+    c = conn.cursor()
+    c.execute("DELETE FROM blitzwatch_locations WHERE node_id=?", (nid,))
+    loc_n = c.rowcount
+    c.execute("DELETE FROM blitzwatch WHERE node_id=?", (nid,))
+    deleted = loc_n > 0 or c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def list_admin_watchers() -> list[dict[str, Any]]:
+    """All nodes with a DB row and/or extra locations, for the admin UI."""
+    initialize_blitzwatch_database()
+    prefs_map = get_all_prefs_map()
+    out: list[dict[str, Any]] = []
+    for nid in sorted(prefs_map):
+        prefs = dict(prefs_map[nid])
+        prefs["node_id"] = nid
+        locs = list_locations(nid)
+        prefs["locations"] = locs
+        prefs["extra_count"] = len(locs)
+        out.append(prefs)
+    return out
+
+
 def set_location_radius(node_id: int, slot: int, radius_km: int) -> dict[str, Any] | None:
     if slot < 1 or slot > MAX_EXTRA_LOCATIONS:
         return None
@@ -519,12 +549,12 @@ def format_status(node_id: int, *, has_fresh_gps: bool) -> str:
     global_on = bool(getattr(st, "blitz_watch_enabled", True))
     prefs = get_node_prefs(node_id)
     locs = list_locations(node_id)
-    lines = ["🤖 !blitzwatch — Blitz-Nähe-Warnung"]
+    node_on = bool(prefs["enabled"]) and global_on
+    lines = ["⚡ Blitzwatch"]
     if not global_on:
-        lines.append("Global: AUS (Admin/Config)")
+        lines.append("Warnung: AUS (vom Admin deaktiviert)")
     else:
-        lines.append("Global: AN")
-    lines.append(f"Deine Node: {'AN' if prefs['enabled'] else 'AUS'}")
+        lines.append(f"Warnung für deine Node: {'AN' if node_on else 'AUS'}")
 
     if prefs["home_mode"] == HOME_MODE_FIXED and prefs["home_lat"] is not None:
         home_s = f"Fix {prefs['home_label'] or f'{prefs['home_lat']:.2f}, {prefs['home_lon']:.2f}'}"
@@ -532,28 +562,31 @@ def format_status(node_id: int, *, has_fresh_gps: bool) -> str:
         home_s = "GPS (≤24h)"
     else:
         home_s = "GPS fehlt (≤24h)"
-    lines.append(f"Home: {home_s} · {prefs['radius_km']} km")
+    lines.append(f"Home: {home_s} · Radius {prefs['radius_km']} km")
 
     if locs:
         for loc in locs:
-            lines.append(f"{loc['slot']}: {loc['label']} · {loc['radius_km']} km")
+            lines.append(f"Ort {loc['slot']}: {loc['label']} · {loc['radius_km']} km")
     else:
-        lines.append(f"Zusatzorte: keine (max {MAX_EXTRA_LOCATIONS})")
+        lines.append(f"Zusatzorte: keine (max. {MAX_EXTRA_LOCATIONS})")
 
     if prefs["last_alert_ts"]:
         ago = int((time.time() - prefs["last_alert_ts"]) / 60)
         lines.append(f"Letzte Home-Warnung: vor {ago} min")
 
-    lines.append(
-        "Befehle: on · off · 5km · home … · add … · N 5km · del N · list · ?"
-    )
+    lines.append("Einstellen: !blitzwatch?")
+    if node_on:
+        lines.append("Aus: !blitzwatch off")
+    else:
+        lines.append("Ein: !blitzwatch on")
+    lines.append("Home-Ort: !blitzwatch home Friedberg")
     return "\n".join(lines)
 
 
 def format_location_list(node_id: int, *, has_fresh_gps: bool) -> str:
     prefs = get_node_prefs(node_id)
     locs = list_locations(node_id)
-    lines = ["🤖 Blitzwatch Standorte"]
+    lines = ["⚡ Blitzwatch Standorte"]
     if prefs["home_mode"] == HOME_MODE_FIXED and prefs["home_lat"] is not None:
         lines.append(
             f"Home (Fix): {prefs['home_label']} · {prefs['radius_km']} km"
@@ -565,23 +598,31 @@ def format_location_list(node_id: int, *, has_fresh_gps: bool) -> str:
         lines.append("Keine Zusatzorte.")
     else:
         for loc in locs:
-            lines.append(f"{loc['slot']}: {loc['label']} · {loc['radius_km']} km")
+            lines.append(f"Ort {loc['slot']}: {loc['label']} · {loc['radius_km']} km")
     free = MAX_EXTRA_LOCATIONS - len(locs)
     lines.append(f"Frei: {free}/{MAX_EXTRA_LOCATIONS}")
+    if locs:
+        example = locs[0]["slot"]
+        lines.append(f"Radius ändern: !blitzwatch {example} 5km")
     return "\n".join(lines)
 
 
 def _usage() -> str:
     return (
-        "🤖 !blitzwatch — Nutzung:\n"
-        "on / off — alle Warnungen\n"
-        "3km…10km — Home-Radius\n"
-        "home <Ort|Coords|Grid> — Home Fix\n"
-        "home gps — Home wieder GPS\n"
-        "add [Nkm] <Ort|Coords|Grid> — Zusatzort\n"
-        "N 5km — Radius Slot N\n"
-        "del N — Slot löschen\n"
-        "list — Standorte"
+        "⚡ Blitzwatch — Einstellen\n"
+        "Ein/Aus:\n"
+        "!blitzwatch on\n"
+        "!blitzwatch off\n"
+        "Home (dein Standort):\n"
+        "!blitzwatch 8km\n"
+        "!blitzwatch home Friedberg\n"
+        "!blitzwatch home gps\n"
+        "Zusatzorte (max. 3):\n"
+        "!blitzwatch add Kassel\n"
+        "!blitzwatch add 5km JO40AA\n"
+        "!blitzwatch del 1\n"
+        "Radius Slot: !blitzwatch 1 5km\n"
+        "Status: !blitzwatch · Liste: !blitzwatch list"
     )
 
 
@@ -606,7 +647,11 @@ def handle_blitzwatch_command(message: str, message_from_id: int, deviceID: int 
     parts = text.replace("?", " ? ").split()
     args = [p for p in parts if p.lower().rstrip("?") != "blitzwatch"]
 
-    if not args or args[0].lower() in ("?", "status", "help", "hilfe"):
+    if not args:
+        return format_status(nid, has_fresh_gps=has_gps)
+    if args[0].lower() in ("?", "help", "hilfe"):
+        return _usage()
+    if args[0].lower() == "status":
         return format_status(nid, has_fresh_gps=has_gps)
 
     token = args[0].lower().strip()

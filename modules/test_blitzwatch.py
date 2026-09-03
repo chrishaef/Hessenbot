@@ -73,7 +73,14 @@ class TestBlitzwatch(unittest.TestCase):
             self.assertEqual(self.bw.get_node_prefs(42)["radius_km"], 5)
 
             out = self.bw.handle_blitzwatch_command("!blitzwatch?", 42, 1)
-            self.assertIn("blitzwatch", out.lower())
+            self.assertIn("Einstellen", out)
+            self.assertIn("!blitzwatch on", out)
+            self.assertIn("home Friedberg", out)
+            self.assertNotIn("Warnung für deine Node", out)
+
+            out = self.bw.handle_blitzwatch_command("!blitzwatch", 42, 1)
+            self.assertIn("Warnung für deine Node", out)
+            self.assertIn("!blitzwatch?", out)
             self.assertIn("5 km", out)
 
     def test_home_fixed_and_gps(self):
