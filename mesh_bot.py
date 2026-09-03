@@ -842,6 +842,9 @@ def handle_whereami(message_from_id, deviceID, channel_number):
     check_throttle = api_throttle(message_from_id, deviceID, apiName='whereami')
     if check_throttle:
         return check_throttle
+    # !whereami = nur Position der anfragenden Node — kein Bot-Standort-Fallback
+    if not from_gps:
+        return my_settings.NO_DATA_NOGPS
     msg = where_am_i(str(lat), str(lon))
     alt = get_node_altitude_m(message_from_id, deviceID)
     if alt is not None:

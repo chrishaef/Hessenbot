@@ -113,6 +113,43 @@ class TestLocationArgs(unittest.TestCase):
             self.assertEqual(label, "Friedberg, Hessen")
             self.assertAlmostEqual(lat_r, 50.33)
 
+    def test_where_am_i_redacted_hides_street(self):
+        from modules import locationdata as ld
+        from modules import settings as my_settings
+
+        fake_loc = MagicMock()
+        fake_loc.raw = {
+            "address": {
+                "house_number": "12",
+                "road": "Geheimstrasse",
+                "city": "Friedberg",
+                "town": "Friedberg",
+                "state": "Hessen",
+                "postcode": "61169",
+                "county": "Wetteraukreis",
+                "country": "Deutschland",
+            }
+        }
+        with patch.object(ld, "Nominatim") as nom_cls:
+            nom_cls.return_value.reverse.return_value = fake_loc
+            out = ld.where_am_i("51.00", "9.00", redacted=True)
+            self.assertNotIn("Geheimstrasse", out)
+            self.assertNotIn("Straße:", out)
+            self.assertNotIn("Nr:", out)
+            self.assertIn("Ort:", out)
+            self.assertNotIn("Maidenhead", out)
+
+            out_full = ld.where_am_i("51.00", "9.00", redacted=False)
+            self.assertIn("Geheimstrasse", out_full)
+            self.assertIn("Straße:", out_full)
+
+            with patch.object(my_settings, "latitudeValue", 50.33456):
+                with patch.object(my_settings, "longitudeValue", 8.75567):
+                    # fuzzConfigLocation rounds to 2 decimals — must still redact
+                    out_fuzz = ld.where_am_i("50.33", "8.76", redacted=False)
+                    self.assertNotIn("Geheimstrasse", out_fuzz)
+                    self.assertNotIn("Straße:", out_fuzz)
+
 
 if __name__ == "__main__":
     unittest.main()

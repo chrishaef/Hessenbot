@@ -699,6 +699,7 @@ def resolve_dest_node(raw: str, interface: int) -> Tuple[Optional[int], Optional
     target = raw[2:].strip().lower() if raw.startswith("n:") else raw.strip().lower()
     if not target:
         return None, "Bitte Empfänger wählen."
+    target_norm = _normalize_party_name(target)
 
     from modules import admin_web_ops as ops
 
@@ -710,13 +711,19 @@ def resolve_dest_node(raw: str, interface: int) -> Tuple[Optional[int], Optional
         if r.get("is_self"):
             continue
         num = int(r["num"])
+        short = html.unescape(str(r.get("shortName") or "")).strip()
+        long_n = html.unescape(str(r.get("longName") or "")).strip()
+        node_id = html.unescape(str(r.get("node_id") or "")).strip()
         candidates = {
             str(num).lower(),
-            html.unescape(str(r.get("node_id") or "")).strip().lower(),
-            html.unescape(str(r.get("shortName") or "")).strip().lower(),
-            html.unescape(str(r.get("longName") or "")).strip().lower(),
+            node_id.lower(),
+            short.lower(),
+            long_n.lower(),
+            _normalize_party_name(short),
+            _normalize_party_name(long_n),
         }
-        if target in candidates:
+        candidates.discard("")
+        if target in candidates or (target_norm and target_norm in candidates):
             return num, None
 
     return None, f"Empfänger nicht in NodeDB gefunden ({raw})."

@@ -249,7 +249,7 @@ def get_place_name(lat=0, lon=0, max_age: float = 86400) -> str:
         return "?"
 
 
-def where_am_i(lat=0, lon=0, short=False, zip=False):
+def where_am_i(lat=0, lon=0, short=False, zip=False, redacted=False):
     whereIam = ""
     grid = mh.to_maiden(float(lat), float(lon))
     location = lat, lon
@@ -260,6 +260,21 @@ def where_am_i(lat=0, lon=0, short=False, zip=False):
     
     # initialize Nominatim API
     geolocator = Nominatim(user_agent="mesh-bot")
+
+    # Bot-Fallback / fuzzed Config-Koordinaten: nie Straße/Hausnummer preisgeben.
+    # Exact-match reicht nicht, weil get_node_location oft auf 2 Dezimalstellen rundet.
+    use_redacted = bool(redacted)
+    if not use_redacted:
+        try:
+            lat_f, lon_f = float(lat), float(lon)
+            cfg_lat = float(my_settings.latitudeValue)
+            cfg_lon = float(my_settings.longitudeValue)
+            if (lat_f == cfg_lat and lon_f == cfg_lon) or (
+                lat_f == round(cfg_lat, 2) and lon_f == round(cfg_lon, 2)
+            ):
+                use_redacted = True
+        except (TypeError, ValueError):
+            pass
     
     try:
         # Nomatim API call to get address
@@ -281,21 +296,28 @@ def where_am_i(lat=0, lon=0, short=False, zip=False):
             whereIam = location.raw['address'].get('postcode', '')
             return whereIam
         
-        if float(lat) == my_settings.latitudeValue and float(lon) == my_settings.longitudeValue:
-            # redacted address when no GPS and using default location
-            location = geolocator.reverse(str(lat) + ", " + str(lon))
-            address = location.raw['address']
+        location = geolocator.reverse(str(lat) + ", " + str(lon))
+        address = location.raw['address']
+        if use_redacted:
+            # redacted address when no GPS / bot config location
             address_components = {
                 'city': 'Ort',
+                'town': 'Ort',
+                'village': 'Ort',
                 'state': 'Bundesland',
                 'postcode': 'PLZ',
                 'county': 'Kreis',
                 'country': 'Land'
             }
-            whereIam += ', '.join([f"{label}: {address.get(component, '')}" for component, label in address_components.items() if component in address])
+            parts = []
+            seen_labels = set()
+            for component, label in address_components.items():
+                if component not in address or label in seen_labels:
+                    continue
+                parts.append(f"{label}: {address[component]}")
+                seen_labels.add(label)
+            whereIam += ', '.join(parts)
         else:
-            location = geolocator.reverse(lat + ", " + lon)
-            address = location.raw['address']
             address_components = {
                 'house_number': 'Nr',
                 'road': 'Straße',

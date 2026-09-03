@@ -179,7 +179,7 @@ cp config.template config.ini
 | `!blitzwatch` / `?` / `on` / `off` / `home` / `add` / `del` | Blitz-Nähe: Home + bis 3 Zusatzorte |
 | `!blitzwatch web` | DM: Code für Web-Einstellungen (`/mein-blitzwatch`) |
 | `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |
-| `!whereami` | Ortsname (Geocoding) + Höhe falls übertragen |
+| `!whereami` | Adresse der anfragenden Node (nur bei bekanntem Standort), sonst Hinweis ohne GPS |
 | `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |
 | `!howfar` / `!howfar reset` | Zurückgelegte Strecke seit letztem Aufruf |
 | `!howtall <Schatten>` | Höhe per Sonnenwinkel (Schattenlänge in m/ft) |

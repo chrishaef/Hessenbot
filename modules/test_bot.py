@@ -166,6 +166,28 @@ class TestBot(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(dm_peer_id(msgs[0]), "n:chris")
 
+    def test_resolve_dest_node_name_and_empty(self):
+        from unittest.mock import patch
+        from modules.admin_mesh_chat import resolve_dest_node
+
+        self.assertEqual(resolve_dest_node("", 1), (None, "Bitte Empfänger wählen."))
+        self.assertEqual(resolve_dest_node("424242", 1), (424242, None))
+        self.assertEqual(resolve_dest_node("!0284a8c8", 1), (0x0284A8C8, None))
+
+        rows = [
+            {
+                "num": 99,
+                "is_self": False,
+                "node_id": "!00000063",
+                "shortName": "Chr",
+                "longName": "Chris | meshhessen.de",
+            }
+        ]
+        with patch("modules.admin_web_ops.list_node_rows", return_value=(None, rows)):
+            num, err = resolve_dest_node("n:chris", 1)
+            self.assertIsNone(err)
+            self.assertEqual(num, 99)
+
     def test_channel_feed_orders_in_before_out_same_second(self):
         import os
         import tempfile

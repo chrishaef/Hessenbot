@@ -329,7 +329,11 @@
       if (!pid) return;
       const cur = map[pid];
       if (!cur || (m.time || "") >= (cur.time || "")) {
-        const nodeNum = m.peer_num || (/^\d+$/.test(pid) ? pid : "");
+        const nodeNum =
+          m.peer_num ||
+          (/^\d+$/.test(pid) ? pid : "") ||
+          (cur && cur.nodeNum) ||
+          "";
         map[pid] = {
           id: pid,
           nodeNum: nodeNum,
@@ -343,10 +347,54 @@
         cur.nodeNum = m.peer_num;
       }
     });
+    Object.keys(map).forEach(function (pid) {
+      const u = map[pid];
+      if (!u.nodeNum) {
+        u.nodeNum = lookupNodeNum(pid, u.label) || "";
+      }
+    });
     return Object.values(map).sort(function (a, b) {
       if (a.time === b.time) return 0;
       return a.time > b.time ? -1 : 1;
     });
+  }
+
+  function lookupNodeNum(peerId, label) {
+    const id = String(peerId || "");
+    if (/^\d+$/.test(id)) return id;
+    if (!nodedbPeers.length) return "";
+
+    if (id.charAt(0) === "!") {
+      const hex = id.toLowerCase();
+      for (let i = 0; i < nodedbPeers.length; i++) {
+        const n = nodedbPeers[i];
+        if ((n.search || "").indexOf(hex) !== -1 || String(n.id).toLowerCase() === hex) {
+          return n.nodeNum || "";
+        }
+      }
+    }
+
+    const nameKey = id.indexOf("n:") === 0 ? id.slice(2).toLowerCase() : "";
+    const labelToken = String(label || "")
+      .split(/[·|]/)[0]
+      .trim()
+      .toLowerCase();
+    const tokens = [nameKey, labelToken].filter(Boolean);
+
+    for (let i = 0; i < nodedbPeers.length; i++) {
+      const n = nodedbPeers[i];
+      const shortN = String(n.short || "").trim().toLowerCase();
+      const longN = String(n.long || "").trim().toLowerCase();
+      const longFirst = longN.split(/\s+/)[0] || "";
+      for (let t = 0; t < tokens.length; t++) {
+        const tok = tokens[t];
+        if (!tok) continue;
+        if (shortN === tok || longN === tok || longFirst === tok) {
+          return n.nodeNum || "";
+        }
+      }
+    }
+    return "";
   }
 
   function loadNodedbPeers() {
@@ -374,6 +422,10 @@
           };
         });
         nodedbLoaded = true;
+        if (selectedPeerId && !selectedPeerNodeNum) {
+          selectedPeerNodeNum =
+            lookupNodeNum(selectedPeerId, selectedPeerLabel) || "";
+        }
         renderUserList();
       })
       .catch(function () {
@@ -492,6 +544,9 @@
     selectedPeerNodeNum = nodeNum
       ? String(nodeNum)
       : (/^\d+$/.test(selectedPeerId) ? selectedPeerId : "");
+    if (!selectedPeerNodeNum) {
+      selectedPeerNodeNum = lookupNodeNum(selectedPeerId, selectedPeerLabel) || "";
+    }
     if (activeLabelEl) {
       activeLabelEl.textContent =
         selectedPeerLabel || selectedPeerId || "Bitte Nutzer wählen";
@@ -632,9 +687,24 @@
             }
           }
         }
+        if (!destNode) {
+          destNode = lookupNodeNum(selectedPeerId, selectedPeerLabel) || "";
+        }
         if (!destNode && /^\d+$/.test(selectedPeerId)) {
           destNode = selectedPeerId;
         }
+        // Name-/Hex-Keys an den Server geben, damit resolve_dest_node greifen kann
+        if (!destNode && selectedPeerId) {
+          destNode = selectedPeerId;
+        }
+        if (!destNode) {
+          setStatus("Bitte Empfänger wählen.", true);
+          if (sendBtn) sendBtn.disabled = false;
+          return;
+        }
+        selectedPeerNodeNum = /^\d+$/.test(String(destNode))
+          ? String(destNode)
+          : selectedPeerNodeNum;
         body.set("dest_node", destNode);
       }
       fetch(cfg.apiSend, {
