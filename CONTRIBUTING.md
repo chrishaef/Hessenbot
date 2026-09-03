@@ -27,9 +27,11 @@ cp config.template config.ini
 Run relevant tests:
 
 ```sh
-python3 -m pytest modules/test_blitzwatch.py -q
+python3 -m pytest modules/test_blitzwatch.py modules/test_location_args.py -q
 python3 modules/test_bot.py
 ```
+
+On GitHub, the **Tests** workflow runs the pytest suite automatically on every push/PR to `main` (see `.github/workflows/tests.yml`).
 
 ## Pull requests
 

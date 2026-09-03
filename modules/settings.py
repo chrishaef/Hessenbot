@@ -302,7 +302,11 @@ try:
     explicitCmd = config['general'].getboolean('explicitCmd', True) # default on
     zuluTime = config['general'].getboolean('zuluTime', False) # aka 24 hour time
     log_messages_to_file = config['general'].getboolean('LogMessagesToFile', False) # default off
-    log_backup_count = config['general'].getint('LogBackupCount', 32) # default 32 days
+    # Template: log_backup_count · älterer Name: LogBackupCount
+    if config['general'].has_option('log_backup_count'):
+        log_backup_count = config['general'].getint('log_backup_count')
+    else:
+        log_backup_count = config['general'].getint('LogBackupCount', 32) # default 32 days
     syslog_to_file = config['general'].getboolean('SyslogToFile', True) # default on
     LOGGING_LEVEL = config['general'].get('sysloglevel', 'DEBUG') # default DEBUG
     urlTimeoutSeconds = config['general'].getint('urlTimeout', 15) # default 15 seconds for URL fetch timeout
@@ -321,7 +325,12 @@ try:
     MOTD = config['general'].get('motd', MOTD)
     autoPingInChannel = config['general'].getboolean('autoPingInChannel', False)
     enableCmdHistory = config['general'].getboolean('enableCmdHistory', True)
-    lheardCmdIgnoreNode = config['general'].get('lheardCmdIgnoreNode', '').split(',')
+    # Template: lheardCmdIgnoreNodes · älterer Name: lheardCmdIgnoreNode
+    _lheard_ignore = config['general'].get(
+        'lheardCmdIgnoreNodes',
+        config['general'].get('lheardCmdIgnoreNode', ''),
+    )
+    lheardCmdIgnoreNode = _lheard_ignore.split(',')
     whoami_enabled = config['general'].getboolean('whoami', True)
     bee_enabled = config['general'].getboolean('bee', False) # 🐝 off by default undocumented
     solar_conditions_enabled = config['general'].getboolean('spaceWeather', True)
@@ -371,14 +380,22 @@ try:
     reqLocationEnabled = config['sentry'].getboolean('reqLocationEnabled', False) # default False
     cmdShellSentryAlerts = config['sentry'].getboolean('cmdShellSentryAlerts', False) # default False
     sentryAlertNear = config['sentry'].get('sentryAlertNear', 'sentry_alert_near.sh') # default sentry_alert_near.sh
-    sentryAlertFar = config['sentry'].get('sentryAlertFar', 'sentry_alert_far.sh') # default sentry_alert_far.sh
+    # Template: sentryAlertAway · älterer Name: sentryAlertFar
+    sentryAlertFar = config['sentry'].get(
+        'sentryAlertAway',
+        config['sentry'].get('sentryAlertFar', 'sentry_alert_far.sh'),
+    )
 
     # location
     location_enabled = config['location'].getboolean('enabled', True)
     latitudeValue = config['location'].getfloat('lat', 48.50)
     longitudeValue = config['location'].getfloat('lon', -123.0)
     fuzz_config_location = config['location'].getboolean('fuzzConfigLocation', True) # default True
-    fuzzItAll = config['location'].getboolean('fuzzAllLocations', False) # default False, only fuzz config location
+    # Template: fuzzItAll · älterer Name: fuzzAllLocations
+    if config['location'].has_option('fuzzItAll'):
+        fuzzItAll = config['location'].getboolean('fuzzItAll')
+    else:
+        fuzzItAll = config['location'].getboolean('fuzzAllLocations', False)
     use_meteo_wxApi = config['location'].getboolean('UseMeteoWxAPI', False) # default False use NOAA
     metar_enabled = config['location'].getboolean('metar_enabled', True)
     wx_extra_commands = config['location'].getboolean('wxExtraCommands', True)

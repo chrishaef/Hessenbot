@@ -1036,6 +1036,13 @@ _CONFIG_ATTR_ALIASES = {
     "respond_by_dm_only": "useDMForResponse",
     "filemon_enabled": "file_monitor_enabled",
     "LogBackupCount": "log_backup_count",
+    "log_backup_count": "log_backup_count",
+    "lheardCmdIgnoreNodes": "lheardCmdIgnoreNode",
+    "lheardCmdIgnoreNode": "lheardCmdIgnoreNode",
+    "fuzzAllLocations": "fuzzItAll",
+    "fuzzItAll": "fuzzItAll",
+    "sentryAlertAway": "sentryAlertFar",
+    "sentryAlertFar": "sentryAlertFar",
     "bee": "bee_enabled",
 }
 

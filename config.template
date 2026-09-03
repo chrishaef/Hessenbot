@@ -518,8 +518,9 @@ port = 5000
 # Session signing; prefer env HESSENBOT_WEB_SECRET instead of storing in config
 secret_key =
 username = admin
-# Leave empty and set env HESSENBOT_WEB_PASSWORD, or set a strong password here
-password = hessenadmin
+# Passwort leer lassen und Env HESSENBOT_WEB_PASSWORD setzen, oder hier ein starkes Passwort eintragen.
+# Niemals ein öffentliches Default-Passwort verwenden — ohne Passwort startet der Admin-Login nicht.
+password =
 # Optional path overrides (project-relative if not absolute). Empty = use [fileMon] file_path / news_file_path and logs/
 alert_file =
 news_file =
