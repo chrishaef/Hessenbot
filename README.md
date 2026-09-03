@@ -14,7 +14,7 @@ Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS
 |:---:|:---:|:---:|:---:|
 | ![Befehlsliste](docs/screenshots/befehle.png) | ![NodeDB — 543 Knoten](docs/screenshots/nodedb.png) | ![FAQ & PKI-Check](docs/screenshots/faq.png) | ![BBS öffentlich & DM-Warteschlange](docs/screenshots/bbs.png) |
 
-Öffentlich unter `/`, `/befehle`, `/nodedb`, `/faq`, `/bbs` — Admin-Login unter `/admin`.
+Öffentlich unter `/`, `/befehle`, `/mein-blitzwatch`, `/faq`, `/impressum`, `/datenschutz` — Admin-Login unter `/admin`.
 
 ### Mesh: Befehle & Trace
 
@@ -62,6 +62,9 @@ Weitere Credits unten unter [Credits (Upstream)](#credits-upstream).
 | Installation | [INSTALL.md](INSTALL.md) |
 | Konfiguration | [config.template](config.template) → `config.ini` |
 | Modul-Details | [modules/README.md](modules/README.md) |
+| Mitwirken | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Sicherheit | [SECURITY.md](SECURITY.md) |
+| Änderungen | [CHANGELOG.md](CHANGELOG.md) |
 | Befehlsreferenz (Web) | `/befehle` am laufenden Portal |
 | FAQ | `/faq` am laufenden Portal |
 
@@ -90,8 +93,7 @@ cp config.template config.ini
 
 ### Ping, Trace & DM-Zustellung
 
-- **`!ping` / `!pong` / `!test` / `!ack` / `!cq`**: QSL-Antwort im Format  
-  `LongName [!nodeid] QSL @ "Ort" | N Hops LoRa|MQTT`
+- **`!ping` / `!pong` / `!test` / `!ack` / `!cq`**: QSL-Antwort in mehreren Zeilen mit Ort, optional Maidenhead-Grid, Hops und SNR bzw. MQTT
 - **Hop-Anzeige bei MQTT-Gateways:** Für über MQTT getunnelte Pakete werden Hops aus NodeDB, Trace-Cache und Paket-Metadaten aufgelöst — nicht mehr pauschal „0 Hops MQTT“.
 - **`!trace` / `!trace MHH` / `!trace !604f8594`**: Meshtastic-Traceroute zum Bot bzw. Ziel; Ergebnis (Hin- und Rückweg) per **DM**. Globale Warteschlange (ein Trace gleichzeitig), ~65 s Abstand pro Funk-Interface.
 - **Channel-Test** (optional): Auf konfigurierten Kanälen antwortet der Bot auf ein nacktes **`test`** / **`Test`** (ohne `!`) **direkt im Kanal** — gleiche Antwort wie `!test`. Ein-/Aus-Schaltung und Kanalauswahl im Web-Admin (Tab **Channel-Test**). Alle anderen Befehle bleiben unverändert (DM und/oder `!`).
@@ -109,14 +111,17 @@ cp config.template config.ini
   - Warnung per **DM** (pro Treffer-Punkt) und **eine** Kanalnachricht (Kurzname + Distanz + Label)
   - Standard: aktiv (Opt-out), Home-Radius **8 km** (1–10 km), Cooldown **60 min** **pro Watch-Punkt** (+ Kanal), Bot-Node ausgeschlossen
   - Steuerung nur für die eigene Node:
-    - `!blitzwatch` / `list` — Status
+    - `!blitzwatch` — Status; `!blitzwatch?` — Einstell-Hilfe
     - `on` / `off` — alle Warnungen
     - `5km` — Home-Radius (Default für neue Zusatzorte)
     - `home <Ort|Coords|Grid>` / `home gps` — Home Fix bzw. wieder GPS
     - `add [Nkm] <…>` — Zusatzort (max. 3); `N 5km` — Radius Slot N; `del N` — löschen
-  - Nutzerhilfe im Web: öffentliche Seite **`/befehle#blitzwatch`** (Steuerung + Funktionsweise)
+    - **`!blitzwatch web`** (Alias `set`) — nur per **DM**: 5-stelliger Code (ca. 15 Min., einmalig) für die Web-Einstellungen
+  - **Web:** öffentliches Menü **Blitzwatch** (`/mein-blitzwatch`) — Code eingeben, dann Home/Radius/Zusatzorte im Browser setzen
+  - Admin: Tab **Blitzwatch** (NodeDB-Liste, Suche, Editor); optional `[webAdmin] publicUrl` für den Link in der DM
+  - Nutzerhilfe: **`/befehle#blitzwatch`**
   - Status in der NodeDB (Admin/öffentlich): z. B. **an 8km** / **an 8km+2** / **bereit 8km** / **aus**
-  - Config/Admin: `[location]` `blitzWatchEnabled` und zugehörige Parameter (siehe `config.template`)
+  - Config: `[location]` `blitzWatchEnabled` und zugehörige Parameter (siehe `config.template`)
 
 ### Admin Mesh-Chat (DM & Kanal)
 
@@ -129,18 +134,22 @@ cp config.template config.ini
 |-----|--------|
 | `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard 24h, DM-Zustellung 24h) |
 | `/befehle` | Befehlsliste inkl. `!trace` und ausführlicher **Blitzwatch**-Hilfe (`#blitzwatch`) |
+| `/mein-blitzwatch` | Blitzwatch-Einstellungen per DM-Code (`!blitzwatch web`) |
 | `/faq` | Hilfe & PKI-Check |
-| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Einstellungen, … |
+| `/impressum` | Impressum (Angaben aus `[webAdmin]`) |
+| `/datenschutz` | Datenschutzhinweise |
+| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Blitzwatch, Einstellungen, … |
 
 **Öffentliches Dashboard:** Metriken, Aktivitätscharts, Leaderboard (24-Stunden-Ansicht), BBS, NodeDB — ohne interne Log-Warnungen/Fehler-Kacheln.
 
-**Admin-Bereich** (Tabs): Übersicht, DM, News, Messages, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, BBS, Umfragen, Einstellungen, Banliste, Logs.
+**Admin-Bereich** (Tabs): Übersicht, DM, News, Kanal, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, **Blitzwatch**, BBS, Umfragen, Einstellungen, Banliste, Logs.
 
 - **MOTD** und **News**: Text bearbeiten plus automatischer Versand — Zeitplan mit klarer UI; Kanalwahl aus der Meshtastic-Instanz
 - **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …) mit derselben Intervall-UI und Kanalwahl vom Radio
 - **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot) sowie **Mesh-Kanäle** (Name, Rolle, PSK, Up-/Downlink je Slot 0–7)
-- Einheitliche **Top-Navigation** (Statistik, Befehle, BBS, NodeDB, FAQ) in öffentlichem und Admin-Bereich
-- Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template))
+- **Blitzwatch (Admin):** NodeDB-Liste mit Suche; Nutzer-Einstellungen (Home, Radius, Zusatzorte)
+- Einheitliche **Top-Navigation** (Statistik, Befehle, Blitzwatch, BBS, NodeDB, FAQ); Footer: Impressum · Datenschutz · GitHub
+- Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template)); optional `publicUrl`, Impressumsfelder
 
 ### Kernfunktionen (aus meshing-around, beibehalten)
 
@@ -158,7 +167,7 @@ cp config.template config.ini
 | Befehl | Beschreibung |
 |--------|----------------|
 | `!cmd` | Kurze Befehlsliste (aktivierte Traps) |
-| `!ping` / `!pong` / `!test` | QSL mit Ort, Hops, LoRa/MQTT |
+| `!ping` / `!pong` / `!test` | QSL mit Ort, optional Grid, Hops, SNR/MQTT |
 | `!trace` / `!trace MHH` | Traceroute zu dir bzw. Ziel-Station (Ergebnis per DM, Warteschlange) |
 | `!trace?` | Kurzhilfe zu `!trace` |
 | `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
@@ -167,7 +176,8 @@ cp config.template config.ini
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
 | `!wx` / `!wx Fulda` / `!wx JO40AA` | Wetter (Open-Meteo); optional Ort/Koordinaten/Grid |
 | `!uv` / `!regen` / `!blitz` | UV, Regen, Blitz — optional ebenfalls mit Ort/Koordinaten |
-| `!blitzwatch` / `on` / `off` / `5km` / `home` / `add` / `del` | Blitz-Nähe: Home + bis 3 Zusatzorte (Ort/Coords/Grid) |
+| `!blitzwatch` / `?` / `on` / `off` / `home` / `add` / `del` | Blitz-Nähe: Home + bis 3 Zusatzorte |
+| `!blitzwatch web` | DM: Code für Web-Einstellungen (`/mein-blitzwatch`) |
 | `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |
 | `!whereami` | Ortsname (Geocoding) + Höhe falls übertragen |
 | `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |
@@ -247,7 +257,11 @@ touch .checkall && python3 modules/test_bot.py
 
 ## Lizenz & Haftung
 
+**Lizenz:** [GNU GPL v3](LICENSE) (wie Upstream meshing-around).
+
 Meshtastic® ist eine eingetragene Marke von Meshtastic LLC. Die Meshtastic-Softwarekomponenten stehen unter verschiedenen Lizenzen — siehe GitHub. **Keine Gewährleistung — Nutzung auf eigenes Risiko.**
+
+Sicherheitsmeldungen: siehe [SECURITY.md](SECURITY.md).
 
 ## Credits (Upstream)
 

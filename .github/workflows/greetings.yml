@@ -3,7 +3,7 @@ name: Greetings
 on:
   issues:
     types: [opened]
-  pull_request:
+  pull_request_target:
     types: [opened]
 
 permissions:
@@ -18,4 +18,15 @@ jobs:
       - uses: actions/first-interaction@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          pr_message: "Thank you for your pull request!"
+          issue_message: |
+            Danke fürs Öffnen eines Issues bei **Hessenbot**!
+
+            Bitte beschreibe Umgebung (OS, Python, Meshtastic), relevante `config.ini`-Abschnitte **ohne Passwörter/Secrets**, und was du erwartet hast vs. was passiert.
+
+            Sicherheitsthemen: siehe [SECURITY.md](https://github.com/chrishaef/Hessenbot/blob/main/SECURITY.md).
+          pr_message: |
+            Danke für den Pull Request!
+
+            Kurzchecklist: Fokus halten, keine Secrets committen, bei Verhaltens-/Config-Änderungen README oder `config.template` mitziehen, Tests wo sinnvoll (`pytest modules/test_blitzwatch.py`).
+
+            Leitfaden: [CONTRIBUTING.md](https://github.com/chrishaef/Hessenbot/blob/main/CONTRIBUTING.md).
