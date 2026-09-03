@@ -1077,6 +1077,16 @@ body.page-login {
   overflow: auto;
 }
 
+.bw-admin-edit {
+  scroll-margin-top: 1rem;
+}
+
+.bw-admin-list .table-scroll {
+  max-height: min(55vh, 28rem);
+  overflow: auto;
+  margin-top: 0;
+}
+
 .nodedb-search-toolbar .input-group-text {
   background: var(--card-bg-muted);
   border-color: var(--card-border);

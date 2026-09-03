@@ -143,6 +143,19 @@ def get_node(node_id: int) -> dict:
     return dict(_nodedb.get(str(int(node_id)), {}))
 
 
+def list_nodes() -> list[tuple[int, dict]]:
+    """All persistent NodeDB entries, newest lastSeen first."""
+    _ensure_nodedb_loaded()
+    items: list[tuple[int, dict]] = []
+    for key, entry in _nodedb.items():
+        try:
+            items.append((int(key), dict(entry)))
+        except (TypeError, ValueError):
+            continue
+    items.sort(key=lambda x: (-float(x[1].get("lastSeen") or 0), x[0]))
+    return items
+
+
 def _ensure_nodedb_loaded() -> None:
     if _nodedb:
         return
