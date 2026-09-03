@@ -38,6 +38,8 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 - Ping/Hop-Zählung bei MQTT; Trace Rate-Limits und Self-Loops
 - DWD-Warnungsausgabe; `!wx?` Kurzhilfe; diverse Scheduler/News- und Dashboard-Fixes
 - CI: Config-Aliases ohne fehlerhaftes `SectionProxy.has_option`
+- `!whereami` nur bei bekanntem Node-Standort (kein Bot-Adress-Fallback)
+- **Mesh-DM**: Empfänger-Auflösung in laufenden Chats; Threads am Ziel-Node statt „Web-Admin“; eingehende DMs nicht mehr in allen Threads; stabile Thread-IDs über `[!hex]` in DM-Logs
 
 ## [1.0.0] — 2026-05-19
 
