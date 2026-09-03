@@ -166,6 +166,19 @@ class TestBot(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(dm_peer_id(msgs[0]), "n:chris")
 
+        line_hex = (
+            "2026-05-31 12:46:00,200 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris [!0284a8c8]\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(line_hex)
+            msgs, err = collect_messages(td, kind="dm", limit=10)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(dm_peer_id(msgs[0]), str(0x0284A8C8))
+
     def test_resolve_dest_node_name_and_empty(self):
         from unittest.mock import patch
         from modules.admin_mesh_chat import resolve_dest_node
@@ -361,14 +374,17 @@ class TestBot(unittest.TestCase):
                 "device": 1,
                 "text": "Hallo zurück",
                 "id": "1127983492",
-                "short": "Web-Admin",
-                "long": "Hessenbot Web-Admin",
+                "short": "Chris",
+                "long": "Chris mobil",
                 "source": "web",
             }
         )
         merged = _merge_events(msgs, [])
         outgoing = [m for m in merged if m.get("dir") == "out"]
         self.assertEqual(len(outgoing), 1)
+        self.assertEqual(outgoing[0].get("source"), "web")
+        # Peer identity must stay the remote node, not Web-Admin
+        self.assertNotEqual(outgoing[0].get("short"), "Web-Admin")
         with _RING_LOCK:
             _RING.clear()
 

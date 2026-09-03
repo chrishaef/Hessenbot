@@ -1211,6 +1211,19 @@ def get_name_from_number(number, type='long', nodeInt=1):
 
     return str(decimal_to_hex(number))
 
+
+def format_dm_peer_for_log(node_id, nodeInt=1) -> str:
+    """Long name plus [!hex] so Mesh-DM UI can thread by stable node id."""
+    name = get_name_from_number(node_id, "long", nodeInt)
+    try:
+        hex_id = f"!{int(node_id):08x}"
+    except (TypeError, ValueError):
+        hex_id = str(decimal_to_hex(node_id))
+    if str(name).strip().lower() == hex_id.lower():
+        return f"[{hex_id}]"
+    return f"{name} [{hex_id}]"
+
+
 def get_num_from_short_name(short_name, nodeInt=1):
     # First, search the specified interface
     interface = globals()[f'interface{nodeInt}']
@@ -1995,7 +2008,7 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
                     logger.info(
                         f"Device:{nodeInt} {ack_tag}Chunker{chunk_of} Sending DM: {CustomFormatter.white}"
                         f"{m.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
-                        f"{get_name_from_number(nodeid, 'long', nodeInt)}"
+                        f"{format_dm_peer_for_log(nodeid, nodeInt)}"
                     )
                 _send_with_reply(**send_kwargs)
 
@@ -2022,7 +2035,7 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
                 logger.info(
                     f"Device:{nodeInt} {ack_tag}Sending DM: {CustomFormatter.white}"
                     f"{message.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
-                    f"{get_name_from_number(nodeid, 'long', nodeInt)}"
+                    f"{format_dm_peer_for_log(nodeid, nodeInt)}"
                 )
             _send_with_reply(**send_kwargs)
             time.sleep(responseDelay)

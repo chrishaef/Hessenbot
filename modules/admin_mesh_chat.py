@@ -28,6 +28,7 @@ _SEND_LOCK = threading.Lock()
 _SEND_DM_TEXT_RE = re.compile(r"Sending DM:\s*(.+?)\s+To:")
 _RECV_DM_TEXT_RE = re.compile(r"(?:Received|Ignoring) DM:\s*(.+?)\s+From:")
 _RECV_DM_MISSING_BANG_RE = re.compile(r"Received DM \(missing !\):\s*(.+?)\s+From:")
+_PEER_HEX_SUFFIX_RE = re.compile(r"\s*\[(![0-9a-fA-F]{1,16})\]\s*$")
 
 MESHBOT_TAIL_IN = 12000
 MESHBOT_TAIL_OUT_SCAN = 30000
@@ -183,7 +184,34 @@ def _outgoing_channel_fingerprints(ev: Dict[str, Any]) -> List[str]:
 
 
 def _is_web_admin_send(ev: Dict[str, Any]) -> bool:
-    return ev.get("source") == "web" or ev.get("short") == "Web-Admin"
+    return ev.get("source") == "web" or (
+        ev.get("kind") != "dm" and ev.get("short") == "Web-Admin"
+    )
+
+
+def _dest_peer_fields(dest_node: int, interface: int) -> Dict[str, str]:
+    """Remote-party fields for an outgoing DM (never the Web-Admin sender label)."""
+    from modules import admin_web_ops as ops
+
+    dest_s = str(int(dest_node))
+    fields = {"id": dest_s, "hex": "", "short": "", "long": f"#{dest_s}"}
+    err, rows = ops.list_node_rows(interface)
+    if err:
+        return fields
+    for r in rows:
+        try:
+            if int(r.get("num")) != int(dest_node):
+                continue
+        except (TypeError, ValueError):
+            continue
+        short = html.unescape(str(r.get("shortName") or "")).strip()
+        long_n = html.unescape(str(r.get("longName") or "")).strip()
+        node_id = html.unescape(str(r.get("node_id") or "")).strip()
+        fields["hex"] = node_id
+        fields["short"] = short
+        fields["long"] = long_n or short or f"#{dest_s}"
+        return fields
+    return fields
 
 
 def _semantic_fingerprints(ev: Dict[str, Any]) -> List[str]:
@@ -256,6 +284,26 @@ def dm_peer_id(entry: Dict[str, Any]) -> str:
     return ""
 
 
+def _peer_from_log_label(nodes: _NodeDirectory, label: str) -> Dict[str, str]:
+    """Resolve From:/To: label; prefer trailing [!hex] for stable DM thread ids."""
+    label = (label or "").strip()
+    if not label:
+        return {"id": "", "hex": "", "short": "", "long": ""}
+    m = _PEER_HEX_SUFFIX_RE.search(label)
+    if m:
+        hex_id = m.group(1)
+        name = label[: m.start()].strip()
+        peer = dict(nodes.resolve(hex_id))
+        if name:
+            peer["long"] = peer.get("long") or name
+            try:
+                nodes.register(int(hex_id[1:], 16), long_name=name)
+            except ValueError:
+                pass
+        return peer
+    return nodes.resolve(label)
+
+
 def _trim_feed(merged: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
     """Keep the newest ``limit`` rows but never drop bot replies in that window."""
     if limit <= 0 or len(merged) <= limit:
@@ -307,7 +355,7 @@ def _parse_meshbot_line(
     if "Sending DM:" in plain or "Sending Multi-Chunk DM:" in plain:
         to_m = re.search(r"\sTo:\s*(.+?)$", plain)
         to_label = to_m.group(1).strip() if to_m else ""
-        peer = nodes.resolve(to_label) if to_label else {}
+        peer = _peer_from_log_label(nodes, to_label) if to_label else {}
         text_m = _SEND_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return _bot_event({**base, "dir": "out", "kind": "dm", "text": text, **peer})
@@ -334,7 +382,7 @@ def _parse_meshbot_line(
     if "Received DM (missing !):" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
         from_label = from_m.group(1).strip() if from_m else ""
-        peer = nodes.resolve(from_label) if from_label else {}
+        peer = _peer_from_log_label(nodes, from_label) if from_label else {}
         text_m = _RECV_DM_MISSING_BANG_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return _bot_event({**base, "dir": "in", "kind": "dm", "text": text, **peer})
@@ -342,7 +390,7 @@ def _parse_meshbot_line(
     if "Received DM:" in plain or "Ignoring DM:" in plain:
         from_m = re.search(r"From:\s*(.+?)$", plain)
         from_label = from_m.group(1).strip() if from_m else ""
-        peer = nodes.resolve(from_label) if from_label else {}
+        peer = _peer_from_log_label(nodes, from_label) if from_label else {}
         text_m = _RECV_DM_TEXT_RE.search(plain)
         text = text_m.group(1).strip() if text_m else ""
         return _bot_event({**base, "dir": "in", "kind": "dm", "text": text, **peer})
@@ -380,13 +428,27 @@ def _merge_events(
         ):
             existing["text"] = ev["text"]
         for field in ("short", "long", "hex", "id", "channel_label"):
-            if not existing.get(field) and ev.get(field):
-                existing[field] = ev[field]
+            ev_val = ev.get(field)
+            if not ev_val:
+                continue
+            cur_val = existing.get(field)
+            if not cur_val:
+                existing[field] = ev_val
+            elif (
+                field in ("short", "long")
+                and existing.get("kind") == "dm"
+                and cur_val == "Web-Admin"
+                and ev_val != "Web-Admin"
+            ):
+                # Repair older optimistic rows that stored sender as peer
+                existing[field] = ev_val
         if _is_web_admin_send(ev):
             existing["source"] = "web"
-            existing["short"] = "Web-Admin"
-            if ev.get("long"):
-                existing["long"] = ev["long"]
+            # DM short/long = remote peer; do not overwrite with sender "Web-Admin"
+            if existing.get("kind") != "dm" and ev.get("kind") != "dm":
+                existing["short"] = "Web-Admin"
+                if ev.get("long"):
+                    existing["long"] = ev["long"]
         elif not _is_web_admin_send(existing) and existing.get("source") == "web" and ev.get("source") == "bot":
             existing["source"] = "bot"
         if (
@@ -764,21 +826,28 @@ def send_mesh_message(
         from modules.system import format_channel_label
 
         ch_label = format_channel_label(channel, interface) if not dest_node else "DM"
-        record_optimistic(
-            {
-                "time": datetime.now().isoformat(timespec="seconds"),
-                "time_short": datetime.now().strftime("%H:%M:%S"),
-                "dir": "out",
-                "kind": kind,
-                "channel": channel,
-                "channel_label": ch_label,
-                "device": interface,
-                "text": text,
-                "id": str(dest_node) if dest_node else "",
-                "short": "Web-Admin",
-                "long": "Hessenbot Web-Admin",
-            }
-        )
+        optimistic: Dict[str, Any] = {
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "time_short": datetime.now().strftime("%H:%M:%S"),
+            "dir": "out",
+            "kind": kind,
+            "channel": channel,
+            "channel_label": ch_label,
+            "device": interface,
+            "text": text,
+            "source": "web",
+        }
+        if dest_node:
+            optimistic.update(_dest_peer_fields(dest_node, interface))
+        else:
+            optimistic.update(
+                {
+                    "id": "",
+                    "short": "Web-Admin",
+                    "long": "Hessenbot Web-Admin",
+                }
+            )
+        record_optimistic(optimistic)
         return True, "Nachricht gesendet."
     return False, "Senden fehlgeschlagen — siehe meshbot.log."
 
@@ -788,12 +857,19 @@ def peer_label(entry: Dict[str, Any]) -> str:
     long_name = entry.get("long") or ""
     hex_id = entry.get("hex") or ""
     node_id = entry.get("id") or ""
-    if entry.get("dir") == "out" and entry.get("short") == "Web-Admin":
+    # Channel out from web: show sender. DM out: show remote peer (id/short/long).
+    if (
+        entry.get("dir") == "out"
+        and entry.get("kind") != "dm"
+        and (short == "Web-Admin" or entry.get("source") == "web")
+    ):
         return "Web-Admin"
-    if short and long_name:
+    if short and long_name and short != long_name:
         return f"{short} · {long_name}"
     if long_name:
         return long_name
+    if short:
+        return short
     if hex_id:
         return hex_id
     if node_id:

@@ -1573,7 +1573,7 @@ def onReceive(packet, interface):
                 if (messageTrap(message_string) and not llm_enabled) or messageTrap(message_string.split()[0]):
                     # log the message to stdout
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
-                                "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
+                                "From: " + CustomFormatter.white + f"{format_dm_peer_for_log(message_from_id, rxNode)}")
                     # rate limit check
                     if is_cmd_rate_limited(message_from_id):
                         send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
@@ -1592,7 +1592,7 @@ def onReceive(packet, interface):
                             + CustomFormatter.purple
                             + "From: "
                             + CustomFormatter.white
-                            + f"{get_name_from_number(message_from_id, 'long', rxNode)}"
+                            + f"{format_dm_peer_for_log(message_from_id, rxNode)}"
                         )
                         if is_cmd_rate_limited(message_from_id):
                             send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
@@ -1607,7 +1607,7 @@ def onReceive(packet, interface):
                         llm = handle_llm(message_from_id, channel_number, rxNode, message_string, publicChannel)
                         send_message(llm, channel_number, message_from_id, rxNode)
                     else:
-                        logger.warning(f"Device:{rxNode} Ignoring DM: {message_log_string} From: {get_name_from_number(message_from_id, 'long', rxNode)}")
+                        logger.warning(f"Device:{rxNode} Ignoring DM: {message_log_string} From: {format_dm_peer_for_log(message_from_id, rxNode)}")
                         if not any(node['nodeID'] == message_from_id and node['welcome'] == True for node in seenNodes):
                             send_message(welcome_message, channel_number, message_from_id, rxNode)
                             for node in seenNodes:

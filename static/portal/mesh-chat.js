@@ -108,22 +108,73 @@
   }
 
   function dmPartnerId(m) {
-    if (m.peer_id) return String(m.peer_id);
+    if (m.peer_num) return String(m.peer_num);
+    if (m.peer_id) {
+      const pid = String(m.peer_id);
+      if (/^\d+$/.test(pid)) return pid;
+      const looked = lookupNodeNum(pid, dmPartnerLabel(m));
+      if (looked) return looked;
+      return pid;
+    }
     const longN = (m.peer_long || "").trim().toLowerCase();
-    if (longN) return "n:" + longN;
+    if (longN) {
+      const looked = lookupNodeNum("n:" + longN, longN);
+      if (looked) return looked;
+      return "n:" + longN;
+    }
     const shortN = (m.peer_short || "").trim().toLowerCase();
-    if (shortN) return "n:" + shortN;
+    if (shortN && shortN !== "web-admin") {
+      const looked = lookupNodeNum("n:" + shortN, shortN);
+      if (looked) return looked;
+      return "n:" + shortN;
+    }
     const peer = (m.peer || "").trim().toLowerCase();
-    if (peer) return "p:" + peer;
+    if (peer && peer !== "web-admin") return "p:" + peer;
     return "";
   }
 
+  function dmThreadMatches(m, peerId, nodeNum) {
+    const mid = dmPartnerId(m);
+    if (!mid) return false;
+    const ids = {};
+    function addId(v) {
+      if (!v) return;
+      ids[String(v)] = true;
+    }
+    addId(peerId);
+    addId(nodeNum);
+    addId(m.peer_num);
+    if (peerId) {
+      addId(lookupNodeNum(peerId, selectedPeerLabel));
+    }
+    if (mid.indexOf("n:") === 0 || mid.charAt(0) === "!") {
+      addId(lookupNodeNum(mid, dmPartnerLabel(m)));
+    }
+    if (ids[mid]) return true;
+    if (m.peer_num && ids[String(m.peer_num)]) return true;
+    // Name-only mid vs numeric selection
+    const midLooked = lookupNodeNum(mid, dmPartnerLabel(m));
+    if (midLooked && ids[midLooked]) return true;
+    return false;
+  }
+
   function dmPartnerLabel(m) {
-    if (m.peer_short || m.peer_long) {
-      if (m.peer_short && m.peer_long && m.peer_short !== m.peer_long) {
-        return m.peer_short + " · " + m.peer_long;
+    const shortN = (m.peer_short || "").trim();
+    const longN = (m.peer_long || "").trim();
+    // Outgoing web DMs used to misuse Web-Admin as peer — ignore that for labels
+    if (
+      shortN.toLowerCase() === "web-admin" ||
+      longN.toLowerCase().indexOf("web-admin") !== -1
+    ) {
+      if (m.peer_num) return "#" + m.peer_num;
+      if (m.peer_id && /^\d+$/.test(String(m.peer_id))) return "#" + m.peer_id;
+      return m.peer && String(m.peer).toLowerCase() !== "web-admin" ? m.peer : "?";
+    }
+    if (shortN || longN) {
+      if (shortN && longN && shortN !== longN) {
+        return shortN + " · " + longN;
       }
-      return m.peer_long || m.peer_short;
+      return longN || shortN;
     }
     return m.peer || "?";
   }
@@ -327,17 +378,24 @@
       if (!shouldShowMessage(m)) return;
       const pid = dmPartnerId(m);
       if (!pid) return;
+      // Skip bogus "Web-Admin" threads from older optimistic sends
+      if (String(pid).toLowerCase().indexOf("web-admin") !== -1) return;
+      const label = dmPartnerLabel(m);
+      if (String(label).toLowerCase().indexOf("web-admin") !== -1 && !m.peer_num && !/^\d+$/.test(pid)) {
+        return;
+      }
       const cur = map[pid];
       if (!cur || (m.time || "") >= (cur.time || "")) {
         const nodeNum =
           m.peer_num ||
           (/^\d+$/.test(pid) ? pid : "") ||
           (cur && cur.nodeNum) ||
+          lookupNodeNum(pid, label) ||
           "";
         map[pid] = {
-          id: pid,
+          id: nodeNum || pid,
           nodeNum: nodeNum,
-          label: dmPartnerLabel(m),
+          label: label.indexOf("web-admin") !== -1 && nodeNum ? "#" + nodeNum : label,
           time: m.time || "",
           timeShort: m.time_short || "",
           preview: (m.text || "").trim().slice(0, 72),
@@ -345,13 +403,33 @@
         };
       } else if (m.peer_num && !cur.nodeNum) {
         cur.nodeNum = m.peer_num;
+        cur.id = m.peer_num;
       }
     });
     Object.keys(map).forEach(function (pid) {
       const u = map[pid];
       if (!u.nodeNum) {
-        u.nodeNum = lookupNodeNum(pid, u.label) || "";
+        u.nodeNum = lookupNodeNum(u.id, u.label) || "";
+        if (u.nodeNum) u.id = u.nodeNum;
       }
+    });
+    // Collapse name-key and numeric-key for the same node
+    const byNum = {};
+    Object.keys(map).forEach(function (pid) {
+      const u = map[pid];
+      if (u.nodeNum) {
+        const existing = byNum[u.nodeNum];
+        if (!existing || (u.time || "") >= (existing.time || "")) {
+          byNum[u.nodeNum] = u;
+          byNum[u.nodeNum].id = u.nodeNum;
+        } else if ((u.label || "").indexOf("#") !== 0 && (existing.label || "").indexOf("#") === 0) {
+          existing.label = u.label;
+        }
+        delete map[pid];
+      }
+    });
+    Object.keys(byNum).forEach(function (num) {
+      map[num] = byNum[num];
     });
     return Object.values(map).sort(function (a, b) {
       if (a.time === b.time) return 0;
@@ -426,7 +504,11 @@
           selectedPeerNodeNum =
             lookupNodeNum(selectedPeerId, selectedPeerLabel) || "";
         }
+        if (selectedPeerNodeNum) {
+          selectedPeerId = selectedPeerNodeNum;
+        }
         renderUserList();
+        if (isDm) renderDmFeed(false);
       })
       .catch(function () {
         nodedbPeers = [];
@@ -547,6 +629,10 @@
     if (!selectedPeerNodeNum) {
       selectedPeerNodeNum = lookupNodeNum(selectedPeerId, selectedPeerLabel) || "";
     }
+    // Prefer numeric thread key so sends stay in the same conversation
+    if (selectedPeerNodeNum) {
+      selectedPeerId = selectedPeerNodeNum;
+    }
     if (activeLabelEl) {
       activeLabelEl.textContent =
         selectedPeerLabel || selectedPeerId || "Bitte Nutzer wählen";
@@ -575,7 +661,10 @@
     }
 
     const thread = allDmMessages.filter(function (m) {
-      return shouldShowMessage(m) && dmPartnerId(m) === selectedPeerId;
+      return (
+        shouldShowMessage(m) &&
+        dmThreadMatches(m, selectedPeerId, selectedPeerNodeNum)
+      );
     });
 
     thread.sort(messageSort);
@@ -705,6 +794,9 @@
         selectedPeerNodeNum = /^\d+$/.test(String(destNode))
           ? String(destNode)
           : selectedPeerNodeNum;
+        if (selectedPeerNodeNum) {
+          selectedPeerId = selectedPeerNodeNum;
+        }
         body.set("dest_node", destNode);
       }
       fetch(cfg.apiSend, {
