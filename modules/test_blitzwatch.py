@@ -275,11 +275,17 @@ class TestBlitzwatch(unittest.TestCase):
             )
             self.assertIn("DM", ch)
             out = self.bw.handle_blitzwatch_command(
-                "!blitzwatch set", 99, 1, is_dm=True
+                "!blitzwatch web", 99, 1, is_dm=True
             )
             self.assertIn("Blitzwatch-Code:", out)
             self.assertIn("https://bot.example.de/mein-blitzwatch", out)
+            self.assertIn("!blitzwatch web", self.bw._usage())
             self.assertIn("!blitzwatch set", self.bw._usage())
+
+            out_set = self.bw.handle_blitzwatch_command(
+                "!blitzwatch set", 100, 1, is_dm=True
+            )
+            self.assertIn("Blitzwatch-Code:", out_set)
 
 
 if __name__ == "__main__":

@@ -2279,7 +2279,7 @@ def build_blitzwatch_public_html(
   </p>
   <ol class="text-muted small mb-4">
     <li>In der Meshtastic-App eine <strong>DM an den Bot</strong> senden:
-      <code>!blitzwatch set</code></li>
+      <code>!blitzwatch web</code> (oder <code>!blitzwatch set</code>)</li>
     <li>Den <strong>5-stelligen Code</strong> unten eingeben (15 Minuten gültig, einmalig).</li>
   </ol>
   <form method="post" class="row g-2 align-items-end" style="max-width: 22rem;">

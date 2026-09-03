@@ -166,7 +166,7 @@ def issue_web_setup_code(node_id: int) -> tuple[str | None, str | None]:
         conn.commit()
         conn.close()
         wait = int(WEB_CODE_MIN_INTERVAL_SEC - (now - float(row[0]))) + 1
-        return None, f"Bitte {wait}s warten, dann !blitzwatch set erneut senden."
+        return None, f"Bitte {wait}s warten, dann !blitzwatch web erneut senden."
 
     code = None
     digest = None
@@ -216,14 +216,14 @@ def consume_web_setup_code(raw: str) -> tuple[int | None, str | None]:
     if not row:
         conn.commit()
         conn.close()
-        return None, "Code ungültig oder abgelaufen. Neu anfordern: !blitzwatch set"
+        return None, "Code ungültig oder abgelaufen. Neu anfordern: !blitzwatch web"
     nid = int(row[0])
     fails = int(row[1] or 0)
     if fails >= WEB_CODE_MAX_FAILS:
         c.execute("DELETE FROM blitzwatch_web_codes WHERE code_hash=?", (digest,))
         conn.commit()
         conn.close()
-        return None, "Code ungültig oder abgelaufen. Neu anfordern: !blitzwatch set"
+        return None, "Code ungültig oder abgelaufen. Neu anfordern: !blitzwatch web"
     c.execute("DELETE FROM blitzwatch_web_codes WHERE code_hash=?", (digest,))
     conn.commit()
     conn.close()
@@ -704,7 +704,7 @@ def format_status(node_id: int, *, has_fresh_gps: bool) -> str:
         ago = int((time.time() - prefs["last_alert_ts"]) / 60)
         lines.append(f"Letzte Home-Warnung: vor {ago} min")
 
-    lines.append("Einstellen: !blitzwatch? · Web: !blitzwatch set")
+    lines.append("Einstellen: !blitzwatch? · Web: !blitzwatch web")
     if node_on:
         lines.append("Aus: !blitzwatch off")
     else:
@@ -753,7 +753,7 @@ def _usage() -> str:
         "!blitzwatch del 1\n"
         "Radius Slot: !blitzwatch 1 5km\n"
         "Status: !blitzwatch · Liste: !blitzwatch list\n"
-        "Web: !blitzwatch set (Code per DM)"
+        "Web: !blitzwatch web · !blitzwatch set (Code per DM)"
     )
 
 
@@ -797,7 +797,7 @@ def handle_blitzwatch_command(
         if not is_dm:
             return (
                 "Web-Code nur per DM — schreib mir direkt:\n"
-                "!blitzwatch set"
+                "!blitzwatch web"
             )
         code, err = issue_web_setup_code(nid)
         if err:
