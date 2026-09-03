@@ -303,7 +303,8 @@ try:
     zuluTime = config['general'].getboolean('zuluTime', False) # aka 24 hour time
     log_messages_to_file = config['general'].getboolean('LogMessagesToFile', False) # default off
     # Template: log_backup_count · älterer Name: LogBackupCount
-    if config['general'].has_option('log_backup_count'):
+    # SectionProxy has no has_option — use membership or ConfigParser.has_option(section, key)
+    if 'log_backup_count' in config['general']:
         log_backup_count = config['general'].getint('log_backup_count')
     else:
         log_backup_count = config['general'].getint('LogBackupCount', 32) # default 32 days
@@ -392,7 +393,7 @@ try:
     longitudeValue = config['location'].getfloat('lon', -123.0)
     fuzz_config_location = config['location'].getboolean('fuzzConfigLocation', True) # default True
     # Template: fuzzItAll · älterer Name: fuzzAllLocations
-    if config['location'].has_option('fuzzItAll'):
+    if 'fuzzItAll' in config['location']:
         fuzzItAll = config['location'].getboolean('fuzzItAll')
     else:
         fuzzItAll = config['location'].getboolean('fuzzAllLocations', False)
