@@ -118,6 +118,11 @@ cp config.template config.ini
   - Status in der NodeDB (Admin/öffentlich): z. B. **an 8km** / **an 8km+2** / **bereit 8km** / **aus**
   - Config/Admin: `[location]` `blitzWatchEnabled` und zugehörige Parameter (siehe `config.template`)
 
+### Admin Mesh-Chat (DM & Kanal)
+
+- **Mesh-DM**: Feed scrollt nur nach unten, wenn du schon unten bist, der Peer gewechselt wird oder du selbst sendest — Hochscrollen bleibt stehen
+- **Kanal**: Dropdown mit allen Kanälen der verbundenen Meshtastic-Instanz (`get_channels_with_hash` beim Bot-Start, Refresh beim Öffnen der Seite); Umschalten von Feed und Sendeziel; Startkanal = `messagesChannel` (typisch `#1 MeshHessen`, `#0` oft ShortSlow)
+
 ### Web-UI (Flask)
 
 | URL | Inhalt |

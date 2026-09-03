@@ -509,26 +509,67 @@ def save_scheduler_to_config(
 
 def available_channels_for_test() -> List[Dict[str, Any]]:
     """Channels known across interfaces as [{'number': int, 'label': str}], deduped by number."""
+    return list_radio_channels()
+
+
+def list_radio_channels(
+    iface_id: int | None = None, *, refresh: bool = False
+) -> List[Dict[str, Any]]:
+    """Channels from Meshtastic instance(s): [{'number', 'label', 'role'}], sorted.
+
+    Reads ``build_channel_cache()`` (filled at bot init / reconnect from
+    ``node.get_channels_with_hash()``). Optionally refresh from the radio first.
+    """
     sm = _system_mod()
-    seen: Dict[int, str] = {}
+    seen: Dict[int, Dict[str, Any]] = {}
     try:
-        cache = sm.build_channel_cache()
+        if refresh:
+            cache = sm.refresh_channel_cache()
+        else:
+            cache = sm.build_channel_cache()
     except Exception:
         cache = []
     for entry in cache or []:
+        if iface_id is not None and int(entry.get("interface_id") or 0) != int(iface_id):
+            continue
         for name, info in (entry.get("channels") or {}).items():
-            num = info.get("number")
+            num = info.get("number") if isinstance(info, dict) else None
             if num is None:
                 continue
             try:
                 num = int(num)
             except (TypeError, ValueError):
                 continue
-            label = name.strip() if name and not name.startswith("Channel") else f"Kanal {num}"
-            # First non-generic name wins
-            if num not in seen or (seen[num].startswith("Kanal ") and not label.startswith("Kanal ")):
-                seen[num] = label
-    return [{"number": n, "label": seen[n]} for n in sorted(seen)]
+            raw_name = (name or "").strip()
+            if raw_name and not raw_name.startswith("Channel"):
+                label = raw_name
+            else:
+                label = f"Kanal {num}"
+            role = ""
+            # Prefer named / non-generic over placeholder
+            prev = seen.get(num)
+            if prev is None or (
+                prev["label"].startswith("Kanal ") and not label.startswith("Kanal ")
+            ):
+                seen[num] = {"number": num, "label": label, "role": role}
+
+    # Sensible fallbacks when radio cache empty (typical Meshhessen setup)
+    if 0 not in seen:
+        seen[0] = {"number": 0, "label": "ShortSlow", "role": "PRIMARY"}
+    try:
+        import modules.settings as st
+
+        msg_ch = int(getattr(st, "messages_channel", 1) or 1)
+    except Exception:
+        msg_ch = 1
+    if msg_ch not in seen:
+        seen[msg_ch] = {
+            "number": msg_ch,
+            "label": "MeshHessen" if msg_ch == 1 else f"Kanal {msg_ch}",
+            "role": "SECONDARY",
+        }
+
+    return [seen[n] for n in sorted(seen)]
 
 
 def save_channel_test_to_config(enabled: bool, channels: List[str]) -> None:

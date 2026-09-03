@@ -605,31 +605,72 @@ def create_app(
         channel = chat.default_mesh_channel()
         iface = chat.default_mesh_interface()
         ifaces = []
+        radio_channels: list = []
         try:
             from modules import admin_web_ops as ops
 
             ifaces = ops.iter_radio_interfaces()
+            # Fresh read from meshtasticd / radio channel table
+            radio_channels = ops.list_radio_channels(refresh=True)
         except Exception:
             pass
         if not ifaces:
             ifaces = [iface]
+        if not radio_channels:
+            try:
+                from modules import admin_web_ops as ops
+
+                radio_channels = ops.list_radio_channels(refresh=False)
+            except Exception:
+                radio_channels = [
+                    {"number": 0, "label": "ShortSlow"},
+                    {"number": channel, "label": "MeshHessen"},
+                ]
 
         try:
             from modules.system import format_channel_label
 
             ch_label = format_channel_label(channel, iface)
         except Exception:
-            ch_label = f"Kanal {channel}"
+            # Prefer label from radio list
+            ch_label = next(
+                (c["label"] for c in radio_channels if int(c["number"]) == int(channel)),
+                f"Kanal {channel}",
+            )
 
         iface_opts = "".join(
             f'<option value="{i}"{" selected" if i == iface else ""}>Interface {i}</option>'
             for i in ifaces
         )
 
+        channel_opts = "".join(
+            f'<option value="{int(c["number"])}"'
+            f'{" selected" if int(c["number"]) == int(channel) else ""}>'
+            f'{html_escape(str(c["label"]))} (#{int(c["number"])})</option>'
+            for c in radio_channels
+        )
+        # Ensure current default is in the list even if cache missed it
+        if not any(int(c["number"]) == int(channel) for c in radio_channels):
+            channel_opts = (
+                f'<option value="{int(channel)}" selected>'
+                f'{html_escape(ch_label)} (#{int(channel)})</option>'
+                + channel_opts
+            )
+
         if kind == "channel":
-            subtitle = f"Kanal {channel} · {ch_label}"
+            subtitle = f"Kanäle vom Radio · aktuell #{channel} · {ch_label}"
         else:
             subtitle = "Direktnachrichten · empfangen & senden"
+
+        channel_field = ""
+        if kind == "channel":
+            channel_field = f"""
+      <div class="mesh-chat-field mesh-chat-field--channel">
+        <label class="mesh-chat-label" for="mesh-chat-channel">Kanal</label>
+        <select id="mesh-chat-channel" class="form-select form-select-sm" title="Kanäle aus der Meshtastic-Instanz">
+          {channel_opts}
+        </select>
+      </div>"""
 
         compose_bar = f"""
     <div class="mesh-chat-compose-bar">
@@ -637,6 +678,7 @@ def create_app(
         <label class="mesh-chat-label" for="mesh-chat-iface">Radio</label>
         <select id="mesh-chat-iface" class="form-select form-select-sm">{iface_opts}</select>
       </div>
+      {channel_field}
       <div class="mesh-chat-field mesh-chat-field--grow">
         <label class="mesh-chat-label" for="mesh-chat-input">Nachricht</label>
         <textarea id="mesh-chat-input" class="form-control mesh-chat-input" rows="2" maxlength="500"
@@ -694,10 +736,12 @@ def create_app(
             "sendChannel": channel,
             "interface": iface,
             "channelLabel": ch_label,
+            "channels": radio_channels if kind == "channel" else [],
             "botName": "Hessenbot",
             "apiMessages": url_for("api_mesh_messages"),
             "apiSend": url_for("api_mesh_send"),
             "apiNodes": url_for("api_mesh_nodes"),
+            "apiChannels": url_for("api_mesh_channels"),
             "pollMs": 3000,
         }
         import json
@@ -705,7 +749,7 @@ def create_app(
         if kind == "dm":
             inner = f"""
 <div class="mesh-chat-shell mesh-chat-shell--dm">
-  <p class="mesh-chat-subtitle">{html_escape(subtitle)}</p>
+  <p class="mesh-chat-subtitle" id="mesh-chat-subtitle">{html_escape(subtitle)}</p>
   {log_hint}
   <div class="mesh-dm-layout">
     <aside class="mesh-dm-sidebar">
@@ -733,12 +777,17 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=13"></script>
+<script src="/static/portal/mesh-chat.js?v=14"></script>
 """
         else:
             inner = f"""
 <div class="mesh-chat-shell">
-  <p class="mesh-chat-subtitle">{html_escape(subtitle)}</p>
+  <p class="mesh-chat-subtitle" id="mesh-chat-subtitle">{html_escape(subtitle)}</p>
+  <p class="small text-muted mb-2">
+    Kanalliste kommt von der verbundenen Meshtastic-Instanz
+    (<code>get_channels_with_hash</code> beim Bot-Start / hier aktualisiert).
+    Standard-Feed: <code>messagesChannel</code> (= #{int(channel)}).
+  </p>
   {log_hint}
   <form id="mesh-chat-form" class="mesh-chat-compose">
     {compose_bar}
@@ -750,7 +799,7 @@ def create_app(
 </div>
 <script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
 <script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
-<script src="/static/portal/mesh-chat.js?v=13"></script>
+<script src="/static/portal/mesh-chat.js?v=14"></script>
 """
         return _render_admin_template(
             inner,
@@ -831,6 +880,20 @@ def create_app(
             dest_node=dest_node,
         )
         return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+    @app.route("/api/admin/mesh/channels")
+    @login_required
+    def api_mesh_channels():
+        from modules import admin_mesh_chat as chat
+        from modules import admin_web_ops as ops
+
+        iface = request.args.get("iface", chat.default_mesh_interface(), type=int)
+        refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+        try:
+            channels = ops.list_radio_channels(iface, refresh=refresh)
+        except Exception as e:
+            return jsonify({"channels": [], "error": str(e)})
+        return jsonify({"channels": channels, "error": None})
 
     @app.route("/api/admin/mesh/nodes")
     @login_required

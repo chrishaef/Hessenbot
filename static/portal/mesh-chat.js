@@ -13,6 +13,8 @@
   const input = document.getElementById("mesh-chat-input");
   const statusEl = document.getElementById("mesh-chat-status");
   const ifaceSelect = document.getElementById("mesh-chat-iface");
+  const channelSelect = document.getElementById("mesh-chat-channel");
+  const subtitleEl = document.getElementById("mesh-chat-subtitle");
   const sendBtn = document.getElementById("mesh-chat-send");
 
   const userListEl = document.getElementById("mesh-dm-user-list");
@@ -31,6 +33,7 @@
   let allChannelMessages = [];
   let selectedPeerId = "";
   let userSearchQuery = "";
+  let forceDmScrollOnce = false;
 
   const FULL_REFRESH_MS = 5 * 60 * 1000;
 
@@ -220,6 +223,18 @@
     }
   }
 
+  function isFeedNearBottom() {
+    if (!feed) return true;
+    return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120;
+  }
+
+  function restoreFeedScroll(prevTop) {
+    if (!feed) return;
+    requestAnimationFrame(function () {
+      feed.scrollTop = prevTop;
+    });
+  }
+
   function messageSort(a, b) {
     if (a.time !== b.time) {
       return a.time > b.time ? 1 : -1;
@@ -380,14 +395,20 @@
       activeLabelEl.textContent = label || selectedPeerId || "Bitte Nutzer wählen";
     }
     renderUserList();
-    renderDmFeed();
+    renderDmFeed(true);
     if (!silent) {
       if (input) input.focus();
     }
   }
 
-  function renderDmFeed() {
+  function renderDmFeed(forceBottom) {
     if (!feed) return;
+    if (forceDmScrollOnce) {
+      forceBottom = true;
+      forceDmScrollOnce = false;
+    }
+    const stickBottom = !!forceBottom || isFeedNearBottom();
+    const prevTop = feed.scrollTop;
     feed.innerHTML = "";
     lastDateKey = "";
 
@@ -414,7 +435,11 @@
     });
 
     updateCount(thread.length);
-    scrollFeed(true);
+    if (stickBottom) {
+      scrollFeed(true);
+    } else {
+      restoreFeedScroll(prevTop);
+    }
   }
 
   function ingestDmMessages(messages, replace) {
@@ -433,7 +458,8 @@
     allDmMessages.sort(messageSort);
 
     renderUserList();
-    renderDmFeed();
+    // Stick to bottom only if user was already near bottom (or peer just selected via selectPeer(true)).
+    renderDmFeed(false);
 
     if (replace) {
       lastFullPollAt = Date.now();
@@ -520,6 +546,7 @@
           if (data.ok) {
             if (input) input.value = "";
             setStatus(data.message || "Gesendet", false);
+            if (isDm) forceDmScrollOnce = true;
             poll(false);
           } else {
             setStatus(data.message || "Fehler beim Senden", true);
@@ -556,6 +583,84 @@
     hideBotEl.addEventListener("change", function () {
       hideBotReplies = !!hideBotEl.checked;
       poll(true);
+    });
+  }
+
+  function channelOptionLabel(ch) {
+    const label = (ch && ch.label) || ("Kanal " + (ch && ch.number));
+    return label + " (#" + ch.number + ")";
+  }
+
+  function updateChannelSubtitle(num, label) {
+    if (!subtitleEl || isDm) return;
+    subtitleEl.textContent =
+      "Kanäle vom Radio · aktuell #" + num + " · " + (label || ("Kanal " + num));
+  }
+
+  function switchChannel(num, label) {
+    const n = parseInt(num, 10);
+    if (isNaN(n)) return;
+    cfg.filterChannel = n;
+    cfg.sendChannel = n;
+    cfg.channelLabel = label || ("Kanal " + n);
+    updateChannelSubtitle(n, cfg.channelLabel);
+    // Reset feed for the new channel
+    allChannelMessages = [];
+    known.clear();
+    lastIso = "";
+    lastDateKey = "";
+    poll(true);
+  }
+
+  if (channelSelect && !isDm) {
+    channelSelect.addEventListener("change", function () {
+      const opt = channelSelect.options[channelSelect.selectedIndex];
+      const label = opt ? opt.textContent.replace(/\s*\(#\d+\)\s*$/, "").trim() : "";
+      switchChannel(channelSelect.value, label);
+    });
+  }
+
+  function fillChannelSelect(channels, keepValue) {
+    if (!channelSelect || isDm) return;
+    const current = keepValue != null ? String(keepValue) : String(cfg.filterChannel);
+    channelSelect.innerHTML = "";
+    (channels || []).forEach(function (ch) {
+      const opt = document.createElement("option");
+      opt.value = String(ch.number);
+      opt.textContent = channelOptionLabel(ch);
+      if (String(ch.number) === current) opt.selected = true;
+      channelSelect.appendChild(opt);
+    });
+    if (!channelSelect.value && channels && channels.length) {
+      channelSelect.selectedIndex = 0;
+    }
+  }
+
+  if (ifaceSelect && cfg.apiChannels && !isDm) {
+    ifaceSelect.addEventListener("change", function () {
+      const iface = ifaceSelect.value;
+      const url =
+        cfg.apiChannels +
+        "?iface=" +
+        encodeURIComponent(iface) +
+        "&refresh=1";
+      fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (data) {
+          if (data.channels && data.channels.length) {
+            fillChannelSelect(data.channels, cfg.filterChannel);
+            const opt = channelSelect.options[channelSelect.selectedIndex];
+            const label = opt
+              ? opt.textContent.replace(/\s*\(#\d+\)\s*$/, "").trim()
+              : cfg.channelLabel;
+            switchChannel(channelSelect.value, label);
+          }
+        })
+        .catch(function () {
+          /* keep existing channel list */
+        });
     });
   }
 
