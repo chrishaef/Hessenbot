@@ -136,25 +136,30 @@
   function dmThreadMatches(m, peerId, nodeNum) {
     const mid = dmPartnerId(m);
     if (!mid) return false;
-    const ids = {};
-    function addId(v) {
-      if (!v) return;
-      ids[String(v)] = true;
+
+    // Only selected-thread ids — never add the message's own peer (that matched every thread)
+    const selected = {};
+    function addSel(v) {
+      const s = String(v || "").trim();
+      if (!s) return;
+      selected[s] = true;
     }
-    addId(peerId);
-    addId(nodeNum);
-    addId(m.peer_num);
+    addSel(peerId);
+    addSel(nodeNum);
     if (peerId) {
-      addId(lookupNodeNum(peerId, selectedPeerLabel));
+      addSel(lookupNodeNum(peerId, selectedPeerLabel));
     }
+    if (!Object.keys(selected).length) return false;
+
+    if (selected[mid]) return true;
+    if (m.peer_num && selected[String(m.peer_num)]) return true;
+    if (m.peer_id && selected[String(m.peer_id)]) return true;
+
+    // Name/hex message key → resolve to node num and compare to selection
     if (mid.indexOf("n:") === 0 || mid.charAt(0) === "!") {
-      addId(lookupNodeNum(mid, dmPartnerLabel(m)));
+      const looked = lookupNodeNum(mid, dmPartnerLabel(m));
+      if (looked && selected[looked]) return true;
     }
-    if (ids[mid]) return true;
-    if (m.peer_num && ids[String(m.peer_num)]) return true;
-    // Name-only mid vs numeric selection
-    const midLooked = lookupNodeNum(mid, dmPartnerLabel(m));
-    if (midLooked && ids[midLooked]) return true;
     return false;
   }
 
