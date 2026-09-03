@@ -1407,6 +1407,17 @@ def create_app(
                 sched_time=st.schedulerTime or "",
             )
         )
+        iface_sel = Markup(
+            ops.iface_select_html("interface", st.schedulerInterface, element_id="sched-iface")
+        )
+        channel_sel = Markup(
+            ops.channel_select_html(
+                "channel",
+                st.schedulerChannel,
+                iface_id=st.schedulerInterface,
+                element_id="sched-channel",
+            )
+        )
 
         return _render_admin_template("""
   <form method="post">
@@ -1416,10 +1427,10 @@ def create_app(
       <label class="form-check-label" for="sen">Scheduler aktiv</label>
     </div>
     <div class="row mb-3">
-      <div class="col-md-6"><label class="form-label">Interface (Radio)</label>
-        <input type="number" name="interface" class="form-control" min="1" max="9" value="{{ iface }}"></div>
-      <div class="col-md-6"><label class="form-label">Kanal</label>
-        <input type="number" name="channel" class="form-control" value="{{ chan }}"></div>
+      <div class="col-md-6"><label class="form-label" for="sched-iface">Interface (Radio)</label>
+        {{ iface_sel }}</div>
+      <div class="col-md-6"><label class="form-label" for="sched-channel">Kanal</label>
+        {{ channel_sel }}</div>
     </div>
     <div class="form-check mb-2">
       <input class="form-check-input" type="checkbox" name="schedulerMotd" id="sm"{{ chk_sm|safe }}>
@@ -1443,8 +1454,8 @@ def create_app(
             prev=prev,
             chk_en=chk_en,
             chk_sm=chk_sm,
-            iface=st.schedulerInterface,
-            chan=st.schedulerChannel,
+            iface_sel=iface_sel,
+            channel_sel=channel_sel,
             msg=st.schedulerMessage,
             schedule_fields=schedule_fields,
         )

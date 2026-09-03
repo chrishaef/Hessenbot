@@ -371,6 +371,77 @@ def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Op
     return None
 
 
+def channel_select_html(
+    name: str,
+    selected: int | str,
+    *,
+    iface_id: int | None = None,
+    element_id: str | None = None,
+    refresh: bool = False,
+) -> str:
+    """``<select>`` of mesh channels from the Meshtastic instance (radio cache)."""
+    try:
+        selected_n = int(selected)
+    except (TypeError, ValueError):
+        selected_n = 0
+    try:
+        channels = list_radio_channels(iface_id, refresh=refresh)
+    except Exception:
+        channels = []
+    if not any(int(c["number"]) == selected_n for c in channels):
+        channels = list(channels) + [
+            {"number": selected_n, "label": f"Kanal {selected_n}"}
+        ]
+        channels.sort(key=lambda c: int(c["number"]))
+
+    eid = element_id or name.replace("_", "-")
+    parts = [
+        f'<select name="{html.escape(name, quote=True)}" id="{html.escape(eid, quote=True)}" '
+        f'class="form-select" required>'
+    ]
+    for ch in channels:
+        num = int(ch["number"])
+        label = str(ch.get("label") or f"Kanal {num}")
+        sel = " selected" if num == selected_n else ""
+        parts.append(
+            f'<option value="{num}"{sel}>{html.escape(label)} (#{num})</option>'
+        )
+    parts.append("</select>")
+    return "".join(parts)
+
+
+def iface_select_html(
+    name: str,
+    selected: int | str,
+    *,
+    element_id: str | None = None,
+) -> str:
+    """``<select>`` of enabled radio interfaces (fallback 1–9 if none live)."""
+    try:
+        selected_n = int(selected)
+    except (TypeError, ValueError):
+        selected_n = 1
+    try:
+        ifaces = iter_radio_interfaces()
+    except Exception:
+        ifaces = []
+    if not ifaces:
+        ifaces = list(range(1, 10))
+    if selected_n not in ifaces:
+        ifaces = sorted(set(ifaces) | {selected_n})
+
+    eid = element_id or name.replace("_", "-")
+    parts = [
+        f'<select name="{html.escape(name, quote=True)}" id="{html.escape(eid, quote=True)}" '
+        f'class="form-select" required>'
+    ]
+    for i in ifaces:
+        sel = " selected" if int(i) == selected_n else ""
+        parts.append(f'<option value="{int(i)}"{sel}>Interface {int(i)}</option>')
+    parts.append("</select>")
+    return "".join(parts)
+
+
 def _schedule_ui_block(
     *,
     mode_name: str,
@@ -463,20 +534,24 @@ def broadcast_schedule_form_html(
         time_value=tim,
     )
     sec = html.escape(config_section)
+    iface_sel = iface_select_html("bc_interface", iface, element_id="bc_interface")
+    ch_sel = channel_select_html(
+        "bc_channel", channel, iface_id=int(iface), element_id="bc_channel"
+    )
     return f"""
 <hr class="my-4">
 <h2 class="h5 mb-3">Automatischer Versand</h2>
 <p class="text-muted small mb-3">Einstellungen in <code>config.ini</code> → <code>[{sec}]</code>.
-Unabhängig vom allgemeinen Scheduler.</p>
+Unabhängig vom allgemeinen Scheduler. Kanäle kommen von der Meshtastic-Instanz.</p>
 <div class="form-check mb-3">
   <input class="form-check-input" type="checkbox" name="bc_enabled" id="bc_en"{chk}>
   <label class="form-check-label" for="bc_en">Automatisch senden</label>
 </div>
 <div class="row mb-3">
-  <div class="col-md-6"><label class="form-label">Interface (Radio)</label>
-    <input type="number" name="bc_interface" class="form-control" min="1" max="9" value="{iface}"></div>
-  <div class="col-md-6"><label class="form-label">Kanal</label>
-    <input type="number" name="bc_channel" class="form-control" value="{channel}"></div>
+  <div class="col-md-6"><label class="form-label" for="bc_interface">Interface (Radio)</label>
+    {iface_sel}</div>
+  <div class="col-md-6"><label class="form-label" for="bc_channel">Kanal</label>
+    {ch_sel}</div>
 </div>
 {schedule_block}
 """
@@ -659,9 +734,10 @@ def list_radio_channels(
     Reads ``build_channel_cache()`` (filled at bot init / reconnect from
     ``node.get_channels_with_hash()``). Optionally refresh from the radio first.
     """
-    sm = _system_mod()
     seen: Dict[int, Dict[str, Any]] = {}
+    cache = []
     try:
+        sm = _system_mod()
         if refresh:
             cache = sm.refresh_channel_cache()
         else:
