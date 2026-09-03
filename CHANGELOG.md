@@ -4,21 +4,44 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-04
+
 ### Added
 
-- Public **Impressum** (`/impressum`) and **Datenschutz** (`/datenschutz`); footer links; editable via Admin → Web-Admin
-- Blitzwatch **web setup**: `!blitzwatch web` / `set` (DM PIN) → `/mein-blitzwatch`
-- Admin Blitzwatch UI: NodeDB-backed list, search, editor on top; `publicUrl` for DM links
+- **Blitzwatch**: Nähe-Warnungen per DM/Kanal; Home + bis zu 3 Zusatzorte; Admin-UI (NodeDB-Liste, Suche, Editor); öffentliches Setup per DM-PIN (`!blitzwatch web` / `set` → `/mein-blitzwatch`)
+- **Impressum & Datenschutz**: öffentliche Seiten `/impressum` und `/datenschutz`, Footer-Links, Felder unter Admin → Web-Admin
+- **Standort-Args**: Ort, Koordinaten und Maidenhead-Grid für Standort-Befehle; Quelle (Node/Bot) in Antworten
+- **Ping/Test**: Antwort mit Ort, Maidenhead, Hops, SNR oder MQTT
+- **Admin Mesh**: Live-Chat (Kanal + DM), Mesh-DM aus NodeDB, Kanalbearbeitung in Node Settings, MOTD/Scheduler-UI mit Kanal-Dropdown
+- **Admin Übersicht**: CPU-Temp und Auslastung mit Sparkline
+- **Traceroute**: `!trace` mit Warteschlange und DM-Ergebnis
+- **NodeDB**: persistente Node-DB, NODEINFO-Erfassung, PKI-Hilfen
+- **Channel-Test**: In-Kanal-Antwort auf nacktes `test` auf konfigurierten Kanälen
+- Repo-Metadaten: SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, Issue/PR-Templates, Dependabot
+- CI: pytest für Blitzwatch und Standort-Args auf Push/PR zu `main`
 
 ### Changed
 
-- Blitzwatch mesh help/status clearer (`!blitzwatch` / `!blitzwatch?`)
-- Ping/test replies with place, Maidenhead, hops, SNR or MQTT
+- Install-/Service-Defaults auf **Hessenbot** / `/opt/Hessenbot`
+- Docker-Image/-Compose auf `hessenbot`; Container-TZ `Europe/Berlin`
+- Leeres Default-Admin-Passwort in `config.template` (bestehende Installs unverändert)
+- Config-Schlüssel-Aliases (Template- und Legacy-Namen, z. B. `log_backup_count` / `LogBackupCount`)
+- Blitzwatch-Hilfe und Mesh-Status klarer (`!blitzwatch` / `!blitzwatch?`)
+- README und Modul-Übersicht an aktuelle Features angepasst
+- Legacy pong-bot / tote Webserver-Pfade entfernt
 
 ### Fixed
 
-- Channel PSK save (bytes parsing); inbound channel hash → slot mapping
-- `publicUrl` / impressum keys auto-added for existing `config.ini` installs
+- Kanal-PSK speichern (Bytes-Parsing); eingehende Kanal-Hashes → Slot-Index
+- `publicUrl` / Impressum-Keys für bestehende `config.ini` nachziehen
+- Viele Admin-Chat-/Dashboard-Dedup- und Layout-Probleme
+- Ping/Hop-Zählung bei MQTT; Trace Rate-Limits und Self-Loops
+- DWD-Warnungsausgabe; `!wx?` Kurzhilfe; diverse Scheduler/News- und Dashboard-Fixes
+- CI: Config-Aliases ohne fehlerhaftes `SectionProxy.has_option`
+
+## [1.0.0] — 2026-05-19
+
+Erstes Hessenbot-Release für Meshhessen (QSL-Ping, Web-Portal, DE-Warnungen, NodeDB-Karten-Fallback u. a.). Details: GitHub Release `v1.0.0`.
 
 ## Earlier history
 
