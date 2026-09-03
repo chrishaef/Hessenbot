@@ -1324,41 +1324,39 @@ def onReceive(packet, interface):
             session_passkey = decoded.get('admin', {}).get('sessionPasskey', None)
         rxNode = 1
 
-    # check if the packet has a channel flag use it ## FIXME needs to be channel hash lookup
-    if packet.get('channel'):
-        channel_number = packet.get('channel')
-        channel_name = "unknown"
+    # MeshPacket.channel: local slot index (0 = primary / omitted) or XOR-hash on some paths.
+    raw_ch = packet.get("channel")
+    if raw_ch is None and getattr(packet.get("raw"), "channel", None):
         try:
-            res = resolve_channel_name(channel_number, rxNode, interface)
-            if res:
-                try:
-                    channel_name, _ = res
-                except Exception:
-                    channel_name = "unknown"
-            else:
-                # Search all interfaces for this channel
-                cache = build_channel_cache()
-                found_on_other = None
-                for device in cache:
-                    for chan_name, info in device.get("channels", {}).items():
-                        if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
-                            found_on_other = device.get("interface_id")
-                            found_chan_name = chan_name
-                            break
-                    if found_on_other:
+            raw_ch = int(packet["raw"].channel)
+        except Exception:
+            raw_ch = None
+    channel_number = normalize_mesh_channel_index(raw_ch, rxNode or 1)
+    channel_name = "unknown"
+    try:
+        res = resolve_channel_name(channel_number, rxNode, interface)
+        if res:
+            try:
+                channel_name, _ = res
+            except Exception:
+                channel_name = "unknown"
+        else:
+            cache = build_channel_cache()
+            found_on_other = None
+            for device in cache:
+                for chan_name, info in device.get("channels", {}).items():
+                    if str(info.get("number")) == str(channel_number) or str(info.get("hash")) == str(raw_ch):
+                        found_on_other = device.get("interface_id")
+                        found_chan_name = chan_name
                         break
-                if found_on_other and found_on_other != rxNode:
-                    logger.debug(
-                        f"System: Received Packet on Channel:{channel_number} ({found_chan_name}) on Interface:{rxNode}, but this channel is configured on Interface:{found_on_other}"
-                    )
-        except Exception as e:
-            logger.debug(f"System: channel resolution error: {e}")
-    
-        #debug channel info
-        # if "unknown" in str(channel_name):
-        #     logger.debug(f"System: Received Packet on Channel:{channel_number} on Interface:{rxNode}")
-        # else:
-        #     logger.debug(f"System: Received Packet on Channel:{channel_number} Name:{channel_name} on Interface:{rxNode}")
+                if found_on_other:
+                    break
+            if found_on_other and found_on_other != rxNode:
+                logger.debug(
+                    f"System: Received Packet on Channel:{channel_number} ({found_chan_name}) on Interface:{rxNode}, but this channel is configured on Interface:{found_on_other}"
+                )
+    except Exception as e:
+        logger.debug(f"System: channel resolution error: {e}")
 
     # check if the packet has a simulator flag
     simulator_flag = decoded.get('simulator', False)
@@ -1629,10 +1627,15 @@ def onReceive(packet, interface):
                 # Channel "test" feature: a bare "test"/"Test" (no "!") on a
                 # configured channel gets the !test reply directly in the channel,
                 # bypassing the cmdBang requirement and DM-only behaviour.
+                _ct_channels = {
+                    str(c).strip()
+                    for c in (getattr(my_settings, "channel_test_channels", None) or [])
+                    if str(c).strip()
+                }
                 _bare_test = (
                     getattr(my_settings, "channel_test_enabled", False)
                     and message_string.strip().lower() == "test"
-                    and str(channel_number) in my_settings.channel_test_channels
+                    and str(int(channel_number)) in _ct_channels
                 )
                 if _bare_test and str(message_from_id) in my_settings.bbs_ban_list:
                     logger.debug(f"System: Ignoring channel test from banned node: {get_name_from_number(message_from_id, 'short', rxNode)}")

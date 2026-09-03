@@ -401,6 +401,12 @@ def read_interface_channel_slots(iface_id: int) -> list:
                 psk_kind = mesh_util.pskToString(psk_bytes)
             except Exception:
                 psk_kind = ""
+            try:
+                from meshtastic.util import generate_channel_hash
+
+                ch_hash = int(generate_channel_hash(name, psk_bytes))
+            except Exception:
+                ch_hash = None
             out.append(
                 {
                     "index": idx if 0 <= idx <= 7 else i,
@@ -410,6 +416,7 @@ def read_interface_channel_slots(iface_id: int) -> list:
                     "role_name": role_names.get(role_i, str(role_i)),
                     "psk": _psk_admin_string(psk_bytes),
                     "psk_kind": psk_kind,
+                    "hash": ch_hash,
                     "uplink": bool(getattr(settings, "uplink_enabled", False)),
                     "downlink": bool(getattr(settings, "downlink_enabled", False)),
                 }
@@ -443,7 +450,7 @@ def build_channel_cache(force_refresh: bool = False):
                     key = slot["name"] or f"{label}#{slot['index']}"
                     channel_dict[key] = {
                         "number": slot["index"],
-                        "hash": None,
+                        "hash": slot.get("hash"),
                         "label": label,
                         "role": slot["role_name"],
                     }
@@ -483,6 +490,56 @@ def build_channel_cache(force_refresh: bool = False):
 
     _channel_cache = cache
     return _channel_cache
+
+
+def normalize_mesh_channel_index(raw, iface_id: int = 1) -> int:
+    """Map MeshPacket.channel (local slot 0–7 or XOR-hash) to the local slot index."""
+    if raw is None or raw is False:
+        return 0
+    try:
+        raw_i = int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+    hash_to_idx: dict[int, int] = {}
+    known_idx = set()
+    try:
+        for slot in read_interface_channel_slots(int(iface_id or 1)) or []:
+            if slot.get("role_name") not in ("PRIMARY", "SECONDARY"):
+                continue
+            idx = int(slot["index"])
+            known_idx.add(idx)
+            h = slot.get("hash")
+            if h is not None:
+                hash_to_idx[int(h)] = idx
+    except Exception:
+        pass
+
+    if not hash_to_idx:
+        try:
+            for device in build_channel_cache() or []:
+                if iface_id and device.get("interface_id") != iface_id:
+                    continue
+                for info in (device.get("channels") or {}).values():
+                    if not isinstance(info, dict):
+                        continue
+                    num = info.get("number")
+                    h = info.get("hash")
+                    if num is not None:
+                        known_idx.add(int(num))
+                    if h is not None and num is not None:
+                        hash_to_idx[int(h)] = int(num)
+        except Exception:
+            pass
+
+    if raw_i > 7:
+        return int(hash_to_idx.get(raw_i, raw_i))
+    if raw_i in hash_to_idx and raw_i not in known_idx:
+        return int(hash_to_idx[raw_i])
+    if 0 <= raw_i <= 7:
+        return raw_i
+    return int(hash_to_idx.get(raw_i, raw_i))
+
 
 def refresh_channel_cache():
     """Force rebuild of channel cache (call only when channel config changes)."""

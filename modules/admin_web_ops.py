@@ -879,7 +879,8 @@ def build_channel_test_html(enabled: bool, selected: List[str]) -> str:
     return f"""
 <p class="text-muted small mb-3">Bei aktivierter Funktion antwortet der Bot auf ein einfaches
 <code>test</code> / <code>Test</code> (ohne <code>!</code>) direkt im Kanal — gleiche Antwort wie
-<code>!test</code>. Gilt nur für die ausgewählten Kanäle; alle anderen Befehle bleiben unverändert
+<code>!test</code>. Nach dem Anlegen eines neuen Kanals diese Seite neu laden und den Slot
+hier erneut anhaken. Gilt nur für die ausgewählten Kanäle; alle anderen Befehle bleiben unverändert
 (DM und <code>!</code>).</p>
 <form method="post">
   <div class="form-check form-switch mb-3">
@@ -1666,7 +1667,11 @@ def _apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
             bits.append("PSK=geändert")
     bits.append(f"Up={'an' if uplink else 'aus'}")
     bits.append(f"Down={'an' if downlink else 'aus'}")
-    return True, f"Kanal #{idx} gespeichert ({', '.join(bits)})."
+    return True, (
+        f"Kanal #{idx} gespeichert ({', '.join(bits)}). "
+        "Empfang auf einem neuen Slot: Channel-Test neu speichern; "
+        "falls weiter nichts ankommt, Bot/meshtasticd neu starten."
+    )
 
 
 def _channel_role_options(index: int, selected: int) -> str:
