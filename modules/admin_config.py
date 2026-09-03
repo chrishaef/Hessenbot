@@ -79,6 +79,10 @@ FIELD_LABELS = {
     ("general", "packetDedupMaxEntries"): "Dedup-Cache Größe",
     ("general", "respond_by_dm_only"): "Antworten nur per DM",
     ("general", "spaceWeather"): "Weltraumwetter (sun, satpass, …)",
+    ("webAdmin", "publicUrl"): "Öffentliche Portal-URL",
+    ("webAdmin", "log_dir"): "Log-Ordner (Admin)",
+    ("webAdmin", "alert_file"): "Alert-Datei (Pfad)",
+    ("webAdmin", "news_file"): "News-Datei (Pfad)",
 }
 
 PASSWORD_KEYS = frozenset(

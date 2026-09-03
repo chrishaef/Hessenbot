@@ -2032,6 +2032,15 @@ def create_app(
             return redirect(url_for("settings_index"))
 
         st.config.read(st.config_file, encoding="utf-8")
+        if "webAdmin" in st.config and "publicUrl" not in st.config["webAdmin"]:
+            st.config["webAdmin"]["publicUrl"] = ""
+            try:
+                with open(st.config_file, "w", encoding="utf-8") as fh:
+                    st.config.write(fh)
+            except OSError:
+                pass
+            if not hasattr(st, "web_admin_public_url"):
+                st.web_admin_public_url = ""
         return _render_admin_template(
             build_settings_form_html(st.config),
             title="Einstellungen",

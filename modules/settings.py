@@ -154,7 +154,12 @@ if 'webAdmin' not in config:
         'alert_file': '',
         'news_file': '',
         'log_dir': '',
+        'publicUrl': '',
     }
+    config.write(open(config_file, 'w'))
+elif 'publicUrl' not in config['webAdmin']:
+    # Bestehende Installationen: Feld für !blitzwatch set / Admin-Einstellungen nachziehen
+    config['webAdmin']['publicUrl'] = ''
     config.write(open(config_file, 'w'))
 
 if 'location' not in config:
