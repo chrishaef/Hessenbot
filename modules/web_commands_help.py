@@ -810,7 +810,9 @@ def render_commands_page_body() -> str:
   <h1 class="h3 section-title mb-3">
     <i class="bi bi-terminal text-success me-2"></i>Mesh-Befehle
   </h1>
-  <p class="text-muted mb-0">{usage}</p>
+  <p class="text-muted mb-0">{usage}
+    Mehr zum Bot: <a href="https://github.com/chrishaef/Hessenbot" target="_blank" rel="noopener noreferrer"><i class="bi bi-github"></i> GitHub</a>.
+  </p>
 </div>
 """
 

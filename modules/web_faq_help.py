@@ -199,6 +199,10 @@ def render_faq_page_body(pki_result: Optional[dict] = None) -> str:
   <p class="text-muted mb-0">
     Tipps für Nutzer im Meshhessen-Netz — Befehle im Funknetz, DMs und typische Stolpersteine.
     Alle Befehle: <a href="/befehle">Befehle</a>.
+    Quellcode &amp; ausführliche Doku:
+    <a href="https://github.com/chrishaef/Hessenbot" target="_blank" rel="noopener noreferrer">
+      <i class="bi bi-github"></i> GitHub
+    </a>.
   </p>
 </div>"""
 

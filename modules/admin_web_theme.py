@@ -147,7 +147,17 @@ def portal_navbar(
 
 
 def portal_footer() -> str:
-    return '<footer class="portal-footer"><span>Hessenbot - powered by Meshhessen.de</span></footer>'
+    github = "https://github.com/chrishaef/Hessenbot"
+    return f"""<footer class="portal-footer">
+  <span>Hessenbot — powered by
+    <a href="https://meshhessen.de" target="_blank" rel="noopener noreferrer">Meshhessen.de</a>
+  </span>
+  <span class="sep">·</span>
+  <a href="{html_escape(github)}" target="_blank" rel="noopener noreferrer"
+     title="Quellcode und Dokumentation auf GitHub">
+    <i class="bi bi-github me-1"></i>GitHub
+  </a>
+</footer>"""
 
 
 def portal_particles_html() -> str:
