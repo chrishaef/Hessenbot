@@ -113,7 +113,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "uv": lambda: handle_wx_extra(message_from_id, deviceID, "uv", message),
     "regen": lambda: handle_wx_extra(message_from_id, deviceID, "regen", message),
     "blitz": lambda: handle_wx_extra(message_from_id, deviceID, "blitz", message),
-    "blitzwatch": lambda: handle_blitzwatch(message, message_from_id, deviceID),
+    "blitzwatch": lambda: handle_blitzwatch(message, message_from_id, deviceID, isDM),
     "metar": lambda: handle_metar(message_from_id, deviceID, message),
     "x:": lambda: handleShellCmd(message, message_from_id, channel_number, isDM, deviceID),
     "📍": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
@@ -395,10 +395,10 @@ def handle_dealert(message_from_id, deviceID):
         return get_nina_alerts()
     return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
 
-def handle_blitzwatch(message, message_from_id, deviceID):
+def handle_blitzwatch(message, message_from_id, deviceID, isDM=True):
     from modules.blitzwatch import handle_blitzwatch_command
 
-    return handle_blitzwatch_command(message, message_from_id, deviceID)
+    return handle_blitzwatch_command(message, message_from_id, deviceID, is_dm=bool(isDM))
 
 
 def _resolve_cmd_location(message, message_from_id, deviceID, command_tokens, *, skip_numeric=False):

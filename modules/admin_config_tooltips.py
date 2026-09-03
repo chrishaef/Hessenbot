@@ -267,6 +267,7 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("webAdmin", "alert_file"): "Optional anderer Pfad für alert.txt im Admin-Editor.",
     ("webAdmin", "news_file"): "Optional anderer Pfad für news.txt im Admin-Editor.",
     ("webAdmin", "log_dir"): "Ordner für Log-Anzeige im Admin; leer = logs/ im Bot-Verzeichnis.",
+    ("webAdmin", "publicUrl"): "Öffentliche Basis-URL des Portals ohne Slash (z. B. https://bot.example.de). Wird in !blitzwatch set als Link zur Code-Eingabe genannt.",
 }
 
 # interface3…9 — gleiche Bedeutung wie interface2

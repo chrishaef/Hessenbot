@@ -525,3 +525,6 @@ alert_file =
 news_file =
 # empty = logs/ under repo root (/opt/Hessenbot/logs); absolute path also allowed
 log_dir =
+# Öffentliche Basis-URL des Portals (ohne Slash), z. B. https://bot.example.de
+# erscheint im DM-Text von !blitzwatch set
+publicUrl =

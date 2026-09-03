@@ -1,7 +1,10 @@
 # Blitz proximity watch: Home (GPS or fixed) + up to 3 extra locations.
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
+import secrets
 import sqlite3
 import time
 from typing import Any
@@ -20,6 +23,11 @@ POLL_SEC = 300
 META_CHANNEL_TS = "last_channel_alert_ts"
 HOME_MODE_GPS = "gps"
 HOME_MODE_FIXED = "fixed"
+WEB_CODE_TTL_SEC = 15 * 60
+WEB_CODE_MAX_FAILS = 8
+WEB_CODE_MIN_INTERVAL_SEC = 25
+WEB_CODE_DIGITS = 5
+PUBLIC_SETUP_PATH = "/mein-blitzwatch"
 
 _last_poll_ts = 0.0
 
@@ -92,12 +100,134 @@ def initialize_blitzwatch_database() -> bool:
                 value TEXT
             )"""
         )
+        _ensure_web_code_table(conn)
         conn.commit()
         conn.close()
         return True
     except Exception as e:
         logger.error(f"Blitzwatch: DB init failed: {e}")
         return False
+
+
+def _ensure_web_code_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS blitzwatch_web_codes (
+            code_hash TEXT PRIMARY KEY,
+            node_id INTEGER NOT NULL UNIQUE,
+            expires_ts REAL NOT NULL,
+            fails INTEGER NOT NULL DEFAULT 0,
+            created_ts REAL NOT NULL
+        )"""
+    )
+
+
+def _web_code_hmac_key() -> bytes:
+    import modules.settings as st
+
+    secret = (getattr(st, "web_admin_secret_key", "") or "").strip()
+    if not secret:
+        secret = "hessenbot-blitzwatch-web"
+    return secret.encode("utf-8")
+
+
+def hash_web_setup_code(code: str) -> str:
+    return hmac.new(
+        _web_code_hmac_key(),
+        str(code).encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def public_setup_url() -> str:
+    """Absolute URL to the public PIN page, or empty if publicUrl is unset."""
+    import modules.settings as st
+
+    base = (getattr(st, "web_admin_public_url", "") or "").strip().rstrip("/")
+    if not base:
+        return ""
+    return f"{base}{PUBLIC_SETUP_PATH}"
+
+
+def issue_web_setup_code(node_id: int) -> tuple[str | None, str | None]:
+    """Create a one-time 5-digit web code. Returns (code, error)."""
+    initialize_blitzwatch_database()
+    nid = int(node_id)
+    now = time.time()
+    conn = _connect()
+    _ensure_web_code_table(conn)
+    c = conn.cursor()
+    c.execute("DELETE FROM blitzwatch_web_codes WHERE expires_ts < ?", (now,))
+    c.execute(
+        "SELECT created_ts FROM blitzwatch_web_codes WHERE node_id=?",
+        (nid,),
+    )
+    row = c.fetchone()
+    if row and (now - float(row[0])) < WEB_CODE_MIN_INTERVAL_SEC:
+        conn.commit()
+        conn.close()
+        wait = int(WEB_CODE_MIN_INTERVAL_SEC - (now - float(row[0]))) + 1
+        return None, f"Bitte {wait}s warten, dann !blitzwatch set erneut senden."
+
+    code = None
+    digest = None
+    for _ in range(48):
+        candidate = f"{secrets.randbelow(10 ** WEB_CODE_DIGITS):0{WEB_CODE_DIGITS}d}"
+        digest = hash_web_setup_code(candidate)
+        c.execute(
+            "SELECT 1 FROM blitzwatch_web_codes WHERE code_hash=?",
+            (digest,),
+        )
+        if not c.fetchone():
+            code = candidate
+            break
+    if not code or not digest:
+        conn.close()
+        return None, "Kein freier Code, später erneut versuchen."
+
+    c.execute("DELETE FROM blitzwatch_web_codes WHERE node_id=?", (nid,))
+    c.execute(
+        """INSERT INTO blitzwatch_web_codes
+           (code_hash, node_id, expires_ts, fails, created_ts)
+           VALUES (?, ?, ?, 0, ?)""",
+        (digest, nid, now + WEB_CODE_TTL_SEC, now),
+    )
+    conn.commit()
+    conn.close()
+    return code, None
+
+
+def consume_web_setup_code(raw: str) -> tuple[int | None, str | None]:
+    """Redeem a PIN. Returns (node_id, error)."""
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) != WEB_CODE_DIGITS:
+        return None, "Bitte den 5-stelligen Code aus der Bot-DM eingeben."
+    initialize_blitzwatch_database()
+    now = time.time()
+    digest = hash_web_setup_code(digits)
+    conn = _connect()
+    _ensure_web_code_table(conn)
+    c = conn.cursor()
+    c.execute("DELETE FROM blitzwatch_web_codes WHERE expires_ts < ?", (now,))
+    c.execute(
+        "SELECT node_id, fails FROM blitzwatch_web_codes WHERE code_hash=?",
+        (digest,),
+    )
+    row = c.fetchone()
+    if not row:
+        conn.commit()
+        conn.close()
+        return None, "Code ungültig oder abgelaufen. Neu anfordern: !blitzwatch set"
+    nid = int(row[0])
+    fails = int(row[1] or 0)
+    if fails >= WEB_CODE_MAX_FAILS:
+        c.execute("DELETE FROM blitzwatch_web_codes WHERE code_hash=?", (digest,))
+        conn.commit()
+        conn.close()
+        return None, "Code ungültig oder abgelaufen. Neu anfordern: !blitzwatch set"
+    c.execute("DELETE FROM blitzwatch_web_codes WHERE code_hash=?", (digest,))
+    conn.commit()
+    conn.close()
+    return nid, None
 
 
 def _connect() -> sqlite3.Connection:
@@ -574,7 +704,7 @@ def format_status(node_id: int, *, has_fresh_gps: bool) -> str:
         ago = int((time.time() - prefs["last_alert_ts"]) / 60)
         lines.append(f"Letzte Home-Warnung: vor {ago} min")
 
-    lines.append("Einstellen: !blitzwatch?")
+    lines.append("Einstellen: !blitzwatch? · Web: !blitzwatch set")
     if node_on:
         lines.append("Aus: !blitzwatch off")
     else:
@@ -622,11 +752,18 @@ def _usage() -> str:
         "!blitzwatch add 5km JO40AA\n"
         "!blitzwatch del 1\n"
         "Radius Slot: !blitzwatch 1 5km\n"
-        "Status: !blitzwatch · Liste: !blitzwatch list"
+        "Status: !blitzwatch · Liste: !blitzwatch list\n"
+        "Web: !blitzwatch set (Code per DM)"
     )
 
 
-def handle_blitzwatch_command(message: str, message_from_id: int, deviceID: int = 1) -> str:
+def handle_blitzwatch_command(
+    message: str,
+    message_from_id: int,
+    deviceID: int = 1,
+    *,
+    is_dm: bool = True,
+) -> str:
     """Parse !blitzwatch for the sending node only."""
     import modules.settings as st
     from modules.system import _nodedb_fresh_position
@@ -655,6 +792,26 @@ def handle_blitzwatch_command(message: str, message_from_id: int, deviceID: int 
         return format_status(nid, has_fresh_gps=has_gps)
 
     token = args[0].lower().strip()
+
+    if token in ("set", "web", "code", "pin"):
+        if not is_dm:
+            return (
+                "Web-Code nur per DM — schreib mir direkt:\n"
+                "!blitzwatch set"
+            )
+        code, err = issue_web_setup_code(nid)
+        if err:
+            return err
+        mins = max(1, int(WEB_CODE_TTL_SEC // 60))
+        url = public_setup_url()
+        lines = [
+            f"Blitzwatch-Code: {code}",
+            f"{mins} Min., einmalig.",
+            "Webseite → Menü Blitzwatch",
+        ]
+        if url:
+            lines.append(url)
+        return "\n".join(lines)
 
     if token in ("on", "an", "ein"):
         set_node_enabled(nid, True)

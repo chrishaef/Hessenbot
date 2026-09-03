@@ -560,6 +560,7 @@ try:
     web_admin_alert_file = config['webAdmin'].get('alert_file', '').strip()
     web_admin_news_file = config['webAdmin'].get('news_file', '').strip()
     web_admin_log_dir = config['webAdmin'].get('log_dir', '').strip()
+    web_admin_public_url = config['webAdmin'].get('publicUrl', '').strip()
 
     # messaging settings
     responseDelay = config['messagingSettings'].getfloat('responseDelay', 0.7) # default 0.7

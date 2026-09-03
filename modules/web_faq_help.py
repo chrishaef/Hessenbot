@@ -122,7 +122,9 @@ def _sections() -> List[FaqSection]:
                         "Automatische Blitz-Nähe-Warnung für deinen Standort (GPS oder Fix) "
                         "und bis zu <strong>3 Zusatzorte</strong> (Relais/Equipment). "
                         "Steuerung per <code>!blitzwatch</code>, "
-                        "<code>home …</code>, <code>add …</code>, <code>del N</code>. "
+                        "<code>home …</code>, <code>add …</code>, <code>del N</code>, "
+                        "oder im Browser: <code>!blitzwatch set</code> (DM) und Menü "
+                        '<a href="/mein-blitzwatch">Blitzwatch</a>. '
                         "Ausführliche Erklärung unter "
                         '<a href="/befehle#blitzwatch">Befehle → Blitzwatch</a>.'
                     ),

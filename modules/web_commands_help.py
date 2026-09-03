@@ -215,7 +215,8 @@ def _sections() -> List[CommandSection]:
             "Wetter & Warnungen (DE/EU)",
             "bi-cloud-lightning-rain",
             "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD). "
-            "Blitzwatch: !blitzwatch (Status), !blitzwatch? (Einstellen) — Details unten.",
+            "Blitzwatch: !blitzwatch (Status), !blitzwatch? (Einstellen), "
+            "!blitzwatch set (Web-Code per DM) — Details unten.",
             (
                 _cmd(
                     f"{p}wx",
@@ -283,6 +284,12 @@ def _sections() -> List[CommandSection]:
                 _cmd(
                     f"{p}blitzwatch on · off",
                     "Warnung für deine Node ein- bzw. ausschalten.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch set",
+                    "Nur per DM: 5-stelligen Code für die Webseite (Menü Blitzwatch).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "blitz_watch_enabled", True),
                 ),
@@ -733,6 +740,14 @@ def _render_blitzwatch_guide() -> str:
             <code>{p}blitzwatch del 1</code> — Slot löschen<br>
             <code>{p}blitzwatch 1 5km</code> — Radius für Slot 1<br>
             <code>{p}blitzwatch list</code> — Standorte
+          </td>
+        </tr>
+        <tr>
+          <td>Web</td>
+          <td>
+            <code>{p}blitzwatch set</code> — nur als <strong>DM</strong>: 5-stelliger Code,
+            15&nbsp;Minuten, einmalig. Eingabe auf der Webseite unter
+            <a href="/mein-blitzwatch">Blitzwatch</a>.
           </td>
         </tr>
       </tbody>

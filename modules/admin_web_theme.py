@@ -108,6 +108,7 @@ def portal_navbar(
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
         {_dash_nav_button("stats", "Statistik", "bar-chart-line", active=True)}
         {_dash_nav_link("Befehle", "terminal", chref)}
+        {_dash_nav_link("Blitzwatch", "lightning-charge", "/mein-blitzwatch")}
         {_dash_nav_button("bbs", "BBS", "inboxes")}
         {_dash_nav_button("nodedb", "NodeDB", "diagram-3")}
         {_dash_nav_link("FAQ/Hilfe", "life-preserver", fhref)}
@@ -117,6 +118,7 @@ def portal_navbar(
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
         {_dash_nav_link("Statistik", "bar-chart-line", "/", active=(active == "stats"))}
         {_dash_nav_link("Befehle", "terminal", chref, active=(active == "commands"))}
+        {_dash_nav_link("Blitzwatch", "lightning-charge", "/mein-blitzwatch", active=(active == "blitzwatch"))}
         {_dash_nav_link("BBS", "inboxes", "/#bbs")}
         {_dash_nav_link("NodeDB", "diagram-3", "/#nodedb")}
         {_dash_nav_link("FAQ/Hilfe", "life-preserver", fhref, active=(active == "faq"))}

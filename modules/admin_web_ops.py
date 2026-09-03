@@ -2136,6 +2136,188 @@ def _bw_collect_admin_list() -> List[Dict[str, Any]]:
     return items
 
 
+def build_blitzwatch_node_editor_html(
+    edit_nid: int,
+    *,
+    extra_footer: str = "",
+) -> str:
+    """Shared prefs editor (admin + public PIN session)."""
+    from modules import blitzwatch as bw
+
+    prefs = bw.get_node_prefs(edit_nid)
+    locs = bw.list_locations(edit_nid)
+    hex_id, short, long_n = _bw_node_caption(edit_nid)
+    title = " · ".join(x for x in (short, long_n) if x) or hex_id
+    en_chk = " checked" if prefs.get("enabled") else ""
+    home_lab = html.escape(prefs.get("home_label") or "")
+    last = prefs.get("last_alert_ts") or 0
+    last_s = "—"
+    if last:
+        ago = int((time.time() - float(last)) / 60)
+        last_s = f"vor {ago} min"
+
+    extra_rows = []
+    for loc in locs:
+        slot = int(loc["slot"])
+        extra_rows.append(
+            f"""
+<div class="d-flex flex-wrap gap-2 align-items-end mb-2">
+  <div class="flex-grow-1 small">
+    <strong>Ort {slot}</strong> {html.escape(loc["label"])}
+    <span class="text-muted">({loc["lat"]:.4f}, {loc["lon"]:.4f})</span>
+  </div>
+  <form method="post" class="d-flex gap-1">
+    <input type="hidden" name="action" value="extra_radius">
+    <input type="hidden" name="node_id" value="{edit_nid}">
+    <input type="hidden" name="slot" value="{slot}">
+    <input class="form-control form-control-sm" style="width:5rem" name="radius_km"
+           type="number" min="1" max="50" value="{int(loc["radius_km"])}">
+    <button class="btn btn-sm btn-outline-primary" type="submit">km</button>
+  </form>
+  <form method="post" onsubmit="return confirm('Ort {slot} löschen?');">
+    <input type="hidden" name="action" value="del_extra">
+    <input type="hidden" name="node_id" value="{edit_nid}">
+    <input type="hidden" name="slot" value="{slot}">
+    <button class="btn btn-sm btn-outline-danger" type="submit">Löschen</button>
+  </form>
+</div>"""
+        )
+    if not extra_rows:
+        extra_rows.append('<p class="text-muted small mb-2">Keine Zusatzorte.</p>')
+
+    return f"""
+<div class="card border-primary mb-4 bw-admin-edit" id="bw-edit">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <span><strong>Einstellungen:</strong> {html.escape(title)}</span>
+    <span class="small text-muted"><code>{edit_nid}</code> · <code>{html.escape(hex_id)}</code></span>
+  </div>
+  <div class="card-body">
+    <p class="small text-muted mb-3">letzte Home-Warnung: {html.escape(last_s)}</p>
+    <form method="post" class="row g-2 align-items-end mb-3">
+      <input type="hidden" name="action" value="save_prefs">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <div class="col-auto">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" name="enabled" id="bwEn" value="1"{en_chk}>
+          <label class="form-check-label" for="bwEn">Warnung AN</label>
+        </div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Home-Radius (km)</label>
+        <input class="form-control" type="number" min="1" max="50" name="radius_km"
+               value="{int(prefs.get("radius_km") or 8)}">
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-primary" type="submit">Speichern</button>
+      </div>
+    </form>
+    <p class="small mb-2">Home: <strong>{"Fix " + home_lab if prefs.get("home_mode") == "fixed" and home_lab else "GPS"}</strong></p>
+    <div class="row g-2 mb-3">
+      <div class="col-md-7">
+        <form method="post" class="d-flex gap-2">
+          <input type="hidden" name="action" value="home_place">
+          <input type="hidden" name="node_id" value="{edit_nid}">
+          <input class="form-control" name="place" placeholder="Ort, 50.34 8.76 oder JO40AA" required>
+          <button class="btn btn-outline-primary" type="submit">Home-Fix setzen</button>
+        </form>
+      </div>
+      <div class="col-md-3">
+        <form method="post">
+          <input type="hidden" name="action" value="home_gps">
+          <input type="hidden" name="node_id" value="{edit_nid}">
+          <button class="btn btn-outline-secondary" type="submit">Home = GPS</button>
+        </form>
+      </div>
+    </div>
+    <h6 class="mt-3">Zusatzorte (max. {bw.MAX_EXTRA_LOCATIONS})</h6>
+    {"".join(extra_rows)}
+    <form method="post" class="row g-2 align-items-end mt-2">
+      <input type="hidden" name="action" value="add_extra">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <div class="col-md-5">
+        <label class="form-label">Neuer Zusatzort</label>
+        <input class="form-control" name="place" placeholder="Ort / Coords / Grid" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Radius km</label>
+        <input class="form-control" name="extra_radius_km" type="number" min="1" max="50" placeholder="wie Home">
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-outline-success" type="submit">Hinzufügen</button>
+      </div>
+    </form>
+    <form method="post" class="mt-4" onsubmit="return confirm('Alle Blitzwatch-Daten dieses Knotens löschen?');">
+      <input type="hidden" name="action" value="reset">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <button class="btn btn-sm btn-outline-danger" type="submit">Eintrag zurücksetzen</button>
+    </form>
+    {extra_footer}
+  </div>
+</div>
+"""
+
+
+def build_blitzwatch_public_html(
+    *,
+    node_id: Optional[int],
+    global_on: bool,
+    location_on: bool,
+) -> str:
+    if not location_on or not global_on:
+        return (
+            '<p class="alert alert-warning">Blitzwatch ist derzeit deaktiviert.</p>'
+        )
+    if not node_id:
+        return """
+<div class="portal-card p-4 mb-4">
+  <h1 class="h3 section-title mb-3">
+    <i class="bi bi-lightning-charge text-success me-2"></i>Blitzwatch
+  </h1>
+  <p class="text-muted">
+    Stelle Home, Radius und Zusatzorte hier im Browser ein.
+    Der Code kommt nur per <strong>Direktnachricht</strong> vom Bot.
+  </p>
+  <ol class="text-muted small mb-4">
+    <li>In der Meshtastic-App eine <strong>DM an den Bot</strong> senden:
+      <code>!blitzwatch set</code></li>
+    <li>Den <strong>5-stelligen Code</strong> unten eingeben (15 Minuten gültig, einmalig).</li>
+  </ol>
+  <form method="post" class="row g-2 align-items-end" style="max-width: 22rem;">
+    <input type="hidden" name="action" value="unlock">
+    <div class="col-8">
+      <label class="form-label" for="bwCode">Code</label>
+      <input class="form-control form-control-lg text-center font-monospace bw-pin-input"
+             id="bwCode" name="code" inputmode="numeric" pattern="[0-9]{5}"
+             maxlength="5" minlength="5" autocomplete="one-time-code" required
+             placeholder="•••••">
+    </div>
+    <div class="col-4">
+      <button class="btn btn-success w-100" type="submit">Öffnen</button>
+    </div>
+  </form>
+  <p class="small text-muted mt-4 mb-0">
+    Mesh-Befehle bleiben: <code>!blitzwatch</code> · Hilfe:
+    <a href="/befehle#blitzwatch">Befehle</a>
+  </p>
+</div>
+"""
+    logout = """
+<form method="post" class="mt-3">
+  <input type="hidden" name="action" value="logout">
+  <button class="btn btn-sm btn-outline-secondary" type="submit">Sitzung beenden</button>
+</form>
+"""
+    return f"""
+<div class="mb-3">
+  <h1 class="h3 section-title mb-2">
+    <i class="bi bi-lightning-charge text-success me-2"></i>Deine Blitzwatch-Einstellungen
+  </h1>
+  <p class="small text-muted mb-0">Gilt nur für deine Node. Nach einer Stunde oder „Sitzung beenden“ ist der Zugang wieder zu.</p>
+</div>
+{build_blitzwatch_node_editor_html(int(node_id), extra_footer=logout)}
+"""
+
+
 def build_blitzwatch_admin_html(
     *,
     edit_nid: Optional[int],
@@ -2143,8 +2325,6 @@ def build_blitzwatch_admin_html(
     global_on: bool,
     location_on: bool,
 ) -> str:
-    from modules import blitzwatch as bw
-
     if not location_on or not global_on:
         return (
             '<p class="alert alert-warning">Blitzwatch ist in der Config aus '
@@ -2233,116 +2413,7 @@ def build_blitzwatch_admin_html(
 </div>
 """
     if edit_nid:
-        prefs = bw.get_node_prefs(edit_nid)
-        locs = bw.list_locations(edit_nid)
-        hex_id, short, long_n = _bw_node_caption(edit_nid)
-        title = " · ".join(x for x in (short, long_n) if x) or hex_id
-        en_chk = " checked" if prefs.get("enabled") else ""
-        home_lab = html.escape(prefs.get("home_label") or "")
-        last = prefs.get("last_alert_ts") or 0
-        last_s = "—"
-        if last:
-            ago = int((time.time() - float(last)) / 60)
-            last_s = f"vor {ago} min"
-
-        extra_rows = []
-        for loc in locs:
-            slot = int(loc["slot"])
-            extra_rows.append(
-                f"""
-<div class="d-flex flex-wrap gap-2 align-items-end mb-2">
-  <div class="flex-grow-1 small">
-    <strong>Ort {slot}</strong> {html.escape(loc["label"])}
-    <span class="text-muted">({loc["lat"]:.4f}, {loc["lon"]:.4f})</span>
-  </div>
-  <form method="post" class="d-flex gap-1">
-    <input type="hidden" name="action" value="extra_radius">
-    <input type="hidden" name="node_id" value="{edit_nid}">
-    <input type="hidden" name="slot" value="{slot}">
-    <input class="form-control form-control-sm" style="width:5rem" name="radius_km"
-           type="number" min="1" max="50" value="{int(loc["radius_km"])}">
-    <button class="btn btn-sm btn-outline-primary" type="submit">km</button>
-  </form>
-  <form method="post" onsubmit="return confirm('Ort {slot} löschen?');">
-    <input type="hidden" name="action" value="del_extra">
-    <input type="hidden" name="node_id" value="{edit_nid}">
-    <input type="hidden" name="slot" value="{slot}">
-    <button class="btn btn-sm btn-outline-danger" type="submit">Löschen</button>
-  </form>
-</div>"""
-            )
-        if not extra_rows:
-            extra_rows.append('<p class="text-muted small mb-2">Keine Zusatzorte.</p>')
-
-        detail = f"""
-<div class="card border-primary mb-4 bw-admin-edit" id="bw-edit">
-  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-    <span><strong>Einstellungen:</strong> {html.escape(title)}</span>
-    <span class="small text-muted"><code>{edit_nid}</code> · <code>{html.escape(hex_id)}</code></span>
-  </div>
-  <div class="card-body">
-    <p class="small text-muted mb-3">letzte Home-Warnung: {html.escape(last_s)}</p>
-    <form method="post" class="row g-2 align-items-end mb-3">
-      <input type="hidden" name="action" value="save_prefs">
-      <input type="hidden" name="node_id" value="{edit_nid}">
-      <div class="col-auto">
-        <div class="form-check mt-4">
-          <input class="form-check-input" type="checkbox" name="enabled" id="bwEn" value="1"{en_chk}>
-          <label class="form-check-label" for="bwEn">Warnung AN</label>
-        </div>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">Home-Radius (km)</label>
-        <input class="form-control" type="number" min="1" max="50" name="radius_km"
-               value="{int(prefs.get("radius_km") or 8)}">
-      </div>
-      <div class="col-md-3">
-        <button class="btn btn-primary" type="submit">Speichern</button>
-      </div>
-    </form>
-    <p class="small mb-2">Home: <strong>{"Fix " + home_lab if prefs.get("home_mode") == "fixed" and home_lab else "GPS"}</strong></p>
-    <div class="row g-2 mb-3">
-      <div class="col-md-7">
-        <form method="post" class="d-flex gap-2">
-          <input type="hidden" name="action" value="home_place">
-          <input type="hidden" name="node_id" value="{edit_nid}">
-          <input class="form-control" name="place" placeholder="Ort, 50.34 8.76 oder JO40AA" required>
-          <button class="btn btn-outline-primary" type="submit">Home-Fix setzen</button>
-        </form>
-      </div>
-      <div class="col-md-3">
-        <form method="post">
-          <input type="hidden" name="action" value="home_gps">
-          <input type="hidden" name="node_id" value="{edit_nid}">
-          <button class="btn btn-outline-secondary" type="submit">Home = GPS</button>
-        </form>
-      </div>
-    </div>
-    <h6 class="mt-3">Zusatzorte (max. {bw.MAX_EXTRA_LOCATIONS})</h6>
-    {"".join(extra_rows)}
-    <form method="post" class="row g-2 align-items-end mt-2">
-      <input type="hidden" name="action" value="add_extra">
-      <input type="hidden" name="node_id" value="{edit_nid}">
-      <div class="col-md-5">
-        <label class="form-label">Neuer Zusatzort</label>
-        <input class="form-control" name="place" placeholder="Ort / Coords / Grid" required>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">Radius km</label>
-        <input class="form-control" name="extra_radius_km" type="number" min="1" max="50" placeholder="wie Home">
-      </div>
-      <div class="col-md-3">
-        <button class="btn btn-outline-success" type="submit">Hinzufügen</button>
-      </div>
-    </form>
-    <form method="post" class="mt-4" onsubmit="return confirm('Alle Blitzwatch-Daten dieses Knotens löschen?');">
-      <input type="hidden" name="action" value="reset">
-      <input type="hidden" name="node_id" value="{edit_nid}">
-      <button class="btn btn-sm btn-outline-danger" type="submit">Eintrag zurücksetzen</button>
-    </form>
-  </div>
-</div>
-"""
+        detail = build_blitzwatch_node_editor_html(edit_nid)
 
     return f"""
 <p class="small text-muted">Liste folgt der persistenten NodeDB. Ohne gespeicherten Blitzwatch-Eintrag gelten Defaults (Warnung AN, Default-Radius).

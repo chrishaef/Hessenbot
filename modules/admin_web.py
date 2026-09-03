@@ -6,6 +6,7 @@ import glob
 import os
 import secrets
 import threading
+import time
 from html import escape as html_escape
 from typing import List, Optional
 
@@ -24,6 +25,7 @@ from flask import (
     redirect,
     render_template_string,
     request,
+    session,
     url_for,
 )
 from flask_limiter import Limiter
@@ -244,6 +246,88 @@ def create_app(
             + "</div></main></div>"
             + portal_shell_end()
         )
+
+    BW_PORTAL_TTL_SEC = 3600
+
+    def _bw_portal_nid():
+        nid = session.get("bw_portal_nid")
+        exp = session.get("bw_portal_exp") or 0
+        try:
+            if nid and float(exp) > time.time():
+                return int(nid)
+        except (TypeError, ValueError):
+            pass
+        session.pop("bw_portal_nid", None)
+        session.pop("bw_portal_exp", None)
+        return None
+
+    def _bw_portal_set(nid: int) -> None:
+        session["bw_portal_nid"] = int(nid)
+        session["bw_portal_exp"] = time.time() + BW_PORTAL_TTL_SEC
+
+    def _bw_portal_clear() -> None:
+        session.pop("bw_portal_nid", None)
+        session.pop("bw_portal_exp", None)
+
+    def _render_public_blitzwatch(body: str):
+        return (
+            portal_shell_start(
+                title="Blitzwatch – Hessenbot",
+                active_nav="blitzwatch",
+                particles=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4">'
+            + _flash_markup()
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
+        )
+
+    @app.route("/mein-blitzwatch", methods=["GET", "POST"])
+    @limiter.limit("25 per minute", methods=["POST"])
+    def blitzwatch_public():
+        from modules import admin_web_ops as ops
+        from modules import blitzwatch as bw
+        import modules.settings as st
+
+        global_on = bool(getattr(st, "blitz_watch_enabled", True))
+        location_on = bool(getattr(st, "location_enabled", True))
+
+        if request.method == "POST":
+            action = (request.form.get("action") or "").strip()
+            if action == "logout":
+                _bw_portal_clear()
+                flash("Sitzung beendet.", "info")
+                return redirect(url_for("blitzwatch_public"))
+            if action == "unlock":
+                nid, err = bw.consume_web_setup_code(request.form.get("code") or "")
+                if err:
+                    flash(err, "error")
+                else:
+                    _bw_portal_set(int(nid))
+                    flash("Einstellungen geöffnet.", "success")
+                return redirect(url_for("blitzwatch_public"))
+            nid = _bw_portal_nid()
+            if not nid:
+                flash("Bitte zuerst den Code aus der Bot-DM eingeben.", "error")
+                return redirect(url_for("blitzwatch_public"))
+            form = request.form.to_dict()
+            form["node_id"] = str(nid)
+            ok, msg, _redir = ops.apply_blitzwatch_admin_form(form)
+            flash(msg, "success" if ok else "error")
+            _bw_portal_set(nid)
+            return redirect(url_for("blitzwatch_public"))
+
+        body = ops.build_blitzwatch_public_html(
+            node_id=_bw_portal_nid(),
+            global_on=global_on,
+            location_on=location_on,
+        )
+        return _render_public_blitzwatch(body)
 
     @app.route("/")
     def index_dashboard():

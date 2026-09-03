@@ -246,6 +246,41 @@ class TestBlitzwatch(unittest.TestCase):
         prefs = self.bw.get_node_prefs(1)
         self.assertEqual(prefs["home_mode"], "fixed")
 
+    def test_web_setup_code(self):
+        import modules.settings as st
+
+        st.web_admin_secret_key = "test-secret"
+        st.web_admin_public_url = "https://bot.example.de"
+        code, err = self.bw.issue_web_setup_code(4242)
+        self.assertIsNone(err)
+        self.assertEqual(len(code), 5)
+        self.assertTrue(code.isdigit())
+        nid, err = self.bw.consume_web_setup_code(code)
+        self.assertIsNone(err)
+        self.assertEqual(nid, 4242)
+        nid2, err2 = self.bw.consume_web_setup_code(code)
+        self.assertIsNone(nid2)
+        self.assertIsNotNone(err2)
+
+    def test_blitzwatch_set_dm_only(self):
+        import modules.settings as st
+
+        st.blitz_watch_enabled = True
+        st.location_enabled = True
+        st.web_admin_secret_key = "test-secret"
+        st.web_admin_public_url = "https://bot.example.de"
+        with patch.dict(sys.modules, {"modules.system": self._fake_system_gps()}):
+            ch = self.bw.handle_blitzwatch_command(
+                "!blitzwatch set", 99, 1, is_dm=False
+            )
+            self.assertIn("DM", ch)
+            out = self.bw.handle_blitzwatch_command(
+                "!blitzwatch set", 99, 1, is_dm=True
+            )
+            self.assertIn("Blitzwatch-Code:", out)
+            self.assertIn("https://bot.example.de/mein-blitzwatch", out)
+            self.assertIn("!blitzwatch set", self.bw._usage())
+
 
 if __name__ == "__main__":
     unittest.main()

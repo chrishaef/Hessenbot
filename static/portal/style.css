@@ -1087,6 +1087,11 @@ body.page-login {
   margin-top: 0;
 }
 
+.bw-pin-input {
+  letter-spacing: 0.35em;
+  font-size: 1.35rem;
+}
+
 .nodedb-search-toolbar .input-group-text {
   background: var(--card-bg-muted);
   border-color: var(--card-border);
