@@ -57,12 +57,12 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}ping",
-                    "QSL-Antwort: LongName [NodeID] @ Bot-Standort | Hops LoRa/MQTT.",
+                    "Gehört-Bestätigung: Name, Standort des Bots, SNR/RSSI oder MQTT-Hops.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
                     f"{p}pong",
-                    "Wie ping — QSL mit Ort, Hops und Verbindungstyp.",
+                    "Wie ping — gehört-Bestätigung mit Ort und Verbindung.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(

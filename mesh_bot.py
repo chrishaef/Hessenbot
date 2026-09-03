@@ -177,7 +177,7 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
     if  "?" in message and isDM:
         pingHelp = (
             "🤖 Hessenbot · Ping-Hilfe:\n"
-            "🏓 ping / pong / test — QSL: Name [ID] @ Ort | Hops LoRa/MQTT\n"
+            "🏓 ping / pong / test — gehört-Bestätigung mit Ort, Hops, SNR/RSSI oder MQTT\n"
             "🏓 ping <Zahl> — mehrere Pings per DM.\n"
             "🏓 ping @Knoten — Ping als BBS-DM."
         )
@@ -190,22 +190,22 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
     rich_ping = True
 
     if "test" in msg_lower or "testing" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "test", snr, rssi)
         type = "🎙TEST"
     elif "pong" in words:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "pong", snr, rssi)
         type = "🏓PONG"
     elif "ping" in msg_lower or "pinging" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ping", snr, rssi)
         type = "🏓PING"
     elif "ack" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ACK")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ack", snr, rssi)
         type = "✋ACK"
     elif "cqcq" in msg_lower or "cq" in words or "cqcqcq" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "cq", snr, rssi)
         type = "CQ"
     else:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "qsl", snr, rssi)
         type = "QSL"
         rich_ping = True
 

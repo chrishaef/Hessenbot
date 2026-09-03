@@ -1024,23 +1024,83 @@ def bot_place_name() -> str:
     return "Meshhessen"
 
 
+_PING_TITLE = {
+    "test": ("🎙", "Test"),
+    "testing": ("🎙", "Test"),
+    "ping": ("🏓", "Ping"),
+    "pinging": ("🏓", "Ping"),
+    "pong": ("🏓", "Pong"),
+    "ack": ("✋", "ACK"),
+    "cq": ("📡", "CQ"),
+    "qsl": ("✅", "QSL"),
+}
+
+
+def _fmt_rf_signal(snr, rssi) -> str:
+    """SNR / RSSI for LoRa replies; skip empty or sentinel values."""
+    parts: list[str] = []
+    try:
+        sv = float(snr)
+        if sv not in (0.0, -128.0):
+            parts.append(f"SNR {sv:.1f}".rstrip("0").rstrip("."))
+    except (TypeError, ValueError):
+        pass
+    try:
+        rv = float(rssi)
+        if rv != 0.0:
+            iv = int(round(rv))
+            parts.append(f"RSSI {iv}")
+    except (TypeError, ValueError):
+        pass
+    return " · ".join(parts)
+
+
+def _ping_signal_line(hop: str, snr=None, rssi=None) -> str:
+    hop_n, _link = _parse_hop_info(hop)
+    hop_s = (hop or "").strip()
+    upper = hop_s.upper()
+    if "GATEWAY" in upper or hop_s.startswith("Gateway"):
+        via = "Gateway"
+    elif "MQTT" in upper:
+        via = "MQTT"
+    else:
+        via = None
+    if via:
+        if hop_n is None or hop_n == 0:
+            return f"☁️ über {via}"
+        return f"☁️ über {via} · {_hop_count_label(hop_n)}"
+    if hop_n is None:
+        hop_txt = "? Hops"
+    elif hop_n == 0:
+        hop_txt = "direkt"
+    else:
+        hop_txt = _hop_count_label(hop_n)
+    sig = _fmt_rf_signal(snr, rssi)
+    if sig:
+        return f"📶 {sig} · {hop_txt}"
+    return f"📶 {hop_txt}"
+
+
 def format_ping_qsl_response(
     message_from_id,
     deviceID,
     hop: str,
-    keyword: str = "QSL",
+    keyword: str = "test",
+    snr=None,
+    rssi=None,
 ) -> str:
-    """
-    QSL-Antwort: LongName [NodeID] KEYWORD @ "Bot-Standort" | N Hops LoRa|MQTT
-    """
+    """Heard-confirmation: title, place, then RF signal or MQTT hops."""
     long_name = get_name_from_number(message_from_id, "long", deviceID)
     if not long_name or str(long_name).startswith("!"):
         long_name = get_name_from_number(message_from_id, "short", deviceID)
-    node_hex = decimal_to_hex(message_from_id)
+    key = (keyword or "test").strip().lower()
+    emoji, title = _PING_TITLE.get(key, ("🎙", (keyword or "Test").strip() or "Test"))
     place = bot_place_name()
-    hop_n, link = _parse_hop_info(hop)
-    hop_part = _hop_count_label(hop_n)
-    return f'{long_name} [{node_hex}] {keyword} @ "{place}" | {hop_part} {link}'
+    return (
+        f"{emoji} {title} von {long_name}\n"
+        f"✅ vom Hessenbot in {place} gehört\n"
+        f"{_ping_signal_line(hop, snr, rssi)}"
+    )
 
 
 def get_name_from_number(number, type='long', nodeInt=1):
