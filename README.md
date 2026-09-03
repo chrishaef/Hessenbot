@@ -138,7 +138,7 @@ cp config.template config.ini
 
 - **MOTD** und **News**: Text bearbeiten plus automatischer Versand (Rhythmus, Kanal, Interface) — unabhängig vom allgemeinen Scheduler
 - **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …)
-- **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot)
+- **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot) sowie **Mesh-Kanäle** (Name, Rolle, PSK, Up-/Downlink je Slot 0–7)
 - Einheitliche **Top-Navigation** (Statistik, Befehle, BBS, NodeDB, FAQ) in öffentlichem und Admin-Bereich
 - Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template))
 

@@ -1202,6 +1202,268 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     return True, f"Gespeichert auf dem Gerät: {', '.join(changes)}."
 
 
+# --- Mesh channels (Meshtastic ChannelSettings via writeChannel) ---
+
+_CHANNEL_ROLE_LABELS: Dict[int, str] = {
+    0: "DISABLED",
+    1: "PRIMARY",
+    2: "SECONDARY",
+}
+
+
+def fetch_local_channels(iface_id: int) -> Tuple[Optional[str], Optional[List[Dict[str, Any]]]]:
+    """Read mesh channel slots 0–7 from the connected local node."""
+    node, err = _local_node_for_iface(iface_id)
+    if err:
+        return err, None
+
+    try:
+        from meshtastic import util as mesh_util
+    except Exception as e:
+        return f"Meshtastic-Util nicht verfügbar: {e!s}", None
+
+    raw = getattr(node, "channels", None)
+    if not raw:
+        return (
+            "Keine Kanäle vom Gerät gelesen — Verbindung prüfen oder Bot neu starten.",
+            None,
+        )
+
+    out: List[Dict[str, Any]] = []
+    for i, ch in enumerate(list(raw)[:8]):
+        if ch is None:
+            continue
+        try:
+            settings = ch.settings
+            role = int(ch.role)
+            name = str(settings.name or "").strip()
+            psk_bytes = bytes(settings.psk) if settings.psk else b""
+            psk_label = mesh_util.pskToString(psk_bytes)
+            out.append(
+                {
+                    "index": i,
+                    "name": name,
+                    "role": role,
+                    "role_name": _CHANNEL_ROLE_LABELS.get(role, str(role)),
+                    "psk_label": psk_label,
+                    "uplink": bool(settings.uplink_enabled),
+                    "downlink": bool(settings.downlink_enabled),
+                    "empty": role == 0 and not name and psk_label in ("unencrypted", ""),
+                }
+            )
+        except Exception as e:
+            out.append(
+                {
+                    "index": i,
+                    "name": "",
+                    "role": 0,
+                    "role_name": "?",
+                    "psk_label": "?",
+                    "uplink": False,
+                    "downlink": False,
+                    "empty": True,
+                    "error": str(e),
+                }
+            )
+    return None, out
+
+
+def apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
+    """Apply one channel slot from the Node Settings channel form."""
+    node, err = _local_node_for_iface(iface_id)
+    if err:
+        return False, err
+
+    try:
+        idx = int(form.get("channel_index", -1))
+    except (TypeError, ValueError):
+        return False, "Kanal-Index ungültig."
+    if idx < 0 or idx > 7:
+        return False, "Kanal-Index muss 0–7 sein."
+
+    channels = getattr(node, "channels", None)
+    if not channels or idx >= len(channels):
+        return False, "Kanal-Slot nicht auf dem Gerät vorhanden."
+
+    ch = channels[idx]
+    settings = ch.settings
+
+    name = (form.get("name") or "").strip()
+    if len(name) > 12:
+        return False, "Kanalname: maximal 12 Zeichen."
+
+    try:
+        role = int(form.get("role", int(ch.role)))
+    except (TypeError, ValueError):
+        return False, "Rolle ungültig."
+
+    if idx == 0:
+        if role == 0:
+            return False, "Primärkanal (#0) darf nicht DISABLED sein."
+        if role != 1:
+            return False, "Slot #0 muss PRIMARY bleiben."
+    else:
+        if role == 1:
+            return False, "PRIMARY ist nur für Slot #0 erlaubt."
+        if role not in (0, 2):
+            return False, "Rolle: SECONDARY oder DISABLED."
+
+    uplink = form.get("uplink_enabled") in ("1", "on", "true", "yes")
+    downlink = form.get("downlink_enabled") in ("1", "on", "true", "yes")
+
+    psk_raw = (form.get("psk") or "").strip()
+    psk_changed = False
+    if psk_raw:
+        try:
+            from meshtastic import util as mesh_util
+
+            new_psk = mesh_util.fromPSK(psk_raw)
+        except Exception as e:
+            return False, f"PSK ungültig: {e!s}"
+        settings.psk = new_psk
+        psk_changed = True
+
+    settings.name = name
+    settings.uplink_enabled = uplink
+    settings.downlink_enabled = downlink
+    ch.role = role
+    ch.index = idx
+
+    try:
+        node.writeChannel(idx)
+    except Exception as e:
+        return False, f"Kanal #{idx} konnte nicht geschrieben werden: {e!s}"
+
+    try:
+        sm = _system_mod()
+        if hasattr(sm, "refresh_channel_cache"):
+            sm.refresh_channel_cache()
+    except Exception:
+        pass
+
+    bits = [f"Name={name or '(leer)'}", f"Rolle={_CHANNEL_ROLE_LABELS.get(role, role)}"]
+    if psk_changed:
+        try:
+            from meshtastic import util as mesh_util
+
+            bits.append(f"PSK={mesh_util.pskToString(bytes(settings.psk) if settings.psk else b'')}")
+        except Exception:
+            bits.append("PSK=geändert")
+    bits.append(f"Up={'an' if uplink else 'aus'}")
+    bits.append(f"Down={'an' if downlink else 'aus'}")
+    return True, f"Kanal #{idx} gespeichert ({', '.join(bits)})."
+
+
+def _channel_role_options(index: int, selected: int) -> str:
+    if index == 0:
+        choices = [(1, "PRIMARY")]
+    else:
+        choices = [(2, "SECONDARY"), (0, "DISABLED")]
+    opts = []
+    for val, label in choices:
+        sel = " selected" if int(selected) == val else ""
+        opts.append(f'<option value="{val}"{sel}>{html.escape(label)}</option>')
+    # If current role is unexpected (e.g. PRIMARY on #1), still show it
+    if not any(int(selected) == v for v, _ in choices):
+        label = _CHANNEL_ROLE_LABELS.get(int(selected), str(selected))
+        opts.insert(
+            0,
+            f'<option value="{int(selected)}" selected>{html.escape(label)}</option>',
+        )
+    return "".join(opts)
+
+
+def build_channels_settings_html(
+    channels: List[Dict[str, Any]],
+    *,
+    iface_id: int,
+    form_action: str,
+) -> str:
+    """Separate forms per channel slot for Node Settings."""
+    rows = []
+    for ch in channels:
+        idx = int(ch["index"])
+        name = html.escape(ch.get("name") or "")
+        psk_label = html.escape(str(ch.get("psk_label") or "—"))
+        up_chk = " checked" if ch.get("uplink") else ""
+        down_chk = " checked" if ch.get("downlink") else ""
+        role_opts = _channel_role_options(idx, int(ch.get("role") or 0))
+        badge = ""
+        if idx == 0:
+            badge = '<span class="badge bg-primary ms-1">Primary</span>'
+        elif ch.get("empty"):
+            badge = '<span class="badge bg-secondary ms-1">leer</span>'
+        rows.append(
+            f"""
+<div class="card border-secondary-subtle mb-3">
+  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+    <span><strong>#{idx}</strong> {badge}</span>
+    <span class="small text-muted">PSK aktuell: <code>{psk_label}</code></span>
+  </div>
+  <div class="card-body py-3">
+    <form method="post" class="row g-2 align-items-end">
+      <input type="hidden" name="action" value="save_channel">
+      <input type="hidden" name="iface_id" value="{iface_id}">
+      <input type="hidden" name="channel_index" value="{idx}">
+      <div class="col-md-3">
+        <label class="form-label" for="ch-name-{idx}">Name</label>
+        <input class="form-control form-control-sm" id="ch-name-{idx}" name="name"
+               maxlength="12" value="{name}" placeholder="z. B. MeshHessen">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="ch-role-{idx}">Rolle</label>
+        <select class="form-select form-select-sm" id="ch-role-{idx}" name="role">
+          {role_opts}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="ch-psk-{idx}">PSK (optional)</label>
+        <input class="form-control form-control-sm" id="ch-psk-{idx}" name="psk"
+               autocomplete="off" placeholder="leer = unverändert"
+               title="none · default · random · base64:… · 0x…">
+        <div class="form-text">none / default / random / base64:…</div>
+      </div>
+      <div class="col-md-2">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" name="uplink_enabled"
+                 id="ch-up-{idx}" value="1"{up_chk}>
+          <label class="form-check-label" for="ch-up-{idx}">Uplink</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="downlink_enabled"
+                 id="ch-down-{idx}" value="1"{down_chk}>
+          <label class="form-check-label" for="ch-down-{idx}">Downlink</label>
+        </div>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-sm btn-outline-primary w-100"
+                onclick="return confirm('Kanal #{idx} wirklich auf dem Gerät speichern?');">
+          Speichern
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+"""
+        )
+
+    return f"""
+<hr class="my-4">
+<h5 class="mb-2">Mesh-Kanäle</h5>
+<p class="small text-muted mb-3">
+  Liest die Kanal-Tabelle der Meshtastic-Instanz (Slots 0–7) und schreibt einzelne Slots
+  mit <code>writeChannel</code> — wie <code>meshtastic --ch-set</code>.
+  <strong>PSK:</strong> der echte Schlüssel wird nie angezeigt; Feld leer lassen = unverändert.
+  Falsches PSK oder Umbenennen von #0/#1 kann den Bot vom Mesh trennen.
+</p>
+<div class="alert alert-warning small">
+  Typisch Meshhessen: <strong>#0 ShortSlow</strong> (PRIMARY) · <strong>#1 MeshHessen</strong> (SECONDARY).
+  Primärkanal (#0) nicht deaktivieren. Nach dem Speichern Cache für Admin-Kanal/Channel-Test aktualisiert.
+</div>
+{''.join(rows) if rows else '<p class="text-muted">Keine Kanäle geladen.</p>'}
+"""
+
+
 def node_settings_role_options(selected: int) -> str:
     opts = []
     for val, label in sorted(_NODE_ROLE_LABELS.items()):
@@ -1351,3 +1613,31 @@ def build_node_settings_html(
   <button type="submit" class="btn btn-primary">Auf Gerät speichern</button>
 </form>
 """
+
+
+def build_node_settings_page_html(
+    settings: Dict[str, Any],
+    channels: Optional[List[Dict[str, Any]]],
+    channels_err: Optional[str],
+    *,
+    iface_id: int,
+    ifaces: List[int],
+    form_action: str,
+) -> str:
+    """Node settings form + channel editor section."""
+    body = build_node_settings_html(
+        settings,
+        iface_id=iface_id,
+        ifaces=ifaces,
+        form_action=form_action,
+    )
+    if channels_err:
+        body += (
+            f'<hr class="my-4"><h5>Mesh-Kanäle</h5>'
+            f'<p class="alert alert-warning">{html.escape(channels_err)}</p>'
+        )
+    elif channels is not None:
+        body += build_channels_settings_html(
+            channels, iface_id=iface_id, form_action=form_action
+        )
+    return body
