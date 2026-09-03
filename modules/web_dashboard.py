@@ -10,14 +10,23 @@ import platform
 import re
 import subprocess
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta
 from html import escape as html_escape
 from typing import Any, Dict, List, Optional
+import threading
 
 from modules.paths import path_in_repo, repo_root
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Host CPU metrics history (admin overview sparklines)
+_HOST_HIST_MAX = 60
+_HOST_SAMPLE_SEC = 5
+_host_history: deque = deque(maxlen=_HOST_HIST_MAX)
+_host_hist_lock = threading.Lock()
+_cpu_prev_times: Optional[tuple[int, int]] = None
+_host_sampler_started = False
 
 
 def _strip_ansi(text: str) -> str:
@@ -1378,25 +1387,265 @@ def render_admin_log_alerts_html(log: Dict[str, Any]) -> str:
     return "".join(parts)
 
 
-def _host_info() -> Dict[str, str]:
-    if platform.system() != "Linux":
-        return {"uptime": "—", "memory": "—", "disk": "—"}
+def _linux_cpu_times() -> Optional[tuple[int, int]]:
+    """Return (idle, total) jiffies from /proc/stat."""
     try:
-
-        def run(cmd: str) -> str:
-            return (
-                subprocess.check_output(cmd, shell=True, timeout=3)
-                .decode("utf-8", errors="replace")
-                .strip()
-            )
-
-        return {
-            "uptime": run("uptime -p"),
-            "memory": f"{run('free -m | awk \'/Mem:/ {print $7}\'')} / {run('free -m | awk \'/Mem:/ {print $2}\'')} MB frei",
-            "disk": f"{run('df -h / | awk \'NR==2 {print $4}\'')} frei von {run('df -h / | awk \'NR==2 {print $2}\'')}",
-        }
+        with open("/proc/stat", encoding="utf-8") as fh:
+            parts = fh.readline().split()
+        if not parts or parts[0] != "cpu":
+            return None
+        vals = [int(x) for x in parts[1:]]
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+        return idle, sum(vals)
     except Exception:
-        return {"uptime": "—", "memory": "—", "disk": "—"}
+        return None
+
+
+def _sample_cpu_percent() -> Optional[float]:
+    """CPU utilization % (Linux /proc/stat delta)."""
+    global _cpu_prev_times
+    if platform.system() != "Linux":
+        return None
+    cur = _linux_cpu_times()
+    if cur is None:
+        return None
+    if _cpu_prev_times is None:
+        _cpu_prev_times = cur
+        time.sleep(0.12)
+        cur2 = _linux_cpu_times()
+        if cur2 is None:
+            return None
+        idle0, total0 = _cpu_prev_times
+        idle1, total1 = cur2
+        _cpu_prev_times = cur2
+    else:
+        idle0, total0 = _cpu_prev_times
+        idle1, total1 = cur
+        _cpu_prev_times = cur
+    dt = total1 - total0
+    if dt <= 0:
+        return None
+    di = idle1 - idle0
+    pct = 100.0 * (1.0 - (di / dt))
+    return max(0.0, min(100.0, round(pct, 1)))
+
+
+def _sample_cpu_temp_c() -> Optional[float]:
+    """CPU/SoC temperature °C (vcgencmd or thermal zones), same idea as script/sysEnv.sh."""
+    if platform.system() != "Linux":
+        return None
+    # Raspberry Pi
+    try:
+        out = (
+            subprocess.check_output(
+                ["vcgencmd", "measure_temp"], stderr=subprocess.DEVNULL, timeout=2
+            )
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
+        # temp=48.2'C
+        m = re.search(r"temp=([0-9.]+)", out)
+        if m:
+            return round(float(m.group(1)), 1)
+    except Exception:
+        pass
+    # thermal zones
+    base = "/sys/class/thermal"
+    try:
+        zones = sorted(
+            d for d in os.listdir(base) if d.startswith("thermal_zone")
+        )
+    except Exception:
+        return None
+    preferred: List[float] = []
+    others: List[float] = []
+    for z in zones:
+        zpath = os.path.join(base, z)
+        try:
+            with open(os.path.join(zpath, "type"), encoding="utf-8") as fh:
+                ztype = fh.read().strip().lower()
+            with open(os.path.join(zpath, "temp"), encoding="utf-8") as fh:
+                millideg = float(fh.read().strip())
+            temp_c = millideg / 1000.0
+            if temp_c <= -50 or temp_c > 150:
+                continue
+            if any(
+                k in ztype
+                for k in ("cpu", "x86_pkg", "soc", "pkg", "core", "k10temp", "zen")
+            ):
+                preferred.append(temp_c)
+            else:
+                others.append(temp_c)
+        except Exception:
+            continue
+    pool = preferred or others
+    if not pool:
+        return None
+    return round(sum(pool) / len(pool), 1)
+
+
+def _host_info() -> Dict[str, str]:
+    """Legacy string metrics for uptime/RAM/disk."""
+    snap = collect_host_snapshot(include_cpu=False)
+    return {
+        "uptime": snap.get("uptime") or "—",
+        "memory": snap.get("memory") or "—",
+        "disk": snap.get("disk") or "—",
+    }
+
+
+def collect_host_snapshot(*, include_cpu: bool = True) -> Dict[str, Any]:
+    """Current host metrics (strings + optional numeric CPU fields)."""
+    out: Dict[str, Any] = {
+        "uptime": "—",
+        "memory": "—",
+        "disk": "—",
+        "cpu_pct": None,
+        "cpu_temp_c": None,
+        "ts": time.time(),
+    }
+    if platform.system() == "Linux":
+        try:
+
+            def run(cmd: str) -> str:
+                return (
+                    subprocess.check_output(cmd, shell=True, timeout=3)
+                    .decode("utf-8", errors="replace")
+                    .strip()
+                )
+
+            out["uptime"] = run("uptime -p") or "—"
+            out["memory"] = (
+                f"{run('free -m | awk \'/Mem:/ {print $7}\'')} / "
+                f"{run('free -m | awk \'/Mem:/ {print $2}\'')} MB frei"
+            )
+            out["disk"] = (
+                f"{run('df -h / | awk \'NR==2 {print $4}\'')} frei von "
+                f"{run('df -h / | awk \'NR==2 {print $2}\'')}"
+            )
+        except Exception:
+            pass
+    if include_cpu:
+        out["cpu_pct"] = _sample_cpu_percent()
+        out["cpu_temp_c"] = _sample_cpu_temp_c()
+    return out
+
+
+def _append_host_history(snap: Dict[str, Any]) -> None:
+    with _host_hist_lock:
+        _host_history.append(
+            {
+                "ts": float(snap.get("ts") or time.time()),
+                "cpu_pct": snap.get("cpu_pct"),
+                "cpu_temp_c": snap.get("cpu_temp_c"),
+            }
+        )
+
+
+def ensure_host_metrics_sampler() -> None:
+    """Start background host CPU sampler (once per process)."""
+    global _host_sampler_started
+    with _host_hist_lock:
+        if _host_sampler_started:
+            return
+        _host_sampler_started = True
+
+    def _loop() -> None:
+        while True:
+            try:
+                snap = collect_host_snapshot(include_cpu=True)
+                _append_host_history(snap)
+            except Exception:
+                pass
+            time.sleep(_HOST_SAMPLE_SEC)
+
+    threading.Thread(target=_loop, name="host-metrics", daemon=True).start()
+
+
+def get_host_metrics_payload() -> Dict[str, Any]:
+    """Current metrics + history for admin overview / API."""
+    ensure_host_metrics_sampler()
+    snap = collect_host_snapshot(include_cpu=True)
+    now = float(snap.get("ts") or time.time())
+    with _host_hist_lock:
+        last_ts = _host_history[-1]["ts"] if _host_history else 0.0
+        if (now - last_ts) >= (_HOST_SAMPLE_SEC - 0.5):
+            _host_history.append(
+                {
+                    "ts": now,
+                    "cpu_pct": snap.get("cpu_pct"),
+                    "cpu_temp_c": snap.get("cpu_temp_c"),
+                }
+            )
+        hist = list(_host_history)
+    return {
+        "uptime": snap["uptime"],
+        "memory": snap["memory"],
+        "disk": snap["disk"],
+        "cpu_pct": snap["cpu_pct"],
+        "cpu_temp_c": snap["cpu_temp_c"],
+        "history": hist,
+        "sample_sec": _HOST_SAMPLE_SEC,
+    }
+
+
+def render_host_metrics_html() -> str:
+    """Host uptime/RAM/disk/CPU for admin UI (with sparkline hooks)."""
+    ensure_host_metrics_sampler()
+    data = get_host_metrics_payload()
+    cpu = data.get("cpu_pct")
+    temp = data.get("cpu_temp_c")
+    cpu_s = "—" if cpu is None else f"{cpu:.1f} %"
+    temp_s = "—" if temp is None else f"{temp:.1f} °C"
+    payload = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
+    return f"""
+<div id="host-metrics" data-api="/api/admin/host-metrics">
+  <script type="application/json" id="host-metrics-bootstrap">{payload}</script>
+  <div class="row g-2 mb-2">
+    <div class="col-md-4">
+      <div class="metric-card">
+        <div class="metric-label">Uptime</div>
+        <div class="metric-value small" data-host="uptime">{html_escape(str(data["uptime"]))}</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="metric-card">
+        <div class="metric-label">RAM</div>
+        <div class="metric-value small" data-host="memory">{html_escape(str(data["memory"]))}</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="metric-card">
+        <div class="metric-label">Disk</div>
+        <div class="metric-value small" data-host="disk">{html_escape(str(data["disk"]))}</div>
+      </div>
+    </div>
+  </div>
+  <div class="row g-2 mb-0">
+    <div class="col-md-6">
+      <div class="metric-card host-metric-spark">
+        <div class="d-flex justify-content-between align-items-baseline gap-2">
+          <div class="metric-label mb-0">CPU-Auslastung</div>
+          <div class="metric-value small mb-0" data-host="cpu_pct">{html_escape(cpu_s)}</div>
+        </div>
+        <canvas class="host-sparkline" data-spark="cpu_pct" width="320" height="48" aria-hidden="true"></canvas>
+        <div class="form-text mb-0">wie <code>!sysinfo</code> / sysEnv.sh · Verlauf ~{int(_HOST_HIST_MAX * _HOST_SAMPLE_SEC / 60)}&nbsp;min</div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="metric-card host-metric-spark">
+        <div class="d-flex justify-content-between align-items-baseline gap-2">
+          <div class="metric-label mb-0">CPU-Temperatur</div>
+          <div class="metric-value small mb-0" data-host="cpu_temp_c">{html_escape(temp_s)}</div>
+        </div>
+        <canvas class="host-sparkline" data-spark="cpu_temp_c" width="320" height="48" aria-hidden="true"></canvas>
+        <div class="form-text mb-0">thermal zone / vcgencmd · Verlauf ~{int(_HOST_HIST_MAX * _HOST_SAMPLE_SEC / 60)}&nbsp;min</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/static/portal/host-metrics.js?v=1"></script>
+"""
 
 
 def collect_runtime_stats() -> Dict[str, Any]:
@@ -1525,33 +1774,6 @@ def _list_items(items: List[str], empty: str = "Keine Einträge") -> str:
     if not items:
         return f'<li class="text-muted">{html_escape(empty)}</li>'
     return "".join(f"<li>{html_escape(str(x))}</li>" for x in items)
-
-
-def render_host_metrics_html() -> str:
-    """Host uptime/RAM/disk for admin UI."""
-    host = _host_info()
-    return f"""
-<div class="row g-2 mb-0">
-  <div class="col-md-4">
-    <div class="metric-card">
-      <div class="metric-label">Uptime</div>
-      <div class="metric-value small">{html_escape(host["uptime"])}</div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="metric-card">
-      <div class="metric-label">RAM</div>
-      <div class="metric-value small">{html_escape(host["memory"])}</div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="metric-card">
-      <div class="metric-label">Disk</div>
-      <div class="metric-value small">{html_escape(host["disk"])}</div>
-    </div>
-  </div>
-</div>
-"""
 
 
 def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:

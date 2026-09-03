@@ -810,6 +810,13 @@ def create_app(
             active_tab=active_tab,
         )
 
+    @app.route("/api/admin/host-metrics")
+    @login_required
+    def api_admin_host_metrics():
+        from modules.web_dashboard import get_host_metrics_payload
+
+        return jsonify(get_host_metrics_payload())
+
     @app.route("/api/admin/mesh/messages")
     @login_required
     def api_mesh_messages():
