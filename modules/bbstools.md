@@ -3,7 +3,7 @@
 
 # 📡 meshBBS: How-To & API Documentation
 
-This document covers the Bulliten Board System or BBS componment of the meshing-around project.
+This document covers the Bulletin Board System (BBS) component of Hessenbot.
 
 ## Table of Contents
 
@@ -97,8 +97,8 @@ bbsAPI_enabled = True
   2. **Copy Files:**  
      Use `scp` or `rsync` to copy files between nodes:
      ```sh
-     scp user@remote:/path/to/meshing-around/data/bbsdb.pkl ./data/bbsdb.pkl
-     scp user@remote:/path/to/meshing-around/data/bbsdm.pkl ./data/bbsdm.pkl
+     scp user@remote:/path/to/Hessenbot/data/bbsdb.pkl ./data/bbsdb.pkl
+     scp user@remote:/path/to/Hessenbot/data/bbsdm.pkl ./data/bbsdm.pkl
      ```
   3. **Reload Database:**  
      After copying, when the "API" is enabled the watchdog will look for changes and injest.

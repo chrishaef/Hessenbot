@@ -15,10 +15,10 @@ CONFIDENCE_THRESHOLD = 0.8  # Only show detections above this confidence
 MOVEMENT_THRESHOLD = 50     # Pixels to consider as movement (adjust as needed)
 IGNORE_STATIONARY = True   # Whether to ignore stationary objects in output
 ALERT_FUSE_COUNT = 5  # Number of consecutive detections before alerting
-ALERT_FILE_PATH = "alert.txt"  # e.g., "/opt/meshing-around/alert.txt" or None for no file output
+ALERT_FILE_PATH = "alert.txt"  # e.g., "/opt/Hessenbot/alert.txt" or None for no file output
 OCR_PROCESSING_ENABLED = True  # Whether to perform OCR on detected objects
 SAVE_EVIDENCE_IMAGES = True  # Whether to save evidence images when OCR text is found in bbox
-EVIDENCE_IMAGE_DIR = "."  # Change to desired directory, e.g., "/opt/meshing-around/data/images"
+EVIDENCE_IMAGE_DIR = "."  # Change to desired directory, e.g., "/opt/Hessenbot/data/images"
 EVIDENCE_IMAGE_PATTERN = "evidence_{timestamp}.png"
 
 try:

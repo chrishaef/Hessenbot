@@ -1,5 +1,5 @@
 #!/bin/bash
-# Update Hessenbot / meshing-around: stop systemd units, git pull, refresh venv deps, optional config merge, start units.
+# Update Hessenbot: stop systemd units, git pull, refresh venv deps, optional config merge, start units.
 # Run from the repository root (same directory as this file). Use sudo if services run as root.
 #
 # Usage:

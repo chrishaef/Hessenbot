@@ -3,7 +3,7 @@
 # Usage:
 #   sudo ./etc/set-permissions.sh [user] [repo_path]
 # Examples:
-#   sudo ./etc/set-permissions.sh meshbot /opt/meshing-around
+#   sudo ./etc/set-permissions.sh meshbot /opt/Hessenbot
 #   sudo ./etc/set-permissions.sh meshbot "$(pwd)"
 
 set -euo pipefail

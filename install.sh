@@ -1,5 +1,5 @@
 #!/bin/bash
-# meshing-around install helper script
+# Hessenbot install helper script
 # to uninstall, run with --nope
 
 NOPE=0
@@ -14,7 +14,7 @@ done
 
 if [[ $NOPE -eq 1 ]]; then
     echo "----------------------------------------------"
-    echo "Uninstalling Meshing Around ..."
+    echo "Uninstalling Hessenbot ..."
     echo "----------------------------------------------"
     
     sudo systemctl stop mesh_bot || true
@@ -39,6 +39,8 @@ if [[ $NOPE -eq 1 ]]; then
     sudo groupdel meshbot || true
     sudo userdel meshbot || true
 
+    sudo rm -rf /opt/Hessenbot/
+    # Legacy Upstream-Pfad (falls noch vorhanden)
     sudo rm -rf /opt/meshing-around/
 
     # If Ollama was installed and you want to remove it:
@@ -68,13 +70,13 @@ if [[ $NOPE -eq 1 ]]; then
     exit 0
 fi
 
-# install.sh, Meshing Around installer script
-# Thanks for using Meshing Around!
+# install.sh — Hessenbot installer
+# Thanks for using Hessenbot!
 echo "=============================================="
-echo "     Meshing Around Automated Installer        "
+echo "        Hessenbot Automated Installer         "
 echo "=============================================="
 echo
-echo "This script will attempt to install the Meshing Around Bot and its dependencies."
+echo "This script will attempt to install Hessenbot and its dependencies."
 echo "Recommended for Raspbian, Debian, Ubuntu, or Foxbuntu embedded systems."
 echo "If you encounter any issues, try running the installer again."
 echo
@@ -85,7 +87,7 @@ echo "----------------------------------------------"
 if [[ -f config.ini ]]; then
     echo
     echo "=========================================================="
-    echo "  Detected existing installation of Meshing Around."
+    echo "  Detected existing installation of Hessenbot."
     echo "  Please backup and remove the existing installation"
     echo "  before proceeding with a new install."
     echo "=========================================================="
@@ -113,19 +115,19 @@ then
     sudo apt-get install curl
 fi
 
-# check if we are in /opt/meshing-around
-if [[ "$program_path" != "/opt/meshing-around" ]]; then
+# check if we are in /opt/Hessenbot
+if [[ "$program_path" != "/opt/Hessenbot" ]]; then
     echo "----------------------------------------------"
     echo "  Project Path Decision"
     echo "----------------------------------------------"
-    printf "\nIt is recommended to install Meshing Around in /opt/meshing-around if used as a service.\n"
-    printf "Do you want to move the project to /opt/meshing-around now? (y/n): "
+    printf "\nIt is recommended to install Hessenbot in /opt/Hessenbot if used as a service.\n"
+    printf "Do you want to move the project to /opt/Hessenbot now? (y/n): "
     read move
     if [[ $(echo "$move" | grep -i "^y") ]]; then
-        sudo mv "$program_path" /opt/meshing-around
-        cd /opt/meshing-around
-        sudo git config --global --add safe.directory /opt/meshing-around
-        printf "\nProject moved to /opt/meshing-around.\n"
+        sudo mv "$program_path" /opt/Hessenbot
+        cd /opt/Hessenbot
+        sudo git config --global --add safe.directory /opt/Hessenbot
+        printf "\nProject moved to /opt/Hessenbot.\n"
         printf "Please re-run the installer from the new location.\n"
         exit 0
     else
@@ -535,7 +537,7 @@ exit 0
 # sudo groupdel meshbot
 # sudo userdel meshbot
 
-# sudo rm -rf /opt/meshing-around/
+# sudo rm -rf /opt/Hessenbot/
 
 # If Ollama was installed and you want to remove it:
 # sudo systemctl stop ollama

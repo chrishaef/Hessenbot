@@ -16,7 +16,7 @@ from importlib.metadata import version
 from collections import Counter, defaultdict
 
 # global variables
-LOG_PATH = '/opt/meshing-around/logs' # override path to log files (defaults to ../log)
+LOG_PATH = '/opt/Hessenbot/logs' # override path to log files (defaults to ../log)
 W3_PATH = '/var/www/html/' # override path for HTML report output (defaults to etc/report_output)
 multiLogReader = False # set to True to read all meshbot logs in ../log
 shameWordList = ['password', 'combo', 'key', 'hidden', 'secret', 'pass', 'token', 'login', 'username', 'admin', 'root', 'base64:', '==' ]

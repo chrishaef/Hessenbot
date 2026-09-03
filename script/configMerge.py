@@ -74,7 +74,7 @@ if __name__ == "__main__":
             raise FileNotFoundError(f"Master configuration file {master_config_path} is missing or empty.")
     except Exception as e:
         print(f"Error: {e}")
-        print("Run the tool from the meshing-around/script/ directory where the config.template is located.")
+        print("Run the tool from the Hessenbot/script/ directory where the config.template is located.")
         print("  python3 script/configMerge.py")
         exit(1)
 

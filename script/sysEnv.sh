@@ -1,5 +1,5 @@
 #!/bin/bash
-# meshing-around shell script for sysinfo
+# Hessenbot shell script for sysinfo
 # runShell.sh
 cd "$(dirname "$0")"
 program_path=$(pwd)
