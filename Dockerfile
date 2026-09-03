@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1 \
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8 \
-    TZ=America/Los_Angeles
+    TZ=Europe/Berlin
 
 RUN apt-get update && \
     apt-get install -y \

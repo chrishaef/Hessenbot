@@ -7,7 +7,6 @@ alert.txt
 
 # logs (bot writes here; never commit rotations)
 logs/*
-!logs/README.md
 
 # modified .service files
 etc/*.service
