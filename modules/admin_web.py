@@ -247,6 +247,28 @@ def create_app(
             + portal_shell_end()
         )
 
+    @app.route("/impressum")
+    def impressum_page():
+        from modules.web_impressum import render_impressum_page_body
+        import modules.settings as st
+
+        body = render_impressum_page_body(st)
+        return (
+            portal_shell_start(
+                title="Impressum – Hessenbot",
+                active_nav="impressum",
+                particles=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4">'
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
+        )
+
     BW_PORTAL_TTL_SEC = 3600
 
     def _bw_portal_nid():
@@ -2032,15 +2054,28 @@ def create_app(
             return redirect(url_for("settings_index"))
 
         st.config.read(st.config_file, encoding="utf-8")
-        if "webAdmin" in st.config and "publicUrl" not in st.config["webAdmin"]:
-            st.config["webAdmin"]["publicUrl"] = ""
-            try:
-                with open(st.config_file, "w", encoding="utf-8") as fh:
-                    st.config.write(fh)
-            except OSError:
-                pass
+        if "webAdmin" in st.config:
+            _ensure_keys = {
+                "publicUrl": "",
+                "impressumOperator": "",
+                "impressumAddress": "",
+                "impressumEmail": "",
+                "impressumPhone": "",
+                "impressumExtra": "",
+            }
+            wrote = False
+            for key, default in _ensure_keys.items():
+                if key not in st.config["webAdmin"]:
+                    st.config["webAdmin"][key] = default
+                    wrote = True
+            if wrote:
+                try:
+                    with open(st.config_file, "w", encoding="utf-8") as fh:
+                        st.config.write(fh)
+                except OSError:
+                    pass
             if not hasattr(st, "web_admin_public_url"):
-                st.web_admin_public_url = ""
+                st.web_admin_public_url = st.config["webAdmin"].get("publicUrl", "")
         return _render_admin_template(
             build_settings_form_html(st.config),
             title="Einstellungen",

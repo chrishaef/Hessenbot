@@ -156,6 +156,8 @@ def portal_footer() -> str:
     <a href="https://meshhessen.de" target="_blank" rel="noopener noreferrer">Meshhessen.de</a>
   </span>
   <span class="sep">·</span>
+  <a href="/impressum">Impressum</a>
+  <span class="sep">·</span>
   <a href="{html_escape(github)}" target="_blank" rel="noopener noreferrer"
      title="Quellcode und Dokumentation auf GitHub">
     <i class="bi bi-github me-1"></i>GitHub

@@ -83,6 +83,11 @@ FIELD_LABELS = {
     ("webAdmin", "log_dir"): "Log-Ordner (Admin)",
     ("webAdmin", "alert_file"): "Alert-Datei (Pfad)",
     ("webAdmin", "news_file"): "News-Datei (Pfad)",
+    ("webAdmin", "impressumOperator"): "Impressum: Betreiber / Name",
+    ("webAdmin", "impressumAddress"): "Impressum: Anschrift",
+    ("webAdmin", "impressumEmail"): "Impressum: E-Mail",
+    ("webAdmin", "impressumPhone"): "Impressum: Telefon (optional)",
+    ("webAdmin", "impressumExtra"): "Impressum: Zusatztext (optional)",
 }
 
 PASSWORD_KEYS = frozenset(

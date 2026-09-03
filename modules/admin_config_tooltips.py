@@ -268,6 +268,11 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("webAdmin", "news_file"): "Optional anderer Pfad für news.txt im Admin-Editor.",
     ("webAdmin", "log_dir"): "Ordner für Log-Anzeige im Admin; leer = logs/ im Bot-Verzeichnis.",
     ("webAdmin", "publicUrl"): "Öffentliche Basis-URL des Portals ohne Slash (z. B. https://bot.example.de). Wird in !blitzwatch web / set als Link zur Code-Eingabe genannt.",
+    ("webAdmin", "impressumOperator"): "Name bzw. Bezeichnung des Verantwortlichen für das öffentliche Portal (/impressum).",
+    ("webAdmin", "impressumAddress"): "Postanschrift für das Impressum (Straße, PLZ Ort).",
+    ("webAdmin", "impressumEmail"): "Kontakt-E-Mail für das Impressum.",
+    ("webAdmin", "impressumPhone"): "Optionale Telefonnummer für das Impressum.",
+    ("webAdmin", "impressumExtra"): "Optionaler Zusatztext auf der Impressumsseite (Haftungshinweise, Amateurfunk-Hinweis, …).",
 }
 
 # interface3…9 — gleiche Bedeutung wie interface2

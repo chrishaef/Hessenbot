@@ -526,5 +526,12 @@ news_file =
 # empty = logs/ under repo root (/opt/Hessenbot/logs); absolute path also allowed
 log_dir =
 # Öffentliche Basis-URL des Portals (ohne Slash), z. B. https://bot.example.de
-# erscheint im DM-Text von !blitzwatch set
+# erscheint im DM-Text von !blitzwatch web / set
 publicUrl =
+# Impressum für die öffentliche Webseite (/impressum) — Pflichtangaben des Betreibers
+impressumOperator =
+impressumAddress =
+impressumEmail =
+impressumPhone =
+# Optionaler Zusatztext (z. B. Hinweis Amateurfunk / Haftung)
+impressumExtra =

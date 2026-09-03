@@ -155,12 +155,33 @@ if 'webAdmin' not in config:
         'news_file': '',
         'log_dir': '',
         'publicUrl': '',
+        'impressumOperator': '',
+        'impressumAddress': '',
+        'impressumEmail': '',
+        'impressumPhone': '',
+        'impressumExtra': '',
     }
     config.write(open(config_file, 'w'))
 elif 'publicUrl' not in config['webAdmin']:
     # Bestehende Installationen: Feld für !blitzwatch set / Admin-Einstellungen nachziehen
     config['webAdmin']['publicUrl'] = ''
     config.write(open(config_file, 'w'))
+
+_IMPRESSUM_KEYS = (
+    'impressumOperator',
+    'impressumAddress',
+    'impressumEmail',
+    'impressumPhone',
+    'impressumExtra',
+)
+if 'webAdmin' in config:
+    _imp_added = False
+    for _k in _IMPRESSUM_KEYS:
+        if _k not in config['webAdmin']:
+            config['webAdmin'][_k] = ''
+            _imp_added = True
+    if _imp_added:
+        config.write(open(config_file, 'w'))
 
 if 'location' not in config:
     config['location'] = {'locations_db': 'data/locations.db', 'public_location_admin_manage': 'False', 'delete_public_locations_admins_only': 'False'}
@@ -566,6 +587,11 @@ try:
     web_admin_news_file = config['webAdmin'].get('news_file', '').strip()
     web_admin_log_dir = config['webAdmin'].get('log_dir', '').strip()
     web_admin_public_url = config['webAdmin'].get('publicUrl', '').strip()
+    web_admin_impressum_operator = config['webAdmin'].get('impressumOperator', '').strip()
+    web_admin_impressum_address = config['webAdmin'].get('impressumAddress', '').strip()
+    web_admin_impressum_email = config['webAdmin'].get('impressumEmail', '').strip()
+    web_admin_impressum_phone = config['webAdmin'].get('impressumPhone', '').strip()
+    web_admin_impressum_extra = config['webAdmin'].get('impressumExtra', '').strip()
 
     # messaging settings
     responseDelay = config['messagingSettings'].getfloat('responseDelay', 0.7) # default 0.7
