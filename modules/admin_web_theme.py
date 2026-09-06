@@ -56,6 +56,7 @@ ADMIN_TABS: List[Tuple[str, str, str]] = [
     ("polls", "Umfragen", "polls_index"),
     ("settings", "Einstellungen", "settings_index"),
     ("banlist", "Banliste", "banlist_index"),
+    ("limits", "Limits", "limits_index"),
     ("logs", "Logs", "logs"),
 ]
 

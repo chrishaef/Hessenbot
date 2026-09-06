@@ -1575,8 +1575,18 @@ def onReceive(packet, interface):
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                 "From: " + CustomFormatter.white + f"{format_dm_peer_for_log(message_from_id, rxNode)}")
                     # rate limit check
-                    if is_cmd_rate_limited(message_from_id):
-                        send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                    _thr = check_command_throttle(
+                        message_from_id,
+                        command_token=extract_command_token(message_string),
+                    )
+                    if _thr is not None:
+                        if _thr:
+                            send_message(_thr, channel_number, message_from_id, rxNode)
+                        else:
+                            logger.debug(
+                                f"System: rate-limit silent DM from "
+                                f"{get_name_from_number(message_from_id, 'short', rxNode)}"
+                            )
                     else:
                         # respond with DM
                         send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode)
@@ -1594,8 +1604,18 @@ def onReceive(packet, interface):
                             + CustomFormatter.white
                             + f"{format_dm_peer_for_log(message_from_id, rxNode)}"
                         )
-                        if is_cmd_rate_limited(message_from_id):
-                            send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                        _thr = check_command_throttle(
+                            message_from_id,
+                            command_token=extract_command_token(message_string),
+                        )
+                        if _thr is not None:
+                            if _thr:
+                                send_message(_thr, channel_number, message_from_id, rxNode)
+                            else:
+                                logger.debug(
+                                    f"System: rate-limit silent missing-! from "
+                                    f"{get_name_from_number(message_from_id, 'short', rxNode)}"
+                                )
                         else:
                             send_message(
                                 missing_cmd_bang_hint(missing_cmd),
@@ -1645,8 +1665,15 @@ def onReceive(packet, interface):
                 elif _bare_test:
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                 "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
-                    if is_cmd_rate_limited(message_from_id):
-                        logger.debug(f"System: channel test rate-limited from: {get_name_from_number(message_from_id, 'short', rxNode)}")
+                    _thr = check_command_throttle(message_from_id, command_token="test")
+                    if _thr is not None:
+                        if _thr:
+                            # Hinweis nur per DM, Channel-Test nicht zusätzlich fluten
+                            send_message(_thr, channel_number, message_from_id, rxNode)
+                        logger.debug(
+                            f"System: channel test rate-limited from: "
+                            f"{get_name_from_number(message_from_id, 'short', rxNode)}"
+                        )
                     else:
                         _test_resp = handle_ping(message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number)
                         send_message(_test_resp, channel_number, 0, rxNode, reply_id=packet_id)
@@ -1667,8 +1694,18 @@ def onReceive(packet, interface):
                         logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                     "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
                         # rate limit check
-                        if is_cmd_rate_limited(message_from_id):
-                            send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                        _thr = check_command_throttle(
+                            message_from_id,
+                            command_token=extract_command_token(message_string),
+                        )
+                        if _thr is not None:
+                            if _thr:
+                                send_message(_thr, channel_number, message_from_id, rxNode)
+                            else:
+                                logger.debug(
+                                    f"System: rate-limit silent channel from "
+                                    f"{get_name_from_number(message_from_id, 'short', rxNode)}"
+                                )
                         elif my_settings.useDMForResponse:
                             # respond to channel message via direct message
                             send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode, reply_id=packet_id)

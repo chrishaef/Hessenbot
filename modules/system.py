@@ -692,11 +692,9 @@ def cleanup_memory():
         #                       ping.get('count', 0) > 0]
 
         # Clean up stale entries from cmd rate tracker
-        if _cmd_rate_tracker:
-            cutoff = current_time - cmdRateLimitWindow
-            stale = [k for k, ts_list in _cmd_rate_tracker.items() if not any(t > cutoff for t in ts_list)]
-            for k in stale:
-                del _cmd_rate_tracker[k]
+        from modules.cmd_throttle import cleanup_throttle_state
+
+        cleanup_throttle_state(current_time)
 
         # Clean up stale nodeDB entries (only when >1000 and older than 60 days)
         _ndb.cleanup_nodedb()
@@ -2252,28 +2250,36 @@ def ban_hammer(node_id, rxInterface=None, channel=None, reason=""):
     return False  # No ban applied
 
 
-_cmd_rate_tracker: dict = {}  # node_id_str -> list of timestamps
+from modules.cmd_throttle import (
+    check_command_throttle as _check_command_throttle,
+    extract_command_token,
+    get_rate_limit_snapshot as _get_rate_limit_snapshot,
+    is_cmd_rate_limited as _is_cmd_rate_limited,
+    reset_rate_limit,
+)
+
 
 def is_cmd_rate_limited(node_id) -> bool:
-    """Returns True and logs a warning if the node is sending commands too fast."""
-    if not cmdRateLimitEnabled:
-        return False
-    if isNodeAdmin(str(node_id)):
-        return False
+    return _is_cmd_rate_limited(node_id, is_admin=isNodeAdmin)
 
-    node_key = str(node_id)
-    now = time.time()
-    cutoff = now - cmdRateLimitWindow
-    timestamps = _cmd_rate_tracker.get(node_key, [])
-    # Drop timestamps outside the current window
-    timestamps = [t for t in timestamps if t > cutoff]
-    timestamps.append(now)
-    _cmd_rate_tracker[node_key] = timestamps
 
-    if len(timestamps) > cmdRateLimitMax:
-        logger.warning(f"System: Rate limit hit for node {node_key} ({len(timestamps)} cmds in {cmdRateLimitWindow}s)")
-        return True
-    return False
+def check_command_throttle(node_id, command_token=None):
+    return _check_command_throttle(
+        node_id, command_token=command_token, is_admin=isNodeAdmin
+    )
+
+
+def get_rate_limit_snapshot() -> list:
+    def _resolve(node_key: str):
+        try:
+            nid = int(node_key)
+            short = get_name_from_number(nid, "short", 1)
+            long_n = get_name_from_number(nid, "long", 1)
+            return short or "", long_n or "", f"!{nid:08x}"
+        except (TypeError, ValueError):
+            return "", "", node_key
+
+    return _get_rate_limit_snapshot(resolve_names=_resolve)
 
 
 def bbs_ban_list_file_path():

@@ -503,6 +503,15 @@ autoBanThreshold = 5
 apiThrottleValue = 20
 # Timeframe for offenses (in seconds)
 autoBanTimeframe = 3600
+# Global command rate limit (per node) — protects mesh airtime
+cmdRateLimitEnabled = True
+cmdRateLimitMax = 3
+cmdRateLimitWindow = 60
+# Only one "please slow down" DM per window; further hits stay silent
+cmdRateLimitNotifyOnce = True
+# Extra cooldown for expensive / multi-chunk commands (seconds, 0 = off)
+cmdExpensiveCooldownSec = 45
+cmdExpensiveCommands = wx,wxc,warning,dealert,blitz,uv,regen,trace,whereami,rlist,satpass,tide,river,earthquake
 
 [dataPersistence]
 # Enable or disable the data persistence loop service

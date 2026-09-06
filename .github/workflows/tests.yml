@@ -37,4 +37,4 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest modules/test_blitzwatch.py modules/test_location_args.py -q --tb=short
+          python -m pytest modules/test_blitzwatch.py modules/test_location_args.py modules/test_throttle.py -q --tb=short

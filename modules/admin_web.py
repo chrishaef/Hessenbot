@@ -3,6 +3,7 @@
 # Started in a background thread when [webAdmin] enabled in config.ini.
 
 import glob
+import json
 import os
 import secrets
 import threading
@@ -1764,6 +1765,160 @@ def create_app(
             active_tab="banlist",
             body=Markup(body),
         )
+
+    @app.route("/limits")
+    @login_required
+    def limits_index():
+        import modules.settings as st
+
+        enabled = getattr(st, "cmdRateLimitEnabled", True)
+        max_c = getattr(st, "cmdRateLimitMax", 3)
+        window = getattr(st, "cmdRateLimitWindow", 60)
+        notify = getattr(st, "cmdRateLimitNotifyOnce", True)
+        cool = getattr(st, "cmdExpensiveCooldownSec", 45)
+        cmds = getattr(st, "cmdExpensiveCommands", [])
+        cmds_s = ", ".join(cmds) if isinstance(cmds, (list, tuple)) else str(cmds)
+        settings_url = url_for("settings_index")
+        body = f"""
+<p class="small text-muted mb-2">
+  Live-Nutzung der Befehls-Limits. Werte ändern unter
+  <a href="{html_escape(settings_url)}">Einstellungen → Nachrichten</a>.
+</p>
+<div class="alert alert-secondary small">
+  Global: <strong>{"an" if enabled else "aus"}</strong> ·
+  max <code>{html_escape(str(max_c))}</code> Befehle /
+  <code>{html_escape(str(window))}s</code> ·
+  Hinweis einmalig: <code>{html_escape(str(notify))}</code><br>
+  Teure Cooldown: <code>{html_escape(str(cool))}s</code> ·
+  Befehle: <code>{html_escape(cmds_s)}</code>
+</div>
+<div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
+  <button type="button" id="limits-refresh" class="btn btn-sm btn-outline-secondary">Aktualisieren</button>
+  <button type="button" id="limits-reset-all" class="btn btn-sm btn-outline-danger">Alle Zähler zurücksetzen</button>
+  <span id="limits-status" class="small text-muted"></span>
+</div>
+<div class="table-scroll">
+  <table class="nodes-table table-dark table-bordered" id="limits-table">
+    <thead>
+      <tr>
+        <th>Node</th><th>Hex</th><th>Befehle</th><th>Status</th><th>Teure Cooldowns</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="limits-tbody">
+      <tr><td colspan="6" class="text-muted">Lade …</td></tr>
+    </tbody>
+  </table>
+</div>
+<script>
+(function () {{
+  const tbody = document.getElementById("limits-tbody");
+  const statusEl = document.getElementById("limits-status");
+  const apiGet = {json.dumps(url_for("api_admin_rate_limits"))};
+  const apiReset = {json.dumps(url_for("api_admin_rate_limits_reset"))};
+
+  function esc(s) {{
+    const d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  }}
+
+  function render(rows) {{
+    if (!rows || !rows.length) {{
+      tbody.innerHTML = '<tr><td colspan="6" class="text-muted">Keine Aktivität im aktuellen Fenster.</td></tr>';
+      return;
+    }}
+    tbody.innerHTML = rows.map(function (r) {{
+      const label = (r.short || r.long)
+        ? esc(r.short || "") + (r.long && r.short !== r.long ? " · " + esc(r.long) : "")
+        : esc(r.node_id);
+      const exp = (r.expensive || []).map(function (e) {{
+        return "!" + esc(e.cmd) + " (" + esc(e.remaining_sec) + "s)";
+      }}).join(", ") || "—";
+      return "<tr>"
+        + "<td>" + label + "<br><code class=\\"small\\">" + esc(r.node_id) + "</code></td>"
+        + "<td><code>" + esc(r.hex) + "</code></td>"
+        + "<td>" + esc(r.cmds_in_window) + " / " + esc(r.limit_max) + "</td>"
+        + "<td>" + esc(r.status) + "</td>"
+        + "<td class=\\"small\\">" + exp + "</td>"
+        + '<td><button type="button" class="btn btn-sm btn-outline-warning limits-reset-one" data-node="'
+        + esc(r.node_id) + '">Reset</button></td>'
+        + "</tr>";
+    }}).join("");
+  }}
+
+  function load() {{
+    fetch(apiGet, {{ credentials: "same-origin", headers: {{ Accept: "application/json" }} }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (data) {{
+        render(data.rows || []);
+        if (statusEl) statusEl.textContent = "Aktualisiert " + new Date().toLocaleTimeString("de-DE");
+      }})
+      .catch(function (e) {{
+        if (statusEl) statusEl.textContent = "Fehler: " + e.message;
+      }});
+  }}
+
+  function resetNode(nodeId) {{
+    const body = new URLSearchParams();
+    body.set("node_id", nodeId || "*");
+    fetch(apiReset, {{
+      method: "POST",
+      credentials: "same-origin",
+      headers: {{ "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }},
+      body: body.toString(),
+    }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (data) {{
+        if (statusEl) statusEl.textContent = data.message || "Zurückgesetzt";
+        load();
+      }})
+      .catch(function (e) {{
+        if (statusEl) statusEl.textContent = "Reset fehlgeschlagen: " + e.message;
+      }});
+  }}
+
+  document.getElementById("limits-refresh").addEventListener("click", load);
+  document.getElementById("limits-reset-all").addEventListener("click", function () {{
+    if (confirm("Alle Rate-Limit-Zähler zurücksetzen?")) resetNode("*");
+  }});
+  tbody.addEventListener("click", function (ev) {{
+    const btn = ev.target.closest(".limits-reset-one");
+    if (!btn) return;
+    resetNode(btn.getAttribute("data-node"));
+  }});
+  load();
+  setInterval(load, 5000);
+}})();
+</script>
+"""
+        return _render_admin_template(
+            """
+  {{ body|safe }}
+""",
+            title="Limits",
+            active_tab="limits",
+            body=Markup(body),
+        )
+
+    @app.route("/api/admin/rate-limits")
+    @login_required
+    def api_admin_rate_limits():
+        from modules.system import get_rate_limit_snapshot
+
+        return jsonify({"rows": get_rate_limit_snapshot()})
+
+    @app.route("/api/admin/rate-limits/reset", methods=["POST"])
+    @login_required
+    def api_admin_rate_limits_reset():
+        from modules.system import reset_rate_limit
+
+        node_id = (request.form.get("node_id") or request.json and request.json.get("node_id") or "*").strip()
+        n = reset_rate_limit(None if node_id in ("*", "") else node_id)
+        if node_id in ("*", ""):
+            msg = f"Alle Zähler zurückgesetzt ({n} Nodes)."
+        else:
+            msg = f"Zähler für {node_id} zurückgesetzt." if n else f"Keine Daten für {node_id}."
+        return jsonify({"ok": True, "cleared": n, "message": msg})
 
     @app.route("/bbs")
     @login_required

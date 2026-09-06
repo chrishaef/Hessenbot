@@ -636,8 +636,17 @@ try:
     autoBanTimeframe = config['messagingSettings'].getint('autoBanTimeframe', 3600) # default 1 hour in seconds
     apiThrottleValue = config['messagingSettings'].getint('apiThrottleValue', 20) # default 20 requests
     cmdRateLimitEnabled = config['messagingSettings'].getboolean('cmdRateLimitEnabled', True)
-    cmdRateLimitMax = config['messagingSettings'].getint('cmdRateLimitMax', 5) # max commands per window
-    cmdRateLimitWindow = config['messagingSettings'].getint('cmdRateLimitWindow', 30) # window in seconds
+    cmdRateLimitMax = config['messagingSettings'].getint('cmdRateLimitMax', 3) # max commands per window
+    cmdRateLimitWindow = config['messagingSettings'].getint('cmdRateLimitWindow', 60) # window in seconds
+    cmdRateLimitNotifyOnce = config['messagingSettings'].getboolean('cmdRateLimitNotifyOnce', True)
+    cmdExpensiveCooldownSec = config['messagingSettings'].getint('cmdExpensiveCooldownSec', 45)
+    _exp_cmds = config['messagingSettings'].get(
+        'cmdExpensiveCommands',
+        'wx,wxc,warning,dealert,blitz,uv,regen,trace,whereami,rlist,satpass,tide,river,earthquake',
+    )
+    cmdExpensiveCommands = [
+        c.strip().lower().rstrip('?') for c in str(_exp_cmds).split(',') if c.strip()
+    ]
 
     # data persistence settings
     dataPersistence_enabled = config.getboolean('dataPersistence', 'enabled', fallback=True) # default True

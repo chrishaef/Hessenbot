@@ -89,6 +89,12 @@ FIELD_LABELS = {
     ("webAdmin", "impressumPhone"): "Impressum: Telefon (optional)",
     ("webAdmin", "impressumExtra"): "Impressum: Zusatztext (optional)",
     ("webAdmin", "datenschutzExtra"): "Datenschutz: Zusatztext (optional)",
+    ("messagingSettings", "cmdRateLimitEnabled"): "Befehls-Rate-Limit aktiv",
+    ("messagingSettings", "cmdRateLimitMax"): "Max. Befehle / Fenster",
+    ("messagingSettings", "cmdRateLimitWindow"): "Rate-Limit-Fenster (Sekunden)",
+    ("messagingSettings", "cmdRateLimitNotifyOnce"): "Nur 1 Hinweis-DM / Fenster",
+    ("messagingSettings", "cmdExpensiveCooldownSec"): "Cooldown teure Befehle (Sekunden)",
+    ("messagingSettings", "cmdExpensiveCommands"): "Teure Befehle (Komma-Liste)",
 }
 
 PASSWORD_KEYS = frozenset(
