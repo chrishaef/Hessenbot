@@ -85,10 +85,14 @@ class TestBot(unittest.TestCase):
             patch("modules.system.explicitCmd", True),
             patch("modules.system.trap_list", traps),
         ):
+            # Channels (default): bang required
             self.assertFalse(messageTrap("ping"))
             self.assertTrue(messageTrap("!ping"))
+            # DMs: with and without bang
             self.assertTrue(messageTrap("ping", require_bang=False))
             self.assertTrue(messageTrap("!ping", require_bang=False))
+            self.assertTrue(messageTrap("!cmd?", require_bang=False))
+            self.assertTrue(messageTrap("cmd?", require_bang=False))
             self.assertFalse(messageTrap("hallo ping", require_bang=False))
             self.assertFalse(messageTrap("ping bitte", require_bang=True))
 

@@ -1566,7 +1566,7 @@ def onReceive(packet, interface):
             if packet.get('to') in [myNodeNum1, myNodeNum2, myNodeNum3, myNodeNum4, myNodeNum5, myNodeNum6, myNodeNum7, myNodeNum8, myNodeNum9]:
                 # message is DM to us
                 isDM = True
-                # DMs: allow bare first-word commands without "!" (channels still require bang)
+                # DMs: accept first-word commands with or without "!"; channels still require bang
                 if messageTrap(message_string, require_bang=False):
                     # log the message to stdout
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
@@ -1612,9 +1612,8 @@ def onReceive(packet, interface):
                         msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | DM | " + message_log_string)
             else:
                 # message is on a channel
-                # Channel "test" feature: a bare "test"/"Test" (no "!") on a
-                # configured channel gets the !test reply directly in the channel,
-                # bypassing the cmdBang requirement and DM-only behaviour.
+                # Channel "test" feature: bare "test"/"Test" (no "!") on a configured
+                # channel only. All other channel commands require a leading "!".
                 _ct_channels = {
                     str(c).strip()
                     for c in (getattr(my_settings, "channel_test_channels", None) or [])
@@ -1666,7 +1665,7 @@ def onReceive(packet, interface):
                             )
                         if my_settings.log_messages_to_file:
                             msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | " + message_log_string)
-                elif messageTrap(message_string):
+                elif messageTrap(message_string, require_bang=True):
                     # message is for us to respond to, or is it...
                     if my_settings.ignoreDefaultChannel and channel_number == my_settings.publicChannel:
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Default Channel:{channel_number}")
@@ -1674,7 +1673,8 @@ def onReceive(packet, interface):
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Cantankerous Node")
                     elif str(channel_number) in my_settings.ignoreChannels:
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Ignored Channel:{channel_number}")
-                    elif my_settings.cmdBang and not message_string.startswith("!"):
+                    elif not message_string.startswith("!"):
+                        # Defense in depth: channels always require "!" (except bare test above)
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Didnt sound like they meant it")
                     else:
                         # message is for bot to respond to, seriously this time..

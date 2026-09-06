@@ -2163,7 +2163,7 @@ def detect_missing_cmd_bang(msg: str):
 def messageTrap(msg, require_bang=None):
     # Check if the message contains a trap word, this is the first filter for listning to messages
     # after this the message is passed to the command_handler in the bot.py which is switch case filter for applying word to function
-    # require_bang: None → use cmdBang; False → allow bare first-word commands (DMs).
+    # require_bang: None → use cmdBang; False → DMs accept commands with or without leading "!".
 
     # Split Message on assumed words spaces m for m = msg.split(" ")
     # t in trap_list, built by the config and system.py not the user
@@ -2173,10 +2173,11 @@ def messageTrap(msg, require_bang=None):
 
     need_bang = cmdBang if require_bang is None else bool(require_bang)
 
-    if need_bang:
-        # check for ! at the start of the message to force a command
-        if not message_list[0].startswith("!"):
-            return False
+    if need_bang and not message_list[0].startswith("!"):
+        return False
+
+    # Strip optional leading "!" so "!ping" and "ping" both match (DMs).
+    if message_list[0].startswith("!"):
         message_list[0] = message_list[0][1:]
 
     for m in message_list:
