@@ -672,6 +672,30 @@ body.page-login {
   padding: 1.1rem 1.2rem;
 }
 
+.limits-settings-block {
+  height: 100%;
+  padding: 1rem 1.1rem;
+  border-radius: 8px;
+  background: var(--card-bg-muted);
+  border: 1px solid var(--card-border);
+}
+
+.limits-settings-form .form-label {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.limits-settings-form .form-control {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  color: var(--text-primary);
+}
+
+.limits-settings-form textarea.form-control {
+  min-height: 6.5rem;
+  resize: vertical;
+}
+
 .dash-list {
   list-style: none;
   padding: 0;

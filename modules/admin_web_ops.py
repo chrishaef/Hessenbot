@@ -846,6 +846,156 @@ def save_channel_test_to_config(enabled: bool, channels: List[str]) -> None:
     st.channel_test_channels = clean
 
 
+_DEFAULT_EXPENSIVE_CMDS = (
+    "wx,wxc,warning,dealert,blitz,uv,regen,trace,whereami,rlist,satpass,tide,river,earthquake"
+)
+
+
+def normalize_expensive_commands(raw: str) -> List[str]:
+    """Parse comma/space-separated command tokens without leading !."""
+    seen: List[str] = []
+    for part in re.split(r"[,;\s]+", raw or ""):
+        tok = part.strip().lower().lstrip("!").rstrip("?")
+        if tok and tok not in seen:
+            seen.append(tok)
+    return seen
+
+
+def save_rate_limit_settings_to_config(
+    *,
+    enabled: bool,
+    max_cmds: int,
+    window_sec: int,
+    notify_once: bool,
+    expensive_cooldown: int,
+    expensive_commands: List[str],
+) -> bool:
+    """Persist cmdRateLimit* / cmdExpensive* under [messagingSettings]; reload runtime."""
+    import modules.settings as st
+
+    max_cmds = max(1, int(max_cmds))
+    window_sec = max(1, int(window_sec))
+    expensive_cooldown = max(0, int(expensive_cooldown))
+    cmds = [
+        str(c).strip().lower().lstrip("!").rstrip("?")
+        for c in expensive_commands
+        if str(c).strip()
+    ]
+    # stable unique order
+    seen: List[str] = []
+    for c in cmds:
+        if c not in seen:
+            seen.append(c)
+
+    st.config.read(st.config_file, encoding="utf-8")
+    if "messagingSettings" not in st.config:
+        st.config["messagingSettings"] = {}
+    sec = st.config["messagingSettings"]
+    sec["cmdRateLimitEnabled"] = "True" if enabled else "False"
+    sec["cmdRateLimitMax"] = str(max_cmds)
+    sec["cmdRateLimitWindow"] = str(window_sec)
+    sec["cmdRateLimitNotifyOnce"] = "True" if notify_once else "False"
+    sec["cmdExpensiveCooldownSec"] = str(expensive_cooldown)
+    sec["cmdExpensiveCommands"] = ",".join(seen)
+    with open(st.config_file, "w", encoding="utf-8") as fh:
+        st.config.write(fh)
+
+    return reload_runtime_settings()
+
+
+def build_limits_settings_html(
+    *,
+    enabled: bool,
+    max_cmds: int,
+    window_sec: int,
+    notify_once: bool,
+    expensive_cooldown: int,
+    expensive_commands: List[str],
+    form_action: str,
+) -> str:
+    """Settings form for Admin → Limits (airtime throttle)."""
+    en_chk = " checked" if enabled else ""
+    once_chk = " checked" if notify_once else ""
+    cmds_s = ", ".join(expensive_commands) if expensive_commands else _DEFAULT_EXPENSIVE_CMDS
+    action = html.escape(form_action, quote=True)
+    return f"""
+<div class="section-card mb-4 limits-settings-card">
+  <h2 class="h5 mb-1">Befehls-Limits einstellen</h2>
+  <p class="small text-muted mb-3">
+    Schützt die Mesh-Airtime: zu viele Befehle pro Node werden begrenzt.
+    Beim ersten Überschreiten eine kurze Hinweis-DM, danach still.
+    Teure Befehle haben zusätzlich einen eigenen Cooldown.
+  </p>
+  <form method="post" action="{action}" class="limits-settings-form">
+    <input type="hidden" name="action" value="save_limits">
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="limits-settings-block">
+          <h3 class="h6 text-uppercase text-muted mb-3">Global pro Node</h3>
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" name="cmdRateLimitEnabled"
+                   id="limEnabled" value="1"{en_chk}>
+            <label class="form-check-label" for="limEnabled">Rate-Limit aktiv</label>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label" for="limMax">Max. Befehle</label>
+              <input type="number" class="form-control" name="cmdRateLimitMax" id="limMax"
+                     min="1" max="100" step="1" value="{html.escape(str(max_cmds))}" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label" for="limWindow">Fenster (Sekunden)</label>
+              <input type="number" class="form-control" name="cmdRateLimitWindow" id="limWindow"
+                     min="1" max="3600" step="1" value="{html.escape(str(window_sec))}" required>
+            </div>
+          </div>
+          <p class="small text-muted mb-3">
+            Beispiel: <code>{html.escape(str(max_cmds))}</code> Befehle in
+            <code>{html.escape(str(window_sec))}s</code> — der nächste löst den Hinweis aus.
+          </p>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="cmdRateLimitNotifyOnce"
+                   id="limNotifyOnce" value="1"{once_chk}>
+            <label class="form-check-label" for="limNotifyOnce">
+              Nur ein Hinweis pro Fenster, danach still
+            </label>
+          </div>
+          <p class="small text-muted mt-1 mb-0">
+            Aus = bei jedem Limit-Treffer erneut „Bitte etwas langsamer.“ senden (mehr Airtime).
+          </p>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="limits-settings-block">
+          <h3 class="h6 text-uppercase text-muted mb-3">Teure Befehle</h3>
+          <label class="form-label" for="limCool">Cooldown (Sekunden)</label>
+          <input type="number" class="form-control mb-2" name="cmdExpensiveCooldownSec"
+                 id="limCool" min="0" max="3600" step="1"
+                 value="{html.escape(str(expensive_cooldown))}" required>
+          <p class="small text-muted mb-3">
+            Mindestabstand zwischen gleichen teuren Befehlen desselben Nodes.
+            <code>0</code> schaltet den Extra-Cooldown aus.
+          </p>
+          <label class="form-label" for="limCmds">Befehlsliste</label>
+          <textarea class="form-control font-monospace" name="cmdExpensiveCommands"
+                    id="limCmds" rows="4"
+                    placeholder="{html.escape(_DEFAULT_EXPENSIVE_CMDS, quote=True)}">{html.escape(cmds_s)}</textarea>
+          <p class="small text-muted mt-1 mb-0">
+            Kommagetrennt, ohne <code>!</code>. Erster Treffer im Cooldown: kurze Restzeit-DM;
+            Wiederholung: still. Admins (<code>isNodeAdmin</code>) sind ausgenommen.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center mt-4">
+      <button type="submit" class="btn btn-success">Limits speichern</button>
+      <span class="small text-muted">Wird sofort in <code>config.ini</code> und zur Laufzeit übernommen.</span>
+    </div>
+  </form>
+</div>
+"""
+
+
 def build_channel_test_html(enabled: bool, selected: List[str]) -> str:
     """Form for the Channel-Test tab: toggle + channel checkboxes (with manual fallback)."""
     chk = " checked" if enabled else ""

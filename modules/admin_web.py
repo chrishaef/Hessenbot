@@ -1766,10 +1766,44 @@ def create_app(
             body=Markup(body),
         )
 
-    @app.route("/limits")
+    @app.route("/limits", methods=["GET", "POST"])
     @login_required
     def limits_index():
+        from modules import admin_web_ops as ops
         import modules.settings as st
+
+        if request.method == "POST" and (request.form.get("action") or "") == "save_limits":
+            try:
+                enabled = request.form.get("cmdRateLimitEnabled") in ("1", "on", "true", "True")
+                notify = request.form.get("cmdRateLimitNotifyOnce") in ("1", "on", "true", "True")
+                max_c = int(request.form.get("cmdRateLimitMax") or 3)
+                window = int(request.form.get("cmdRateLimitWindow") or 60)
+                cool = int(request.form.get("cmdExpensiveCooldownSec") or 45)
+                cmds = ops.normalize_expensive_commands(
+                    request.form.get("cmdExpensiveCommands") or ""
+                )
+                full = ops.save_rate_limit_settings_to_config(
+                    enabled=enabled,
+                    max_cmds=max_c,
+                    window_sec=window,
+                    notify_once=notify,
+                    expensive_cooldown=cool,
+                    expensive_commands=cmds,
+                )
+                msg = "Limits gespeichert und übernommen."
+                if not full:
+                    msg += " Einige andere Config-Werte ggf. erst nach Bot-Neustart aktiv."
+                flash(msg, "success")
+            except OSError as e:
+                if getattr(e, "errno", None) == 13:
+                    flash(ops.runtime_file_permission_hint(st.config_file), "error")
+                else:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+            except (TypeError, ValueError) as e:
+                flash(f"Ungültige Eingabe: {e!s}", "error")
+            except Exception as e:
+                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+            return redirect(url_for("limits_index"))
 
         enabled = getattr(st, "cmdRateLimitEnabled", True)
         max_c = getattr(st, "cmdRateLimitMax", 3)
@@ -1777,37 +1811,45 @@ def create_app(
         notify = getattr(st, "cmdRateLimitNotifyOnce", True)
         cool = getattr(st, "cmdExpensiveCooldownSec", 45)
         cmds = getattr(st, "cmdExpensiveCommands", [])
-        cmds_s = ", ".join(cmds) if isinstance(cmds, (list, tuple)) else str(cmds)
-        settings_url = url_for("settings_index")
+        if isinstance(cmds, str):
+            cmds = ops.normalize_expensive_commands(cmds)
+
+        settings_html = ops.build_limits_settings_html(
+            enabled=bool(enabled),
+            max_cmds=int(max_c or 3),
+            window_sec=int(window or 60),
+            notify_once=bool(notify),
+            expensive_cooldown=int(cool or 0),
+            expensive_commands=list(cmds) if isinstance(cmds, (list, tuple)) else [],
+            form_action=url_for("limits_index"),
+        )
+
         body = f"""
-<p class="small text-muted mb-2">
-  Live-Nutzung der Befehls-Limits. Werte ändern unter
-  <a href="{html_escape(settings_url)}">Einstellungen → Nachrichten</a>.
-</p>
-<div class="alert alert-secondary small">
-  Global: <strong>{"an" if enabled else "aus"}</strong> ·
-  max <code>{html_escape(str(max_c))}</code> Befehle /
-  <code>{html_escape(str(window))}s</code> ·
-  Hinweis einmalig: <code>{html_escape(str(notify))}</code><br>
-  Teure Cooldown: <code>{html_escape(str(cool))}s</code> ·
-  Befehle: <code>{html_escape(cmds_s)}</code>
-</div>
-<div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
-  <button type="button" id="limits-refresh" class="btn btn-sm btn-outline-secondary">Aktualisieren</button>
-  <button type="button" id="limits-reset-all" class="btn btn-sm btn-outline-danger">Alle Zähler zurücksetzen</button>
-  <span id="limits-status" class="small text-muted"></span>
-</div>
-<div class="table-scroll">
-  <table class="nodes-table table-dark table-bordered" id="limits-table">
-    <thead>
-      <tr>
-        <th>Node</th><th>Hex</th><th>Befehle</th><th>Status</th><th>Teure Cooldowns</th><th></th>
-      </tr>
-    </thead>
-    <tbody id="limits-tbody">
-      <tr><td colspan="6" class="text-muted">Lade …</td></tr>
-    </tbody>
-  </table>
+{settings_html}
+<div class="section-card">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+    <div>
+      <h2 class="h5 mb-1">Live-Nutzung</h2>
+      <p class="small text-muted mb-0">Aktuelle Zähler pro Node im laufenden Fenster (Auto-Refresh 5 s).</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="button" id="limits-refresh" class="btn btn-sm btn-outline-secondary">Aktualisieren</button>
+      <button type="button" id="limits-reset-all" class="btn btn-sm btn-outline-danger">Alle Zähler zurücksetzen</button>
+    </div>
+  </div>
+  <span id="limits-status" class="small text-muted d-block mb-2"></span>
+  <div class="table-scroll">
+    <table class="nodes-table table-dark table-bordered" id="limits-table">
+      <thead>
+        <tr>
+          <th>Node</th><th>Hex</th><th>Befehle</th><th>Status</th><th>Teure Cooldowns</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="limits-tbody">
+        <tr><td colspan="6" class="text-muted">Lade …</td></tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 <script>
 (function () {{
@@ -1899,6 +1941,7 @@ def create_app(
             active_tab="limits",
             body=Markup(body),
         )
+
 
     @app.route("/api/admin/rate-limits")
     @login_required
