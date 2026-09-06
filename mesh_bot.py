@@ -1599,7 +1599,9 @@ def onReceive(packet, interface):
                                 if node['nodeID'] == message_from_id:
                                     node['welcome'] = True
                         else:
-                            send_message(help_message, channel_number, message_from_id, rxNode)
+                            hint = take_unknown_dm_hint(message_from_id)
+                            if hint:
+                                send_message(hint, channel_number, message_from_id, rxNode)
                     
                     # add message to tts queue
                     if meshagesTTS:

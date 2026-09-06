@@ -127,3 +127,14 @@ def missing_cmd_bang_hint(cmd: str) -> str:
         f'Meintest du „{example}"?\n'
         f"!cmd = Befehlsliste"
     )
+
+
+def unknown_dm_command_hint() -> str:
+    """Kurzer Hinweis bei unbekannter DM (kein gültiger Befehl)."""
+    import modules.settings as st
+
+    base = (getattr(st, "web_admin_public_url", "") or "").strip().rstrip("/")
+    msg = "Kein bekannter Befehl. Hilfe: cmd / !cmd"
+    if base:
+        msg += f" · {base}/befehle"
+    return msg

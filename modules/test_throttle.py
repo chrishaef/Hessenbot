@@ -98,6 +98,23 @@ class TestCommandThrottle(unittest.TestCase):
         rows2 = self.ct.get_rate_limit_snapshot()
         self.assertFalse(any(r["node_id"] == node for r in rows2))
 
+    def test_unknown_dm_hint_cooldown(self):
+        from unittest.mock import patch
+
+        node = "777"
+        with patch.object(self.st, "web_admin_public_url", "https://bot.example.de"):
+            first = self.ct.take_unknown_dm_hint(node, cooldown_sec=300)
+            self.assertIsNotNone(first)
+            self.assertIn("Kein bekannter Befehl", first)
+            self.assertIn("cmd / !cmd", first)
+            self.assertIn("https://bot.example.de/befehle", first)
+            second = self.ct.take_unknown_dm_hint(node, cooldown_sec=300)
+            self.assertIsNone(second)
+        with patch.object(self.st, "web_admin_public_url", ""):
+            self.ct.reset_rate_limit(node)
+            bare = self.ct.take_unknown_dm_hint(node, cooldown_sec=300)
+            self.assertEqual(bare, "Kein bekannter Befehl. Hilfe: cmd / !cmd")
+
 
 if __name__ == "__main__":
     unittest.main()

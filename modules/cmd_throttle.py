@@ -13,10 +13,14 @@ _cmd_rate_tracker: dict = {}
 _cmd_rate_notified: dict = {}
 _cmd_expensive_last: dict = {}
 _cmd_expensive_notified: dict = {}
+_unknown_dm_hint_last: dict = {}
 
 _DEFAULT_EXPENSIVE_COMMANDS = (
     "wx,wxc,warning,dealert,blitz,uv,regen,trace,whereami,rlist,satpass,tide,river,earthquake"
 )
+
+# Cooldown between "unknown command" DM hints per node (seconds)
+UNKNOWN_DM_HINT_COOLDOWN_SEC = 300
 
 
 def extract_command_token(message: str) -> str:
@@ -116,6 +120,20 @@ def check_command_throttle(
     return None
 
 
+def take_unknown_dm_hint(node_id, cooldown_sec: Optional[int] = None) -> Optional[str]:
+    """Return unknown-command hint text if cooldown elapsed; else None (stay silent)."""
+    from modules.locale_de import unknown_dm_command_hint
+
+    node_key = str(node_id)
+    now = time.time()
+    cd = UNKNOWN_DM_HINT_COOLDOWN_SEC if cooldown_sec is None else max(0, int(cooldown_sec))
+    last = float(_unknown_dm_hint_last.get(node_key, 0) or 0)
+    if last and (now - last) < cd:
+        return None
+    _unknown_dm_hint_last[node_key] = now
+    return unknown_dm_command_hint()
+
+
 def is_cmd_rate_limited(node_id, *, is_admin: Optional[Callable[[str], bool]] = None) -> bool:
     return check_command_throttle(node_id, is_admin=is_admin) is not None
 
@@ -188,17 +206,28 @@ def get_rate_limit_snapshot(
 def reset_rate_limit(node_id=None) -> int:
     """Clear throttle state for one node or all. Returns number of nodes cleared."""
     global _cmd_rate_tracker, _cmd_rate_notified, _cmd_expensive_last, _cmd_expensive_notified
+    global _unknown_dm_hint_last
     if node_id is None or str(node_id).strip() in ("", "*"):
-        n = len(set(_cmd_rate_tracker) | {k[0] for k in _cmd_expensive_last})
+        n = len(
+            set(_cmd_rate_tracker)
+            | {k[0] for k in _cmd_expensive_last}
+            | set(_unknown_dm_hint_last)
+        )
         _cmd_rate_tracker.clear()
         _cmd_rate_notified.clear()
         _cmd_expensive_last.clear()
         _cmd_expensive_notified.clear()
+        _unknown_dm_hint_last.clear()
         return n
     node_key = str(node_id).strip()
-    had = node_key in _cmd_rate_tracker or any(k[0] == node_key for k in _cmd_expensive_last)
+    had = (
+        node_key in _cmd_rate_tracker
+        or any(k[0] == node_key for k in _cmd_expensive_last)
+        or node_key in _unknown_dm_hint_last
+    )
     _cmd_rate_tracker.pop(node_key, None)
     _cmd_rate_notified.pop(node_key, None)
+    _unknown_dm_hint_last.pop(node_key, None)
     for key in [k for k in list(_cmd_expensive_last) if k[0] == node_key]:
         del _cmd_expensive_last[key]
     for key in [k for k in list(_cmd_expensive_notified) if k[0] == node_key]:
@@ -228,3 +257,6 @@ def cleanup_throttle_state(current_time: Optional[float] = None) -> None:
         for key in [k for k, t in list(_cmd_expensive_last.items()) if t < exp_cut]:
             del _cmd_expensive_last[key]
             _cmd_expensive_notified.pop(key, None)
+    hint_cut = now - (UNKNOWN_DM_HINT_COOLDOWN_SEC * 2)
+    for k in [k for k, t in list(_unknown_dm_hint_last.items()) if t < hint_cut]:
+        del _unknown_dm_hint_last[k]

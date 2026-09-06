@@ -2325,6 +2325,7 @@ from modules.cmd_throttle import (
     get_rate_limit_snapshot as _get_rate_limit_snapshot,
     is_cmd_rate_limited as _is_cmd_rate_limited,
     reset_rate_limit,
+    take_unknown_dm_hint,
 )
 
 
