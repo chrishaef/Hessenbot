@@ -1678,7 +1678,7 @@ def onReceive(packet, interface):
                     else:
                         from modules.settings import channel_test_mode
 
-                        _ct_mode, _ct_emoji = channel_test_mode(channel_number)
+                        _ct_mode, _ct_emoji, _ct_hops = channel_test_mode(channel_number)
                         if _ct_mode == "react":
                             send_emoji_reaction(
                                 _ct_emoji or "👍",
@@ -1686,13 +1686,13 @@ def onReceive(packet, interface):
                                 packet_id,
                                 rxNode,
                             )
-                            # Zweite Reaction: Hop-Anzahl als Ziffern-Emoji (0–9)
-                            send_emoji_reaction(
-                                hop_count_emoji(hop_count),
-                                channel_number,
-                                packet_id,
-                                rxNode,
-                            )
+                            if _ct_hops:
+                                send_emoji_reaction(
+                                    hop_count_emoji(hop_count),
+                                    channel_number,
+                                    packet_id,
+                                    rxNode,
+                                )
                         else:
                             _test_resp = handle_ping(
                                 message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number

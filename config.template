@@ -310,7 +310,8 @@ training = False
 enabled = False
 # comma separated channel numbers, e.g. 0,2
 channels =
-# optional modes: 1=long,2=react:👍,3=react:✅  (default per channel = long)
+# optional modes: 1=long,2=react:👍,3=react:✅:hops  (default per channel = long)
+# :hops = second reaction with hop-count digit emoji (0–9)
 modes =
 
 [repeater]

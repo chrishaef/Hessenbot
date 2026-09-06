@@ -2328,9 +2328,10 @@ def create_app(
                     emoji = (request.form.get(f"emoji_{ch}") or default_em).strip()
                     if emoji not in choices:
                         emoji = default_em
-                    modes[ch] = ("react", emoji)
+                    hops = request.form.get(f"hops_{ch}") in ("1", "on", "true", "True")
+                    modes[ch] = ("react", emoji, hops)
                 else:
-                    modes[ch] = ("long", "")
+                    modes[ch] = ("long", "", False)
             # Modes for newly typed manual channels not yet in form selects → long
             try:
                 ops.save_channel_test_to_config(enabled, seen, modes)

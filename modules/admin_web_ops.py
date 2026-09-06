@@ -843,9 +843,13 @@ def save_channel_test_to_config(
     mode_clean = {}
     for ch in clean:
         if ch in modes:
-            mode_clean[ch] = modes[ch]
+            entry = modes[ch]
+            if len(entry) >= 3:
+                mode_clean[ch] = (entry[0], entry[1], bool(entry[2]))
+            else:
+                mode_clean[ch] = (entry[0], entry[1], False)
         else:
-            mode_clean[ch] = ("long", "")
+            mode_clean[ch] = ("long", "", False)
     modes_s = st.serialize_channel_test_modes(mode_clean)
 
     if "channelTest" not in st.config:
@@ -1042,16 +1046,21 @@ def build_channel_test_html(
     for ch in rows_meta:
         num = ch["number"]
         active = num in selected_set
-        mode, emoji = parsed_modes.get(num, ("long", ""))
+        entry = parsed_modes.get(num, ("long", "", False))
+        mode = entry[0] if entry else "long"
+        emoji = entry[1] if len(entry) > 1 else ""
+        hops_on = bool(entry[2]) if len(entry) > 2 else False
         if mode != "react":
             mode = "long"
             emoji = ""
+            hops_on = False
         if mode == "react" and not emoji:
             emoji = default_emoji
         active_chk = " checked" if active else ""
         long_sel = " selected" if mode == "long" else ""
         react_sel = " selected" if mode == "react" else ""
         react_hidden = "" if mode == "react" else " is-hidden"
+        hops_chk = " checked" if hops_on else ""
         emoji_btns = []
         for em in emoji_choices:
             is_sel = (mode == "react" and em == emoji) or (
@@ -1087,9 +1096,18 @@ def build_channel_test_html(
       </select>
     </div>
   </div>
-  <div class="ct-emoji-picker{react_hidden}" data-picker-for="{html.escape(num, quote=True)}">
-    <span class="small text-muted me-2">Emoji</span>
-    <div class="ct-emoji-group">{"".join(emoji_btns)}</div>
+  <div class="ct-react-opts{react_hidden}" data-picker-for="{html.escape(num, quote=True)}">
+    <div class="ct-emoji-picker">
+      <span class="small text-muted me-2">Emoji</span>
+      <div class="ct-emoji-group">{"".join(emoji_btns)}</div>
+    </div>
+    <div class="form-check form-switch ct-hops-switch mt-2 mb-0">
+      <input class="form-check-input" type="checkbox" name="hops_{html.escape(num, quote=True)}"
+             id="ctHops{html.escape(num)}" value="1"{hops_chk}>
+      <label class="form-check-label small" for="ctHops{html.escape(num)}">
+        Hop-Anzahl zusätzlich als Reaction (0️⃣–9️⃣)
+      </label>
+    </div>
   </div>
 </div>
 """
@@ -1117,8 +1135,8 @@ def build_channel_test_html(
   <p class="small text-muted mb-0">
     Auf <code>test</code> / <code>Test</code> (ohne <code>!</code>) im gewählten Kanal antworten.
     <strong>Lange Testnachricht</strong> = wie <code>!test</code>.
-    <strong>Reaction</strong> = gewähltes Emoji (👍 oder ✅) plus Hop-Anzahl als Ziffern-Emoji
-    auf die Originalnachricht (weniger Airtime).
+    <strong>Reaction</strong> = Emoji (👍 oder ✅) auf die Originalnachricht;
+    optional zusätzlich die Hop-Anzahl als Ziffern-Emoji.
     Andere Befehle bleiben unverändert (DM / <code>!</code>).
   </p>
 </div>
@@ -1140,10 +1158,10 @@ def build_channel_test_html(
 (function () {{
   function syncRow(row) {{
     var sel = row.querySelector(".ct-mode");
-    var picker = row.querySelector(".ct-emoji-picker");
-    if (!sel || !picker) return;
-    if (sel.value === "react") picker.classList.remove("is-hidden");
-    else picker.classList.add("is-hidden");
+    var opts = row.querySelector(".ct-react-opts");
+    if (!sel || !opts) return;
+    if (sel.value === "react") opts.classList.remove("is-hidden");
+    else opts.classList.add("is-hidden");
   }}
   document.querySelectorAll(".ct-channel-row").forEach(function (row) {{
     syncRow(row);

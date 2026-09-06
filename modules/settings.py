@@ -666,9 +666,9 @@ CHANNEL_TEST_EMOJI_CHOICES = ("👍", "✅")
 
 
 def parse_channel_test_modes(raw: str) -> dict:
-    """Parse modes string → {channel: (mode, emoji)}.
+    """Parse modes string → {channel: (mode, emoji, hops)}.
 
-    Examples: ``1=long``, ``2=react:👍``, ``3=react`` (default emoji).
+    Examples: ``1=long``, ``2=react:👍``, ``3=react:✅:hops``.
     """
     out = {}
     for part in str(raw or "").split(","):
@@ -682,10 +682,19 @@ def parse_channel_test_modes(raw: str) -> dict:
         rest = rest.strip()
         if not rest:
             continue
+        hops = False
         if ":" in rest:
-            mode, emoji = rest.split(":", 1)
+            mode, rem = rest.split(":", 1)
             mode = mode.strip().lower()
-            emoji = (emoji or "").strip() or CHANNEL_TEST_DEFAULT_EMOJI
+            bits = [b.strip() for b in rem.split(":") if b.strip()]
+            emoji = CHANNEL_TEST_DEFAULT_EMOJI
+            for bit in bits:
+                if bit.lower() == "hops":
+                    hops = True
+                elif bit in CHANNEL_TEST_EMOJI_CHOICES:
+                    emoji = bit
+                elif bit:  # unknown token — treat as emoji if plausible
+                    emoji = bit
         else:
             mode = rest.lower()
             emoji = CHANNEL_TEST_DEFAULT_EMOJI
@@ -693,33 +702,44 @@ def parse_channel_test_modes(raw: str) -> dict:
             mode = "long"
         if mode == "long":
             emoji = ""
+            hops = False
         elif emoji not in CHANNEL_TEST_EMOJI_CHOICES:
             emoji = CHANNEL_TEST_DEFAULT_EMOJI
-        out[ch] = (mode, emoji)
+        out[ch] = (mode, emoji, hops)
     return out
 
 
 def serialize_channel_test_modes(modes: dict) -> str:
-    """Serialize {ch: (mode, emoji)} → config string."""
+    """Serialize {ch: (mode, emoji[, hops])} → config string."""
     parts = []
     for ch in sorted(modes.keys(), key=lambda x: (len(str(x)), str(x))):
-        mode, emoji = modes[ch]
+        entry = modes[ch]
+        if len(entry) >= 3:
+            mode, emoji, hops = entry[0], entry[1], bool(entry[2])
+        else:
+            mode, emoji, hops = entry[0], entry[1], False
         mode = str(mode or "long").lower()
         if mode == "react":
             em = emoji or CHANNEL_TEST_DEFAULT_EMOJI
-            parts.append(f"{ch}=react:{em}")
+            s = f"{ch}=react:{em}"
+            if hops:
+                s += ":hops"
+            parts.append(s)
         else:
             parts.append(f"{ch}=long")
     return ",".join(parts)
 
 
 def channel_test_mode(channel_number) -> tuple:
-    """Return (mode, emoji) for a channel. Default (\"long\", \"\")."""
+    """Return (mode, emoji, hops_enabled). Default (\"long\", \"\", False)."""
     try:
         ch = str(int(channel_number))
     except (TypeError, ValueError):
         ch = str(channel_number).strip()
     modes = parse_channel_test_modes(globals().get("channel_test_modes", ""))
     if ch not in modes:
-        return "long", ""
-    return modes[ch]
+        return "long", "", False
+    entry = modes[ch]
+    if len(entry) >= 3:
+        return entry[0], entry[1], bool(entry[2])
+    return entry[0], entry[1], False

@@ -734,9 +734,16 @@ body.page-login {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
+}
+
+.ct-react-opts {
   margin-top: 0.75rem;
   padding-top: 0.65rem;
   border-top: 1px solid var(--card-border);
+}
+
+.ct-react-opts.is-hidden {
+  display: none;
 }
 
 .ct-emoji-picker.is-hidden {
