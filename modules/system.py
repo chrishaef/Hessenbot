@@ -38,8 +38,8 @@ _interface_reconnecting: set[int] = set()
 
 # Ping Configuration
 if ping_enabled:
-    # ping, pinging, ack, testing, test, pong, trace
-    trap_list_ping = ("ping", "pinging", "ack", "testing", "test", "pong", "trace", "🔔", "cq","cqcq", "cqcqcq")
+    # ping, ack, test, cq, trace
+    trap_list_ping = ("ping", "ack", "test", "trace", "🔔", "cq", "cqcq", "cqcqcq")
     trap_list = trap_list + trap_list_ping
     help_message = help_message + "ping, trace"
 
@@ -1092,10 +1092,7 @@ def bot_maidenhead() -> str:
 
 _PING_TITLE = {
     "test": ("🎙", "Test"),
-    "testing": ("🎙", "Test"),
     "ping": ("🏓", "Ping"),
-    "pinging": ("🏓", "Ping"),
-    "pong": ("🏓", "Pong"),
     "ack": ("✋", "ACK"),
     "cq": ("📡", "CQ"),
     "qsl": ("✅", "QSL"),
@@ -2163,20 +2160,24 @@ def detect_missing_cmd_bang(msg: str):
     return None
 
 
-def messageTrap(msg):
+def messageTrap(msg, require_bang=None):
     # Check if the message contains a trap word, this is the first filter for listning to messages
     # after this the message is passed to the command_handler in the bot.py which is switch case filter for applying word to function
+    # require_bang: None → use cmdBang; False → allow bare first-word commands (DMs).
 
     # Split Message on assumed words spaces m for m = msg.split(" ")
     # t in trap_list, built by the config and system.py not the user
-    message_list=msg.split(" ")
-    
-    if cmdBang:
+    message_list = msg.split(" ")
+    if not message_list or not message_list[0]:
+        return False
+
+    need_bang = cmdBang if require_bang is None else bool(require_bang)
+
+    if need_bang:
         # check for ! at the start of the message to force a command
-        if not message_list[0].startswith('!'):
+        if not message_list[0].startswith("!"):
             return False
-        else:
-            message_list[0] = message_list[0][1:]
+        message_list[0] = message_list[0][1:]
 
     for m in message_list:
         for t in trap_list:
@@ -2191,7 +2192,7 @@ def messageTrap(msg):
     # if no trap words found, run a search for near misses like ping? or cmd?
     for m in message_list:
         for t in range(len(trap_list)):
-            if m.endswith('?') and m[:-1].lower() == trap_list[t]:
+            if m.endswith("?") and m[:-1].lower() == trap_list[t]:
                 return True
     return False
 

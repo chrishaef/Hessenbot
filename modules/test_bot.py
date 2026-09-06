@@ -75,6 +75,23 @@ class TestBot(unittest.TestCase):
         with patch("modules.system.cmdBang", False), patch("modules.system.trap_list", traps):
             self.assertIsNone(detect_missing_cmd_bang("ping"))
 
+    def test_message_trap_dm_allows_bare_command(self):
+        from unittest.mock import patch
+        from modules.system import messageTrap
+
+        traps = ("ping", "wx", "cmd")
+        with (
+            patch("modules.system.cmdBang", True),
+            patch("modules.system.explicitCmd", True),
+            patch("modules.system.trap_list", traps),
+        ):
+            self.assertFalse(messageTrap("ping"))
+            self.assertTrue(messageTrap("!ping"))
+            self.assertTrue(messageTrap("ping", require_bang=False))
+            self.assertTrue(messageTrap("!ping", require_bang=False))
+            self.assertFalse(messageTrap("hallo ping", require_bang=False))
+            self.assertFalse(messageTrap("ping bitte", require_bang=True))
+
     def test_missing_cmd_bang_hint_text(self):
         from modules.locale_de import missing_cmd_bang_hint
 

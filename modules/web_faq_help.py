@@ -69,7 +69,10 @@ def _sections() -> List[FaqSection]:
                 FaqEntry(
                     "Bot reagiert gar nicht",
                     (
-                        "Befehle beginnen meist mit <strong>!</strong>, z. B. <code>!ping</code> oder <code>!cmd</code>. "
+                        "Im <strong>Kanal</strong> beginnen Befehle mit <strong>!</strong>, "
+                        "z. B. <code>!ping</code> oder <code>!cmd</code>. "
+                        "Per <strong>DM</strong> reicht der Befehl als erstes Wort auch ohne "
+                        "<code>!</code> (z. B. <code>ping</code>). "
                         "Nur die Zeile senden, die mit dem Befehl beginnt — kein Text davor. "
                         "Welche Befehle dieser Bot unterstützt, steht unter "
                         '<a href="/befehle">Befehle</a> und mit <code>!cmd</code> im Mesh.'

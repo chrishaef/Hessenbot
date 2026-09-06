@@ -62,27 +62,17 @@ def _sections() -> List[CommandSection]:
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
-                    f"{p}pong",
-                    "Wie ping — gehört-Bestätigung mit Ort und Verbindung.",
-                    enabled=lambda: getattr(st, "ping_enabled", True),
-                ),
-                _cmd(
-                    f"{p}pinging",
-                    "Alias für ping.",
-                    enabled=lambda: getattr(st, "ping_enabled", True),
-                ),
-                _cmd(
-                    f"{p}testing",
-                    "Alias für ping.",
-                    enabled=lambda: getattr(st, "ping_enabled", True),
-                ),
-                _cmd(
                     f"{p}test",
                     "Alias für ping.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
                     f"{p}cq",
+                    "Alias für ping.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}ack",
                     "Alias für ping.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
@@ -779,11 +769,15 @@ def render_commands_page_body() -> str:
     explicit = getattr(st, "explicitCmd", True)
     if bang and explicit:
         usage = (
-            "Sende Befehle mit <strong>!</strong> am Anfang, z. B. <code>!ping</code>. "
-            "Nur Zeilen, die mit einem bekannten Befehl beginnen, werden verarbeitet."
+            "Im <strong>Kanal</strong> Befehle mit <strong>!</strong> am Anfang, z. B. <code>!ping</code>. "
+            "Per <strong>DM</strong> reicht der Befehl als erstes Wort auch ohne <code>!</code> "
+            "(z. B. <code>ping</code>). "
+            "Nur Nachrichten, die mit einem bekannten Befehl beginnen, werden verarbeitet."
         )
     elif bang:
-        usage = "Befehle mit <strong>!</strong>, z. B. <code>!cmd</code>."
+        usage = (
+            "Im Kanal mit <strong>!</strong>, per DM auch ohne — z. B. <code>!cmd</code> / <code>cmd</code>."
+        )
     else:
         usage = "Befehle ohne Ausrufezeichen, z. B. <code>ping</code> (je nach Bot-Konfiguration)."
 

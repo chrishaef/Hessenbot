@@ -65,7 +65,7 @@ class TestCommandThrottle(unittest.TestCase):
     def test_global_notify_once_then_silent(self):
         node = "424242"
         self.assertIsNone(self.ct.check_command_throttle(node, "ping", is_admin=_not_admin))
-        self.assertIsNone(self.ct.check_command_throttle(node, "pong", is_admin=_not_admin))
+        self.assertIsNone(self.ct.check_command_throttle(node, "ping", is_admin=_not_admin))
         self.assertIsNone(self.ct.check_command_throttle(node, "test", is_admin=_not_admin))
         msg = self.ct.check_command_throttle(node, "cmd", is_admin=_not_admin)
         self.assertEqual(msg, "⏱️ Bitte etwas langsamer.")

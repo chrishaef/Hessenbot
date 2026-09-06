@@ -93,7 +93,7 @@ cp config.template config.ini
 
 ### Ping, Trace & DM-Zustellung
 
-- **`!ping` / `!pong` / `!test` / `!ack` / `!cq`**: QSL-Antwort in mehreren Zeilen mit Ort, optional Maidenhead-Grid, Hops und SNR bzw. MQTT
+- **`!ping` / `!test` / `!ack` / `!cq`**: QSL-Antwort in mehreren Zeilen mit Ort, optional Maidenhead-Grid, Hops und SNR bzw. MQTT
 - **Hop-Anzeige bei MQTT-Gateways:** Für über MQTT getunnelte Pakete werden Hops aus NodeDB, Trace-Cache und Paket-Metadaten aufgelöst — nicht mehr pauschal „0 Hops MQTT“.
 - **`!trace` / `!trace MHH` / `!trace !604f8594`**: Meshtastic-Traceroute zum Bot bzw. Ziel; Ergebnis (Hin- und Rückweg) per **DM**. Globale Warteschlange (ein Trace gleichzeitig), ~65 s Abstand pro Funk-Interface.
 - **Channel-Test** (optional): Auf konfigurierten Kanälen antwortet der Bot auf ein nacktes **`test`** / **`Test`** (ohne `!`) **direkt im Kanal** — gleiche Antwort wie `!test`. Ein-/Aus-Schaltung und Kanalauswahl im Web-Admin (Tab **Channel-Test**). Alle anderen Befehle bleiben unverändert (DM und/oder `!`).
@@ -167,7 +167,7 @@ cp config.template config.ini
 | Befehl | Beschreibung |
 |--------|----------------|
 | `!cmd` | Kurze Befehlsliste (aktivierte Traps) |
-| `!ping` / `!pong` / `!test` | QSL mit Ort, optional Grid, Hops, SNR/MQTT |
+| `!ping` / `!test` | QSL mit Ort, optional Grid, Hops, SNR/MQTT |
 | `!trace` / `!trace MHH` | Traceroute zu dir bzw. Ziel-Station (Ergebnis per DM, Warteschlange) |
 | `!trace?` | Kurzhilfe zu `!trace` |
 | `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
@@ -225,7 +225,7 @@ news_file_path = data/news.txt
 enabled = True
 ```
 
-`cmdBang = True` — normale Befehle beginnen mit `!`. Ausnahme: **Channel-Test** (siehe oben).
+`cmdBang = True` — im Kanal beginnen Befehle mit `!`. Per DM auch ohne `!`, wenn der Befehl das erste Wort ist. Weitere Ausnahme: **Channel-Test** (siehe oben).
 
 ## Entwicklung & Plattform
 

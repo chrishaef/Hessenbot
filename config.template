@@ -42,7 +42,7 @@ defaultChannel = 0
 ignoreDefaultChannel = True
 # ignoreChannels is a comma separated list of channels to ignore, e.g. 4,5
 ignoreChannels = 2,3,4 
-# require ! to be the first character in a command
+# require ! as first character for channel commands; DMs also accept bare first-word commands
 cmdBang = True
 # require explicit command, the message will only be processed if it starts with a command word
 explicitCmd = True

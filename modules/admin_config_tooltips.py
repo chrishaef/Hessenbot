@@ -29,7 +29,7 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("general", "defaultChannel"): "Nummer des öffentlichen Meshtastic-Kanals (LongFast oft 0). -1 = kein Standardkanal.",
     ("general", "ignoreDefaultChannel"): "True: Nachrichten/Befehle auf dem Standardkanal werden ignoriert.",
     ("general", "ignoreChannels"): "Diese Kanalnummern werden vom Bot komplett ignoriert (kommagetrennt).",
-    ("general", "cmdBang"): "True: Nur Nachrichten mit führendem ! gelten als Befehl.",
+    ("general", "cmdBang"): "True: Im Kanal nur mit führendem !. Per DM gilt der Befehl auch ohne !, wenn er das erste Wort ist.",
     ("general", "explicitCmd"): "True: Nur bekannte Befehle werden ausgeführt — kein Zufallstreffer.",
     ("general", "favoriteNodeList"): "Favoriten-Knoten für Skripte wie addFav (dezimale IDs, kommagetrennt).",
     ("general", "motd"): "Standard-Text für MOTD und geplante MOTD-Sendungen; wird beim Start eingelesen.",

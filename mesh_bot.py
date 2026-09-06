@@ -16,7 +16,6 @@ from modules.log import logger, CustomFormatter, msgLogger, getPrettyTime
 import modules.settings as my_settings
 from modules.system import *
 import modules.nodedb as _ndb
-from modules.locale_de import missing_cmd_bang_hint
 
 # list of commands to remove from the default list for DM only
 restrictedCommands = []
@@ -84,8 +83,6 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "moon": lambda: handle_moon(message_from_id, deviceID, channel_number, message=message),
     "motd": lambda: handle_motd(message, message_from_id, isDM),
     "ping": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "pinging": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "pong": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "readnews": lambda: handleNews(message_from_id, deviceID, message, isDM),
     "readrss": lambda: get_rss_feed(message),
     "rlist": lambda: handle_repeaterQuery(message_from_id, deviceID, channel_number, message=message),
@@ -98,7 +95,6 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "sun": lambda: handle_sun(message_from_id, deviceID, channel_number, message=message),
     "sysinfo": lambda: sysinfo(message, message_from_id, deviceID, isDM),
     "test": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "testing": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "trace": lambda: handle_trace(message, message_from_id, deviceID, channel_number),
     "warning": lambda: handle_warning(
         message_from_id, deviceID, channel_number, isDM, message=message
@@ -177,7 +173,7 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
     if  "?" in message and isDM:
         pingHelp = (
             "🤖 Hessenbot · Ping-Hilfe:\n"
-            "🏓 ping / pong / test — gehört-Bestätigung mit Ort, Hops, SNR/RSSI oder MQTT\n"
+            "🏓 ping / test — gehört-Bestätigung mit Ort, Hops, SNR/RSSI oder MQTT\n"
             "🏓 ping <Zahl> — mehrere Pings per DM.\n"
             "🏓 ping @Knoten — Ping als BBS-DM."
         )
@@ -188,20 +184,20 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
     msg = ""
     type = ""
     rich_ping = True
+    first = words[0].lstrip("!") if words else ""
+    if first.endswith("?"):
+        first = first[:-1]
 
-    if "test" in msg_lower or "testing" in msg_lower:
+    if first == "test":
         msg = format_ping_qsl_response(message_from_id, deviceID, hop, "test", snr, rssi)
         type = "🎙TEST"
-    elif "pong" in words:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "pong", snr, rssi)
-        type = "🏓PONG"
-    elif "ping" in msg_lower or "pinging" in msg_lower:
+    elif first == "ping":
         msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ping", snr, rssi)
         type = "🏓PING"
-    elif "ack" in msg_lower:
+    elif first == "ack":
         msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ack", snr, rssi)
         type = "✋ACK"
-    elif "cqcq" in msg_lower or "cq" in words or "cqcqcq" in msg_lower:
+    elif first in ("cq", "cqcq", "cqcqcq"):
         msg = format_ping_qsl_response(message_from_id, deviceID, hop, "cq", snr, rssi)
         type = "CQ"
     else:
@@ -1570,8 +1566,8 @@ def onReceive(packet, interface):
             if packet.get('to') in [myNodeNum1, myNodeNum2, myNodeNum3, myNodeNum4, myNodeNum5, myNodeNum6, myNodeNum7, myNodeNum8, myNodeNum9]:
                 # message is DM to us
                 isDM = True
-                # check if the message contains a trap word, DMs are always responded to
-                if (messageTrap(message_string) and not llm_enabled) or messageTrap(message_string.split()[0]):
+                # DMs: allow bare first-word commands without "!" (channels still require bang)
+                if messageTrap(message_string, require_bang=False):
                     # log the message to stdout
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                 "From: " + CustomFormatter.white + f"{format_dm_peer_for_log(message_from_id, rxNode)}")
@@ -1592,39 +1588,7 @@ def onReceive(packet, interface):
                         # respond with DM
                         send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode)
                 else:
-                    missing_cmd = detect_missing_cmd_bang(message_string)
-                    if missing_cmd:
-                        logger.info(
-                            f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} "
-                            + CustomFormatter.green
-                            + "Received DM (missing !): "
-                            + CustomFormatter.white
-                            + f"{message_log_string} "
-                            + CustomFormatter.purple
-                            + "From: "
-                            + CustomFormatter.white
-                            + f"{format_dm_peer_for_log(message_from_id, rxNode)}"
-                        )
-                        _thr = check_command_throttle(
-                            message_from_id,
-                            command_token=extract_command_token(message_string),
-                        )
-                        if _thr is not None:
-                            if _thr:
-                                send_message(_thr, channel_number, message_from_id, rxNode)
-                            else:
-                                logger.debug(
-                                    f"System: rate-limit silent missing-! from "
-                                    f"{get_name_from_number(message_from_id, 'short', rxNode)}"
-                                )
-                        else:
-                            send_message(
-                                missing_cmd_bang_hint(missing_cmd),
-                                channel_number,
-                                message_from_id,
-                                rxNode,
-                            )
-                    elif llm_enabled and my_settings.llmReplyToNonCommands:
+                    if llm_enabled and my_settings.llmReplyToNonCommands:
                         llm = handle_llm(message_from_id, channel_number, rxNode, message_string, publicChannel)
                         send_message(llm, channel_number, message_from_id, rxNode)
                     else:
