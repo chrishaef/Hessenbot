@@ -117,15 +117,19 @@ def _sections() -> List[CommandSection]:
             "Knoten & Position",
             "bi-geo-alt",
             (
-                "Standortdaten stammen aus der Meshtastic-NodeDB (GPS am Gerät). Ohne GPS kann der Bot keine "
-                "Koordinaten liefern.\n\n"
-                f"Entfernungen messen: Mit aktivem GPS sendest du {p}map <Name> — der Bot antwortet mit Richtung "
-                "und Distanz zu einem zuvor gespeicherten Ort (bezogen auf deine aktuelle Position). "
-                f"{p}howfar summiert die zurückgelegte Strecke seit dem letzten Aufruf (erneut senden aktualisiert "
-                f"den Zähler; {p}howfar reset setzt den Startpunkt zurück).\n\n"
-                f"Standorte speichern: An der gewünschten Position {p}map save <Name> [Beschreibung] (nur für dich) "
-                f"oder {p}map save public <Name> [Beschreibung] (für alle). {p}map list zeigt deine Einträge, "
-                f"{p}map delete <Name> entfernt einen Ort. {p}map public <Name> fragt einen öffentlichen Ort ab."
+                "Standortdaten kommen aus der Meshtastic-NodeDB (GPS am Gerät) oder der regionalen Mesh-Karte. "
+                "Viele Wetter-/Standort-Befehle akzeptieren auch Ort, Koordinaten oder Maidenhead-Grid "
+                f"(z. B. <code>{p}wx Fulda</code>, <code>{p}wx 50.34 8.76</code>, <code>{p}wx JO40AA</code>).\n\n"
+                "Fehlt die Position und du gibst keinen Ort an, fragt der Bot deine Node kurz per Mesh "
+                "nach GPS (<em>Standort angefragt – kurz warten…</em>) und führt den Befehl danach "
+                "automatisch aus. Kommt keine Position: Hinweis, Ort oder Koordinaten mitzuschicken "
+                "(kein stiller Bot-Standort).\n\n"
+                f"Entfernungen: Mit GPS <code>{p}map &lt;Name&gt;</code> — Richtung und Distanz zu einem "
+                f"gespeicherten Ort. <code>{p}howfar</code> summiert die Strecke seit dem letzten Aufruf "
+                f"(<code>{p}howfar reset</code> setzt zurück).\n\n"
+                f"Orte speichern: <code>{p}map save &lt;Name&gt;</code> (privat) oder "
+                f"<code>{p}map save public &lt;Name&gt;</code>; <code>{p}map list</code> / "
+                f"<code>{p}map delete &lt;Name&gt;</code>."
             ),
             (
                 _cmd(
@@ -155,7 +159,8 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}whereami",
-                    "Ortstext zu deiner Position (Geocoding), plus Höhe falls übertragen.",
+                    "Ortstext zu deiner Position (Geocoding), plus Höhe falls übertragen. "
+                    "Ohne GPS: Positionsanfrage, sonst Hinweis.",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
                 _cmd(
@@ -206,6 +211,7 @@ def _sections() -> List[CommandSection]:
             "Wetter & Warnungen (DE/EU)",
             "bi-cloud-lightning-rain",
             "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD). "
+            "Ohne Ort-Angabe: GPS der Node, sonst Positionsanfrage (siehe Abschnitt Knoten & Position). "
             "Blitzwatch: !blitzwatch (Status), !blitzwatch? (Einstellen), "
             "!blitzwatch web / set (Web-Code per DM). "
             'Ausführliche Erklärung: <a href="/mein-blitzwatch#blitzwatch">'
@@ -213,7 +219,8 @@ def _sections() -> List[CommandSection]:
             (
                 _cmd(
                     f"{p}wx",
-                    "Wettervorhersage (Open-Meteo). Optional Ort/Coords/Grid: !wx Friedberg · !wx 50.34 8.76 · !wx JO40AA",
+                    "Wettervorhersage (Open-Meteo). Optional Ort/Coords/Grid; ohne GPS: Positionsanfrage. "
+                    "Beispiele: !wx Friedberg · !wx 50.34 8.76 · !wx JO40AA",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
@@ -225,7 +232,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}metar",
-                    "METAR des nächsten Flugplatzes zu deinem Standort.",
+                    "METAR des nächsten Flugplatzes zu deinem Standort (ohne ICAO: GPS bzw. Positionsanfrage).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "metar_enabled", True),
                 ),
@@ -243,21 +250,22 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}uv",
-                    "UV-Index heute und morgen. Optional: !uv Friedberg · !uv 50.34 8.76 · !uv JO40AA",
+                    "UV-Index. Optional Ort/Coords; ohne GPS: Positionsanfrage. "
+                    "Beispiele: !uv Friedberg · !uv 50.34 8.76",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}regen",
-                    "Stündlicher Regen. Optional: !regen Frankfurt · !regen 50.34 8.76 · !regen JO40AA",
+                    "Stündlicher Regen. Optional Ort/Coords; ohne GPS: Positionsanfrage.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}blitz",
-                    "Live-Blitze + Gewitter-Vorhersage. Optional: !blitz Friedberg · !blitz 50.34 8.76 · !blitz JO40AA",
+                    "Live-Blitze + Gewitter-Vorhersage. Optional Ort/Coords; ohne GPS: Positionsanfrage.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),

@@ -88,8 +88,13 @@ cp config.template config.ini
 - **Wetter** über **Open-Meteo**: `!wx`, `!wxc`, `!uv`, `!regen`, `!blitz`
 - **METAR** (`!metar`, optional ICAO): nächstgelegener Flughafen
 - **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
-- **Standort-Auflösung** (für Wetter, Warnungen, Blitz, …): zuerst Ort/Coords/Grid in der Nachricht, sonst frische NodeDB-Position (≤ 24 h) bzw. [Mesh-Karte](https://map.meshhessen.de); fehlt alles → Positionsanfrage per Mesh, Timeout mit Hinweis auf Ort/Koordinaten (kein Bot-Standort-Fallback)
-- **Optional Ort/Koordinaten/Maidenhead-Grid** bei vielen Standort-Befehlen: z. B. `!wx Fulda`, `!blitz Friedberg`, `!regen 50.55 9.68` (auch deutsches Dezimal-Komma `50,55 9,68`), `!wx JO40AA`. Ohne Angabe bleibt die Node-/Bot-Auflösung. Nicht betroffen: `!metar` (ICAO), `!loc` (Node), `!whereami`, `!howfar`, `!howtall`
+- **Standort-Auflösung** (für Wetter, Warnungen, Blitz, METAR ohne ICAO, …):
+  1. Ort / Koordinaten / Maidenhead in der Nachricht (z. B. `!wx Fulda`)
+  2. sonst frische NodeDB-Position (≤ 24 h) oder [Mesh-Karte](https://map.meshhessen.de)
+  3. fehlt alles → **Positionsanfrage** an die Node (`Standort angefragt – kurz warten…`); bei Erfolg wird der Befehl automatisch nachgeholt
+  4. Timeout → Hinweis, Ort/Koordinaten mitzuschicken (z. B. `!wx 50.34 8.76`) — **kein** stiller Bot-Standort-Fallback
+- **Optional Ort/Koordinaten/Maidenhead-Grid**: z. B. `!wx Fulda`, `!blitz Friedberg`, `!regen 50.55 9.68` (auch `50,55 9,68`), `!wx JO40AA`. Ohne Angabe: NodeDB/Karte bzw. Positionsanfrage. Ausnahme: `!metar EDDF` (ICAO), `!loc` (andere Node)
+- **Befehle per DM**: mit oder ohne `!`, wenn der Befehl das erste Wort ist (`ping`, `wx`, …). Im **Kanal** nur mit `!` (Ausnahme Channel-Test: nacktes `test`/`Test`)
 
 ### Ping, Trace & DM-Zustellung
 
@@ -174,14 +179,14 @@ cp config.template config.ini
 | `!ack` | Wie Ping, Keyword ACK |
 | `!warning` / `!warning Fulda` | NINA/Katwarn für deinen Standort oder angegebenen Ort |
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
-| `!wx` / `!wx Fulda` / `!wx JO40AA` | Wetter (Open-Meteo); optional Ort/Koordinaten/Grid |
-| `!uv` / `!regen` / `!blitz` | UV, Regen, Blitz — optional ebenfalls mit Ort/Koordinaten |
+| `!wx` / `!wx Fulda` / `!wx JO40AA` | Wetter (Open-Meteo); ohne Ort: Node-GPS bzw. Positionsanfrage |
+| `!uv` / `!regen` / `!blitz` | UV, Regen, Blitz — optional Ort/Koordinaten; sonst wie `!wx` |
 | `!blitzwatch` / `?` / `on` / `off` / `home` / `add` / `del` | Blitz-Nähe: Home + bis 3 Zusatzorte |
 | `!blitzwatch web` | DM: Code für Web-Einstellungen (`/mein-blitzwatch`) |
 | `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |
-| `!whereami` | Adresse der anfragenden Node (nur bei bekanntem Standort), sonst Hinweis ohne GPS |
+| `!whereami` | Adresse der eigenen Node; ohne GPS: Positionsanfrage, sonst Hinweis |
 | `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |
-| `!howfar` / `!howfar reset` | Zurückgelegte Strecke seit letztem Aufruf |
+| `!howfar` / `!howfar reset` | Zurückgelegte Strecke seit letztem Aufruf (braucht GPS) |
 | `!howtall <Schatten>` | Höhe per Sonnenwinkel (Schattenlänge in m/ft) |
 | `!messages` | Letzte Nachrichten von Kanal 1 (ohne Bot-Befehle) |
 | `!readnews` | News aus `data/news.txt` (oder `{quelle}_news.txt`) |
@@ -202,6 +207,10 @@ cmdBang = True
 enabled = True
 enableDEalerts = True
 UseMeteoWxAPI = True
+# Positionsanfrage wenn Node-GPS fehlt (Timeout/Cooldown siehe config.template)
+locationRequestEnabled = True
+locationRequestTimeoutSec = 25
+locationRequestCooldownSec = 60
 
 [messagingSettings]
 wantAckOnDm = True
@@ -225,7 +234,7 @@ news_file_path = data/news.txt
 enabled = True
 ```
 
-`cmdBang = True` — im Kanal beginnen Befehle mit `!`. Per DM auch ohne `!`, wenn der Befehl das erste Wort ist. Weitere Ausnahme: **Channel-Test** (siehe oben).
+`cmdBang = True` — im Kanal beginnen Befehle mit `!`. Per DM auch ohne `!`, wenn der Befehl das erste Wort ist. Weitere Ausnahme: **Channel-Test** (nacktes `test`/`Test`). Unbekannte DMs: einmal Welcome, danach kurzer Hinweis max. alle 5 Min. (mit Link zu `/befehle` wenn `publicUrl` gesetzt).
 
 ## Entwicklung & Plattform
 

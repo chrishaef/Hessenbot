@@ -4,6 +4,25 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ## [Unreleased]
 
+### Added
+
+- **Positionsanfrage**: Fehlt bei ortsabhängigen Befehlen (`!wx`, `!blitz`, `!metar`, `!whereami`, `!map`, …) die Node-Position, fordert der Bot sie per Mesh an, wartet kurz und führt den Befehl automatisch nach; Timeout mit Hinweis auf Ort/Koordinaten
+- **Channel-Test**: pro Kanal lange Antwort oder Emoji-Reaction (👍/✅), optional Hop-Ziffern-Reaction; Admin-UI
+- **Befehls-Throttling**: Notify-once + teure-Befehl-Cooldowns; Admin-Seite **Limits**
+- Config: `locationRequestEnabled`, `locationRequestTimeoutSec`, `locationRequestCooldownSec`
+
+### Changed
+
+- **Kein Bot-Standort-Fallback** mehr für Nutzer-Nodes (`get_node_location*` / Wetter & Co.)
+- **DM-Befehle**: mit und ohne `!` (erstes Wort); im Kanal weiter nur mit `!` (außer Channel-Test `test`)
+- Entfernt: Aliase `pong` / `pinging` / `testing`
+- Unbekannte DMs: einmal Welcome, danach Hinweis mit 5-Min-Cooldown (statt kompletter Befehlsliste)
+
+### Fixed
+
+- DM: `!ping` und `ping` beide gültig (`messageTrap` strippt optionales `!`)
+- Diverse Admin-/Dashboard- und Hop-/MQTT-Korrekturen (siehe Commits seit 1.1.0)
+
 ## [1.1.0] — 2026-09-04
 
 ### Added

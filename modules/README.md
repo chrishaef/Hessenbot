@@ -23,7 +23,8 @@ Python-Module für `mesh_bot.py` und das Flask-Web-Portal. Konfiguration über `
 | `wx_extra.py` | `!uv`, `!regen`, `!blitz` |
 | `blitzwatch.py` | Nähe-Warnung — Home + Zusatzorte, Mesh + Web-PIN |
 | `metar.py` | METAR-Flughafenwetter |
-| `locationdata.py` | Standort-Auflösung, Map-Orte, Geocoding-Helfer |
+| `locationdata.py` | Standort-Args, Map-Orte, Geocoding-Helfer |
+| `location_request.py` | Positionsanfrage per Mesh wenn Node-GPS fehlt; Pending/Timeout |
 
 ## Web-Portal
 
@@ -54,7 +55,7 @@ Aktivierung: `[webAdmin] enabled = True` in `config.ini`. Logs liegen unter `log
 ## Tests
 
 ```sh
-python3 -m pytest modules/test_blitzwatch.py -q
+python3 -m pytest modules/test_blitzwatch.py modules/test_location_request.py -q
 python3 modules/test_bot.py
 ```
 

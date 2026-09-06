@@ -97,6 +97,14 @@ def _sections() -> List[FaqSection]:
                         "z. B. <code>!metar?</code> oder <code>!cmd?</code>."
                     ),
                 ),
+                FaqEntry(
+                    "Channel-Test: nacktes „test“",
+                    (
+                        "Auf manchen Kanälen antwortet der Bot auf <code>test</code> / <code>Test</code> "
+                        "<strong>ohne</strong> <code>!</code> direkt im Kanal (lange Antwort oder Emoji-Reaction). "
+                        "Alle anderen Befehle brauchen im Kanal weiterhin <code>!</code>."
+                    ),
+                ),
             ),
         ),
         FaqSection(
@@ -107,9 +115,20 @@ def _sections() -> List[FaqSection]:
                 FaqEntry(
                     "!wx, !metar, !whereami: kein Standort / kein GPS",
                     (
-                        "Der Bot nutzt die <strong>letzte bekannte Position deiner Node</strong> im Mesh. "
-                        "GPS am Gerät aktivieren, Position freigeben und kurz warten, bis deine Node "
-                        "im Netz sichtbar ist — danach Befehl erneut senden."
+                        "Der Bot nutzt Ort/Koordinaten in der Nachricht, sonst die "
+                        "<strong>letzte bekannte Position deiner Node</strong> (NodeDB/Mesh-Karte). "
+                        "Fehlt sie, fragt er deine Node kurz per Mesh nach GPS und holt den Befehl "
+                        "automatisch nach. Timeout: z. B. <code>!wx Fulda</code> oder "
+                        "<code>!wx 50.34 8.76</code> senden. "
+                        "GPS am Gerät aktivieren und Position freigeben hilft dauerhaft."
+                    ),
+                ),
+                FaqEntry(
+                    "Befehl ohne ! per DM",
+                    (
+                        "Per Direktnachricht reichen <code>ping</code>, <code>wx</code> usw. als "
+                        "<strong>erstes Wort</strong> (mit oder ohne <code>!</code>). "
+                        "Im Kanal weiterhin mit <code>!</code> (Ausnahme: Channel-Test <code>test</code>)."
                     ),
                 ),
                 FaqEntry(
