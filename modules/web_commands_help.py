@@ -25,6 +25,7 @@ class CommandSection:
     intro: str
     commands: tuple[CommandEntry, ...]
     section_enabled: Optional[Callable[[], bool]] = None
+    intro_html: bool = False
 
 
 def _prefix() -> str:
@@ -216,7 +217,9 @@ def _sections() -> List[CommandSection]:
             "bi-cloud-lightning-rain",
             "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD). "
             "Blitzwatch: !blitzwatch (Status), !blitzwatch? (Einstellen), "
-            "!blitzwatch web / set (Web-Code per DM) — Details unten.",
+            "!blitzwatch web / set (Web-Code per DM). "
+            'Ausführliche Erklärung: <a href="/mein-blitzwatch#blitzwatch">'
+            "Blitzwatch — so funktioniert’s</a>.",
             (
                 _cmd(
                     f"{p}wx",
@@ -289,7 +292,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}blitzwatch web · set",
-                    "Nur per DM: 5-stelligen Code für die Webseite (Menü Blitzwatch).",
+                    "Nur per DM: 5-stelligen Code für /mein-blitzwatch (Menü Blitzwatch).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "blitz_watch_enabled", True),
                 ),
@@ -306,6 +309,7 @@ def _sections() -> List[CommandSection]:
             ),
             section_enabled=lambda: getattr(st, "location_enabled", False)
             or getattr(st, "enableDEalerts", False),
+            intro_html=True,
         ),
         CommandSection(
             "Repeater & Himmel",
@@ -667,8 +671,8 @@ def _blitzwatch_enabled() -> bool:
         return False
 
 
-def _render_blitzwatch_guide() -> str:
-    """Ausführliche Nutzerhilfe unter der Befehlsliste (nur wenn Blitzwatch aktiv)."""
+def render_blitzwatch_guide() -> str:
+    """Ausführliche Nutzerhilfe (für /mein-blitzwatch; nur wenn Blitzwatch aktiv)."""
     if not _blitzwatch_enabled():
         return ""
     p = html_escape(_prefix())
@@ -747,8 +751,7 @@ def _render_blitzwatch_guide() -> str:
           <td>
             <code>{p}blitzwatch web</code> · <code>{p}blitzwatch set</code> —
             nur als <strong>DM</strong>: 5-stelliger Code,
-            15&nbsp;Minuten, einmalig. Eingabe auf der Webseite unter
-            <a href="/mein-blitzwatch">Blitzwatch</a>.
+            15&nbsp;Minuten, einmalig. Eingabe oben auf dieser Seite.
           </td>
         </tr>
       </tbody>
@@ -810,7 +813,10 @@ def render_commands_page_body() -> str:
         icon = html_escape(section.icon)
         sec_intro = ""
         if section.intro:
-            sec_intro = f'<p class="text-muted small mb-3">{html_escape(section.intro)}</p>'
+            intro_body = (
+                section.intro if section.intro_html else html_escape(section.intro)
+            )
+            sec_intro = f'<p class="text-muted small mb-3">{intro_body}</p>'
         btn_cls = "" if expanded else " collapsed"
         show_cls = " show" if expanded else ""
         parts.append(
@@ -844,5 +850,4 @@ def render_commands_page_body() -> str:
         parts.append(
             '<p class="text-muted portal-card p-4">Keine Befehlsmodule aktiv — prüfe <code>config.ini</code>.</p>'
         )
-    parts.append(_render_blitzwatch_guide())
     return "\n".join(parts)

@@ -127,7 +127,7 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("location", "metar_enabled"): "True: !metar = METAR des nächsten Flugplatzes; !metar EDDF = METAR für ICAO-Code.",
     ("location", "wxExtraCommands"): "True: !uv (UV-Index), !regen (Niederschlag stündlich), !blitz (Gewitter-Risiko-Modell).",
     ("location", "blitzLiveData"): "True: !blitz nutzt echte Einschläge (DMI EU, optional Blitzortung.org mit Account).",
-    ("location", "blitzWatchEnabled"): "True: Blitzwatch — Home (GPS/Fix) + bis 3 Zusatzorte; Warnung per DM + Kanal (Opt-out: !blitzwatch off). Hilfe: /befehle#blitzwatch.",
+    ("location", "blitzWatchEnabled"): "True: Blitzwatch — Home (GPS/Fix) + bis 3 Zusatzorte; Warnung per DM + Kanal (Opt-out: !blitzwatch off). Hilfe: /mein-blitzwatch#blitzwatch.",
     ("location", "blitzWatchDefaultRadiusKm"): "Standard-Home-Radius in km (auch Default für neue Zusatzorte; Node: !blitzwatch 5km).",
     ("location", "blitzWatchMaxRadiusKm"): "Obergrenze für den per Watch-Punkt einstellbaren Radius.",
     ("location", "blitzWatchCooldownMin"): "Mindestabstand zwischen Warnungen (pro Watch-Punkt und für den Kanal).",

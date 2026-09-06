@@ -33,7 +33,7 @@ Python-Module für `mesh_bot.py` und das Flask-Web-Portal. Konfiguration über `
 | `admin_web_ops.py` | Admin-Helfer (NodeDB, Kanäle, Blitzwatch-UI, …) |
 | `admin_web_theme.py` | Portal-Shell, Navbar, Footer |
 | `web_dashboard.py` | Statistik-Dashboard |
-| `web_commands_help.py` | `/befehle` (inkl. Blitzwatch-Anleitung) |
+| `web_commands_help.py` | `/befehle`; Blitzwatch-Guide für `/mein-blitzwatch` |
 | `web_faq_help.py` | `/faq` |
 | `web_legal.py` | `/impressum`, `/datenschutz` |
 | `admin_config.py` / `admin_config_tooltips.py` | Einstellungsformular + Tooltips |

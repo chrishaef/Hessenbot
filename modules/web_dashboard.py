@@ -532,7 +532,9 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
             unique_users.add(user_match.group(1).strip()[:80])
 
         if "WARNING |" in line:
-            warnings.append(line.strip()[:200])
+            # Eigenes Echo über MQTT/Kanal — kein Betriebsfehler, nicht in Warnlisten
+            if "loop or traffic replay detected" not in plain:
+                warnings.append(line.strip()[:200])
         if "ERROR |" in line or "CRITICAL |" in line:
             errors.append(line.strip()[:200])
 
@@ -1365,7 +1367,14 @@ def _activity_series(hourly: Dict[str, int], *, hours: int = 48) -> tuple[List[s
 
 def render_admin_log_alerts_html(log: Dict[str, Any]) -> str:
     """Recent warnings/errors from meshbot.log for the admin overview."""
-    warnings = [_strip_ansi(str(w)) for w in (log.get("warnings") or [])[:8]]
+    def _keep_alert(line: str) -> bool:
+        return "loop or traffic replay detected" not in line
+
+    warnings = [
+        _strip_ansi(str(w))
+        for w in (log.get("warnings") or [])
+        if _keep_alert(str(w))
+    ][:8]
     errors = [_strip_ansi(str(e)) for e in (log.get("errors") or [])[:8]]
     if not warnings and not errors:
         return (

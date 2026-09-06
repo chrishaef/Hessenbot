@@ -189,11 +189,11 @@ def render_dm_delivery_stats_html(stats: Dict[str, Any], *, compact: bool = Fals
     </div>
     <div class="col-4">
       <div class="metric-label small">PKI-Fehler</div>
-      <div class="metric-value text-warning">{fp}</div>
+      <div class="metric-value text-danger">{fp}</div>
     </div>
     <div class="col-4">
       <div class="metric-label small">Sonst. Fehler</div>
-      <div class="metric-value text-danger">{fo}</div>
+      <div class="metric-value text-warning">{fo}</div>
     </div>
   </div>
   {chart_block}
@@ -228,14 +228,14 @@ def render_dm_delivery_stats_html(stats: Dict[str, Any], *, compact: bool = Fals
   <div class="col-md-4">
     <div class="metric-card h-100">
       <div class="metric-label">PKI-Fehler</div>
-      <div class="metric-value text-warning">{fp}</div>
+      <div class="metric-value text-danger">{fp}</div>
       <div class="metric-label metric-sub">delivery failed (PKI)</div>
     </div>
   </div>
   <div class="col-md-4">
     <div class="metric-card h-100">
       <div class="metric-label">Sonst. Fehler</div>
-      <div class="metric-value text-danger">{fo}</div>
+      <div class="metric-value text-warning">{fo}</div>
       <div class="metric-label metric-sub">Routing / Timeout</div>
     </div>
   </div>

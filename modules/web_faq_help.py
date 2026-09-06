@@ -125,8 +125,8 @@ def _sections() -> List[FaqSection]:
                         "<code>home …</code>, <code>add …</code>, <code>del N</code>, "
                         "oder im Browser: <code>!blitzwatch web</code> (DM) und Menü "
                         '<a href="/mein-blitzwatch">Blitzwatch</a>. '
-                        "Ausführliche Erklärung unter "
-                        '<a href="/befehle#blitzwatch">Befehle → Blitzwatch</a>.'
+                        "Ausführliche Erklärung: "
+                        '<a href="/mein-blitzwatch#blitzwatch">so funktioniert’s</a>.'
                     ),
                 ),
             ),

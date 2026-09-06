@@ -1435,7 +1435,8 @@ def onReceive(packet, interface):
                 if n
             ]
             if message_from_id in _my_nodes:
-                logger.warning(
+                # MQTT/Kanal-Echo eigener Antworten — normal, kein Betriebsfehler
+                logger.debug(
                     f"System: Packet from self {message_from_id} loop or traffic replay detected"
                 )
                 return

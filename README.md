@@ -119,7 +119,7 @@ cp config.template config.ini
     - **`!blitzwatch web`** (Alias `set`) — nur per **DM**: 5-stelliger Code (ca. 15 Min., einmalig) für die Web-Einstellungen
   - **Web:** öffentliches Menü **Blitzwatch** (`/mein-blitzwatch`) — Code eingeben, dann Home/Radius/Zusatzorte im Browser setzen
   - Admin: Tab **Blitzwatch** (NodeDB-Liste, Suche, Editor); optional `[webAdmin] publicUrl` für den Link in der DM
-  - Nutzerhilfe: **`/befehle#blitzwatch`**
+  - Nutzerhilfe: **`/mein-blitzwatch#blitzwatch`** (auch verlinkt unter `/befehle` → Wetter & Warnungen)
   - Status in der NodeDB (Admin/öffentlich): z. B. **an 8km** / **an 8km+2** / **bereit 8km** / **aus**
   - Config: `[location]` `blitzWatchEnabled` und zugehörige Parameter (siehe `config.template`)
 
@@ -133,8 +133,8 @@ cp config.template config.ini
 | URL | Inhalt |
 |-----|--------|
 | `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard 24h, DM-Zustellung 24h) |
-| `/befehle` | Befehlsliste inkl. `!trace` und ausführlicher **Blitzwatch**-Hilfe (`#blitzwatch`) |
-| `/mein-blitzwatch` | Blitzwatch-Einstellungen per DM-Code (`!blitzwatch web`) |
+| `/befehle` | Befehlsliste inkl. `!trace`; Link zur Blitzwatch-Erklärung |
+| `/mein-blitzwatch` | Blitzwatch-Einstellungen per DM-Code + ausführliche Hilfe (`#blitzwatch`) |
 | `/faq` | Hilfe & PKI-Check |
 | `/impressum` | Impressum (Angaben aus `[webAdmin]`) |
 | `/datenschutz` | Datenschutzhinweise |

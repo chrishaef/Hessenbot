@@ -2420,12 +2420,16 @@ def build_blitzwatch_public_html(
     global_on: bool,
     location_on: bool,
 ) -> str:
+    from modules.web_commands_help import render_blitzwatch_guide
+
+    guide = render_blitzwatch_guide()
     if not location_on or not global_on:
         return (
             '<p class="alert alert-warning">Blitzwatch ist derzeit deaktiviert.</p>'
+            + guide
         )
     if not node_id:
-        return """
+        return f"""
 <div class="portal-card p-4 mb-4">
   <h1 class="h3 section-title mb-3">
     <i class="bi bi-lightning-charge text-success me-2"></i>Blitzwatch
@@ -2453,10 +2457,11 @@ def build_blitzwatch_public_html(
     </div>
   </form>
   <p class="small text-muted mt-4 mb-0">
-    Mesh-Befehle bleiben: <code>!blitzwatch</code> · Hilfe:
-    <a href="/befehle#blitzwatch">Befehle</a>
+    Mesh-Befehle bleiben: <code>!blitzwatch</code> · Übersicht:
+    <a href="/befehle">Befehle</a>
   </p>
 </div>
+{guide}
 """
     logout = """
 <form method="post" class="mt-3">
@@ -2472,6 +2477,7 @@ def build_blitzwatch_public_html(
   <p class="small text-muted mb-0">Gilt nur für deine Node. Nach einer Stunde oder „Sitzung beenden“ ist der Zugang wieder zu.</p>
 </div>
 {build_blitzwatch_node_editor_html(int(node_id), extra_footer=logout)}
+{guide}
 """
 
 
