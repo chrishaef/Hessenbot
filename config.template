@@ -228,6 +228,10 @@ delete_public_locations_admins_only = False
 
 # Default to metric units rather than imperial
 useMetric = True
+# If a command needs the node's GPS and none is known: request position over the mesh
+locationRequestEnabled = True
+locationRequestTimeoutSec = 25
+locationRequestCooldownSec = 60
 
 # repeaterList lookup location (rbook / artsci / False)
 repeaterLookup = rbook
@@ -240,9 +244,9 @@ satList = 25544,7530
 
 # use Open-Meteo API for weather data not NOAA useful for non US locations
 UseMeteoWxAPI = True
-# METAR of nearest airport for !metar (aviationweather.gov; needs GPS or config lat/lon)
+# METAR of nearest airport for !metar (aviationweather.gov; needs GPS or Ort/Coords)
 metar_enabled = True
-# Short Open-Meteo commands: !uv, !regen, !blitz (needs GPS or config lat/lon)
+# Short Open-Meteo commands: !uv, !regen, !blitz (needs GPS or Ort/Coords)
 wxExtraCommands = True
 # Live lightning for !blitz: DMI (EU, no key); optional Blitzortung.org account (better coverage)
 blitzLiveData = True

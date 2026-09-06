@@ -668,7 +668,7 @@ def _resolve_explicit_location(
     )
     if source == "error":
         return None, label
-    if source in ("gps", "bot") or lat is None or lon is None:
+    if source in ("gps", "bot", "missing") or lat is None or lon is None:
         return None, "Standort fehlt (Ort, Koordinaten oder Maidenhead-Grid)."
     return (float(lat), float(lon), label or f"{lat:.2f}, {lon:.2f}"), None
 

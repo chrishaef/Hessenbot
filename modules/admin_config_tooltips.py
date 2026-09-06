@@ -112,8 +112,8 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("polls", "allow_revote"): "True: Gleiche Node darf Stimme ändern; False: nur eine Abstimmung.",
     # ── location ──
     ("location", "enabled"): "True: Standort-Befehle (wxc, loc, repeater, …) sind aktiv.",
-    ("location", "lat"): "Ersatz-Breitengrad, wenn eine anfragende Node kein GPS in der NodeDB hat.",
-    ("location", "lon"): "Ersatz-Längengrad ohne GPS der anfragenden Node.",
+    ("location", "lat"): "Koordinaten des Bots selbst (Ping/QSL, Sentry-Zentrum) — nicht als Ersatz für Nutzer-Nodes.",
+    ("location", "lon"): "Koordinaten des Bots selbst (Ping/QSL, Sentry-Zentrum) — nicht als Ersatz für Nutzer-Nodes.",
     ("location", "fuzzConfigLocation"): "True: Nur dieser Config-Standort wird leicht zufällig verfälscht (Privatsphäre).",
     ("location", "fuzzItAll"): "True: Alle Standortangaben in Antworten werden verfälscht.",
     ("location", "locations_db"): "Datei für gespeicherte öffentliche/private Orte (!loc save …).",

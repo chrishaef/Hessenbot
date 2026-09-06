@@ -138,3 +138,21 @@ def unknown_dm_command_hint() -> str:
     if base:
         msg += f" · {base}/befehle"
     return msg
+
+
+def location_request_ack() -> str:
+    return "Standort angefragt – kurz warten…"
+
+
+def location_request_timeout_hint(cmd_key: str, timeout_kind: str = "weather") -> str:
+    """Hinweis wenn kein GPS kam — Ort/Coords oder GPS freigeben."""
+    cmd = (cmd_key or "cmd").strip().lstrip("!").split()[0] or "cmd"
+    kind = (timeout_kind or "weather").lower()
+    if kind in ("gps_only", "whereami", "howfar", "map"):
+        return (
+            "Kein GPS vom Gerät. Position freigeben und erneut versuchen, "
+            "oder Befehl mit Ort/Koordinaten senden."
+        )
+    return (
+        f"Kein GPS. Versuch z. B. !{cmd} Fulda oder !{cmd} 50.34 8.76"
+    )

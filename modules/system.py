@@ -1586,13 +1586,11 @@ def _nodedb_fresh_position(nodeID, nodeInt, round_digits):
 
 def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
     """
-    Returns [latitude, longitude] for a node.
-    Flow (same for all location commands): fresh (<=24h) NodeDB position →
-    mesh map snapshot → bot/config location.
+    Returns [latitude, longitude] for a node, or None if unknown.
+    Flow: fresh (<=24h) NodeDB position → mesh map snapshot.
+    Never falls back to bot/config lat/lon.
     """
     _ensure_mesh_map_positions_loaded()
-    fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
-    config_position = [latitudeValue, longitudeValue]
 
     fresh = _nodedb_fresh_position(nodeID, nodeInt, round_digits)
     if fresh:
@@ -1608,23 +1606,16 @@ def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
             lon = round(lon, round_digits)
         return [lat, lon]
 
-    if fuzz_config_location:
-        # Return fuzzed config location if no valid position found
-        return fuzzed_position
-    else:
-        return config_position
+    return None
 
 
 def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
-    """Returns [latitude, longitude, from_gps] for warning/location replies.
+    """Returns [latitude, longitude, from_gps] or None if unknown.
 
-    Same flow as get_node_location; from_gps is True when the location came from a
-    fresh NodeDB position or the mesh map, False when falling back to the bot
-    location.
+    from_gps is True when the location came from a fresh NodeDB position or the mesh map.
+    Never falls back to bot/config lat/lon.
     """
     _ensure_mesh_map_positions_loaded()
-    fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
-    config_position = [latitudeValue, longitudeValue]
 
     fresh = _nodedb_fresh_position(nodeID, nodeInt, round_digits)
     if fresh:
@@ -1639,27 +1630,25 @@ def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
             lon = round(lon, round_digits)
         return [lat, lon, True]
 
-    if fuzz_config_location:
-        return [fuzzed_position[0], fuzzed_position[1], False]
-    return [config_position[0], config_position[1], False]
+    return None
 
 
 def format_location_source_note(from_gps=None, *, source=None, label=None) -> str:
-    """Clarify location origin (GPS, bot fallback, or explicit place/coords argument)."""
+    """Clarify location origin (GPS or explicit place/coords argument)."""
     src = source
     if src is None:
         if from_gps is True:
             src = "gps"
         elif from_gps is False:
-            src = "bot"
+            src = "missing"
     if src in ("arg-coords", "arg-grid", "arg-place"):
         if label:
             return f"📍 Standort: {label}"
         return "📍 Standort (Angabe)"
     if src == "gps":
         return "📍 Standort bekannt"
-    if src == "bot":
-        return "📍 Standort unbekannt – Bot-Standort"
+    if src in ("bot", "missing"):
+        return "📍 Standort unbekannt"
     return ""
 
 
@@ -1678,7 +1667,7 @@ def location_source_as_from_gps(source: str):
     """Map resolve_message_location source to legacy from_gps bool/None."""
     if source == "gps":
         return True
-    if source == "bot":
+    if source in ("bot", "missing"):
         return False
     return None
 
@@ -3467,6 +3456,17 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                 apply_leaderboard_altitude_speed_from_position(
                     nodeID, position_data, lb_ts
                 )
+            try:
+                from modules.location_request import try_complete_pending_location
+
+                try_complete_pending_location(
+                    nodeID,
+                    lat=position_data.get("latitude"),
+                    lon=position_data.get("longitude"),
+                )
+            except Exception as _loc_e:
+                logger.debug(f"System: location_request complete hook: {_loc_e}")
+            if position_data.get("altitude") is not None:
                 altitude = position_data["altitude"]
                 highflying = altitude > highfly_altitude
                 if logMetaStats:

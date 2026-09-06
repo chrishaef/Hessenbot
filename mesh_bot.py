@@ -22,11 +22,20 @@ restrictedCommands = []
 restrictedResponse = ""
 
 
-def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):
+def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM, reply_id=None):
     global cmdHistory
     #Auto response to messages
+    from modules.location_request import set_command_context
+
+    set_command_context(
+        channel=channel_number,
+        is_dm=isDM,
+        device_id=deviceID,
+        node_id=message_from_id,
+        reply_id=reply_id,
+    )
     message_lower = message.lower()
-    bot_response = "🤖I'm sorry, I'm afraid I can't do that."
+    bot_response = ""
 
     # Command List processes system.trap_list. system.messageTrap() sends any commands to here
     default_commands = {
@@ -287,8 +296,7 @@ def handle_emergency(message_from_id, deviceID, message):
     # trgger alert to emergency_responder_alert_channel
     if message_from_id != 0:
         nodeLocation = get_node_location(message_from_id, deviceID)
-        # if default location is returned set to Unknown
-        if nodeLocation[0] == my_settings.latitudeValue and nodeLocation[1] == my_settings.longitudeValue:
+        if not nodeLocation:
             nodeLocation = ["?", "?"]
         nodeInfo = (
             f"{get_name_from_number(message_from_id, 'short', deviceID)} "
@@ -397,44 +405,68 @@ def handle_blitzwatch(message, message_from_id, deviceID, isDM=True):
     return handle_blitzwatch_command(message, message_from_id, deviceID, is_dm=bool(isDM))
 
 
-def _resolve_cmd_location(message, message_from_id, deviceID, command_tokens, *, skip_numeric=False):
-    """Resolve lat/lon from message args or node. Returns (lat, lon, source, label) or error str."""
-    from modules.locationdata import resolve_message_location
+def _resolve_cmd_location(
+    message,
+    message_from_id,
+    deviceID,
+    command_tokens,
+    *,
+    skip_numeric=False,
+    cmd_key="",
+    timeout_kind="weather",
+    build_response=None,
+):
+    """Resolve lat/lon from args or node; may defer with mesh position request.
 
-    lat, lon, source, label = resolve_message_location(
+    Returns:
+      (lat, lon, source, label) — ready
+      str — error/hint
+      None — deferred (ack already sent; build_response runs async)
+    """
+    from modules.location_request import resolve_or_request_location
+
+    return resolve_or_request_location(
         message or "",
         message_from_id,
         deviceID,
         command_tokens=command_tokens,
         skip_numeric=skip_numeric,
+        cmd_key=cmd_key or (command_tokens[0] if command_tokens else "cmd"),
+        timeout_kind=timeout_kind,
+        build_response=build_response,
     )
-    if source == "error":
-        return label
-    return lat, lon, source, label
 
 
 def handle_wxc(message_from_id, deviceID, days=None, vox=False, message=""):
     if "?" in (message or ""):
         return (
             "🤖 !wx — Wettervorhersage (Open-Meteo).\n"
-            "Ohne Angabe: GPS der Node, sonst Mesh-Karte/Bot-Standort.\n"
+            "Ohne Angabe: GPS der Node (sonst Positionsanfrage).\n"
             "Mit Ort/Coords/Grid: !wx Friedberg · !wx 50.34 8.76 · !wx JO40AA\n"
             "Verwandt: !uv · !regen · !blitz · !metar"
         )
 
     from modules.wx_meteo import format_wx_info_header, get_wx_meteo
 
-    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("wx", "wxc"))
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        unit = 1 if my_settings.use_metric else 0
+        report = get_wx_meteo(str(lat), str(lon), unit)
+        if not report or report == ERROR_FETCHING_DATA:
+            return report
+        header = format_wx_info_header(lat, lon, from_gps=from_gps, source=source, label=label)
+        return f"{header}\n{report}"
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("wx", "wxc"),
+        cmd_key="wx", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
     if isinstance(resolved, str):
         return resolved
     lat, lon, source, label = resolved
-    from_gps = location_source_as_from_gps(source)
-    unit = 1 if my_settings.use_metric else 0
-    report = get_wx_meteo(str(lat), str(lon), unit)
-    if not report or report == ERROR_FETCHING_DATA:
-        return report
-    header = format_wx_info_header(lat, lon, from_gps=from_gps, source=source, label=label)
-    return f"{header}\n{report}"
+    return build(lat, lon, source, label)
 
 
 def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
@@ -450,7 +482,7 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
             ),
             "blitz": (
                 "🤖 !blitz — Live-Blitze im Umkreis plus kurze Gewitter-Vorhersage.\n"
-                "Ohne Angabe: GPS der Node, sonst Mesh-Karte/Bot-Standort.\n"
+                "Ohne Angabe: GPS der Node (sonst Positionsanfrage).\n"
                 "Optional: !blitz Friedberg · !blitz 50.34 8.76 · !blitz JO40AA"
             ),
         }
@@ -464,18 +496,26 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
         return f"🤖 !{cmd} ist in der Konfiguration deaktiviert (wxExtraCommands)."
     from modules.wx_extra import get_blitz, get_regen, get_uv
 
-    resolved = _resolve_cmd_location(message, message_from_id, deviceID, (cmd,))
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        if cmd == "blitz":
+            return get_blitz(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
+        if cmd == "uv":
+            return get_uv(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
+        if cmd == "regen":
+            return get_regen(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
+        return "Unbekannter Wetter-Befehl."
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, (cmd,),
+        cmd_key=cmd, timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
     if isinstance(resolved, str):
         return resolved
     lat, lon, source, label = resolved
-    from_gps = location_source_as_from_gps(source)
-    if cmd == "blitz":
-        return get_blitz(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
-    if cmd == "uv":
-        return get_uv(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
-    if cmd == "regen":
-        return get_regen(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
-    return "Unbekannter Wetter-Befehl."
+    return build(lat, lon, source, label)
 
 
 def handleNews(message_from_id, deviceID, message, isDM):
@@ -531,8 +571,20 @@ def handle_metar(message_from_id, deviceID, message=""):
     if icao:
         return get_metar_by_icao(icao)
 
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-    return get_metar(str(lat), str(lon), from_gps=from_gps)
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        return get_metar(str(lat), str(lon), from_gps=from_gps)
+
+    resolved = _resolve_cmd_location(
+        message or "", message_from_id, deviceID, ("metar",),
+        cmd_key="metar", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handle_warning(message_from_id, deviceID, channel_number, isDM, message=""):
@@ -543,24 +595,30 @@ def handle_warning(message_from_id, deviceID, channel_number, isDM, message=""):
         )
     if not my_settings.enableDEalerts:
         return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        parts = build_warning_messages(
+            lat, lon, from_gps, include_detail=isDM, source=source, label=label
+        )
+        if not parts:
+            return WARNING_NONE_MSG
+        dest = message_from_id if my_settings.useDMForResponse or isDM else 0
+        for extra in parts[1:]:
+            time.sleep(my_settings.splitDelay)
+            send_message(extra, channel_number, dest, deviceID)
+        return parts[0]
+
     resolved = _resolve_cmd_location(
-        message, message_from_id, deviceID, ("warning", "dealert")
+        message, message_from_id, deviceID, ("warning", "dealert"),
+        cmd_key="warning", timeout_kind="weather", build_response=build,
     )
+    if resolved is None:
+        return ""
     if isinstance(resolved, str):
         return resolved
     lat, lon, source, label = resolved
-    from_gps = location_source_as_from_gps(source)
-    # include_detail only for real DMs — channel requests (even DM-responded) stay short
-    parts = build_warning_messages(
-        lat, lon, from_gps, include_detail=isDM, source=source, label=label
-    )
-    if not parts:
-        return WARNING_NONE_MSG
-    dest = message_from_id if my_settings.useDMForResponse or isDM else 0
-    for extra in parts[1:]:
-        time.sleep(my_settings.splitDelay)
-        send_message(extra, channel_number, dest, deviceID)
-    return parts[0]
+    return build(lat, lon, source, label)
 
 def handle_emergency_alerts(message, message_from_id, deviceID):
     if my_settings.enableDEalerts:
@@ -569,7 +627,7 @@ def handle_emergency_alerts(message, message_from_id, deviceID):
 
 def handle_checklist(message, message_from_id, deviceID):
     name = get_name_from_number(message_from_id, 'short', deviceID)
-    location = get_node_location(message_from_id, deviceID)
+    location = get_node_location(message_from_id, deviceID) or [None, None]
     return process_checklist_command(message_from_id, message, name, location)
 
 def handle_inventory(message, message_from_id, deviceID):
@@ -688,18 +746,26 @@ def handle_sun(message_from_id, deviceID, channel_number, vox=False, message="")
             "Optional: !sun Frankfurt · !sun 50.34 8.76 · !sun JO40AA"
         )
     if vox:
-        # return a default message if vox is enabled
         return get_sun(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("sun",))
+
+    def build(lat, lon, source, label):
+        return with_location_source_note(
+            get_sun(str(lat), str(lon)),
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("sun",),
+        cmd_key="sun", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
     if isinstance(resolved, str):
         return resolved
     lat, lon, source, label = resolved
-    return with_location_source_note(
-        get_sun(str(lat), str(lon)),
-        location_source_as_from_gps(source),
-        source=source,
-        label=label,
-    )
+    return build(lat, lon, source, label)
 
 def handle_satpass(message_from_id, deviceID, message):
     if "?" in message:
@@ -716,22 +782,31 @@ def handle_satpass(message_from_id, deviceID, message):
     if norad is None:
         sat_list = getattr(my_settings, "satListConfig", ["25544"])
         norad = (sat_list[0] if sat_list else "25544").strip()
+
+    def build(lat, lon, source, label):
+        return with_location_source_note(
+            getNextSatellitePass(norad, lat, lon),
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
     resolved = _resolve_cmd_location(
         message,
         message_from_id,
         deviceID,
         ("satpass",),
         skip_numeric=True,
+        cmd_key="satpass",
+        timeout_kind="weather",
+        build_response=build,
     )
+    if resolved is None:
+        return ""
     if isinstance(resolved, str):
         return resolved
     lat, lon, source, label = resolved
-    return with_location_source_note(
-        getNextSatellitePass(norad, lat, lon),
-        location_source_as_from_gps(source),
-        source=source,
-        label=label,
-    )
+    return build(lat, lon, source, label)
 
 def sysinfo(message, message_from_id, deviceID, isDM):
     if "?" in message:
@@ -833,19 +908,30 @@ def handle_history(message, nodeid, deviceID, isDM, lheard=False):
     return msg
 
 def handle_whereami(message_from_id, deviceID, channel_number):
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-    # check api_throttle
     check_throttle = api_throttle(message_from_id, deviceID, apiName='whereami')
     if check_throttle:
         return check_throttle
-    # !whereami = nur Position der anfragenden Node — kein Bot-Standort-Fallback
-    if not from_gps:
-        return my_settings.NO_DATA_NOGPS
-    msg = where_am_i(str(lat), str(lon))
-    alt = get_node_altitude_m(message_from_id, deviceID)
-    if alt is not None:
-        msg += f"\n{format_node_altitude_line(alt)}"
-    return with_location_source_note(msg, from_gps)
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        if not from_gps:
+            return my_settings.NO_DATA_NOGPS
+        msg = where_am_i(str(lat), str(lon))
+        alt = get_node_altitude_m(message_from_id, deviceID)
+        if alt is not None:
+            msg += f"\n{format_node_altitude_line(alt)}"
+        return with_location_source_note(msg, from_gps)
+
+    resolved = _resolve_cmd_location(
+        "", message_from_id, deviceID, ("whereami",),
+        cmd_key="whereami", timeout_kind="gps_only", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handle_howfar(message, message_from_id, deviceID, isDM):
@@ -859,11 +945,24 @@ def handle_howfar(message, message_from_id, deviceID, isDM):
     check_throttle = api_throttle(message_from_id, deviceID, apiName="howfar")
     if check_throttle:
         return check_throttle
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     reset = "reset" in message.lower()
-    return with_location_source_note(
-        distance(lat, lon, message_from_id, reset=reset), from_gps
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        return with_location_source_note(
+            distance(lat, lon, message_from_id, reset=reset), from_gps
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("howfar",),
+        cmd_key="howfar", timeout_kind="gps_only", build_response=build,
     )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handle_howtall(message, message_from_id, deviceID, isDM):
@@ -877,7 +976,6 @@ def handle_howtall(message, message_from_id, deviceID, isDM):
     check_throttle = api_throttle(message_from_id, deviceID, apiName="howtall")
     if check_throttle:
         return check_throttle
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
     shadow = None
     parts = message.replace("!", " ").split()
     for i, part in enumerate(parts):
@@ -900,9 +998,21 @@ def handle_howtall(message, message_from_id, deviceID, isDM):
                 continue
     if shadow is None:
         return "Bitte Schattenlänge angeben, z. B. !howtall 2"
-    return with_location_source_note(
-        measureHeight(lat, lon, shadow), from_gps
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        return with_location_source_note(measureHeight(lat, lon, shadow), from_gps)
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("howtall",),
+        cmd_key="howtall", timeout_kind="weather", build_response=build,
     )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handle_trace(message, message_from_id, deviceID, channel_number):
@@ -979,26 +1089,34 @@ def handle_repeaterQuery(message_from_id, deviceID, channel_number, message=""):
             "🤖 !rlist — Relais in der Nähe.\n"
             "Optional: !rlist Friedberg · !rlist 50.34 8.76 · !rlist JO40AA"
         )
-    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("rlist",))
+
+    def build(lat, lon, source, label):
+        check_throttle = api_throttle(message_from_id, deviceID, apiName='repeaterQuery')
+        if check_throttle:
+            return check_throttle
+        if repeater_lookup == "rbook":
+            body = getRepeaterBook(str(lat), str(lon))
+        elif repeater_lookup == "artsci":
+            body = getArtSciRepeaters(str(lat), str(lon))
+        else:
+            return "Repeater-Suche ist nicht aktiviert."
+        return with_location_source_note(
+            body,
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("rlist",),
+        cmd_key="rlist", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
     if isinstance(resolved, str):
         return resolved
     lat, lon, source, label = resolved
-    # check api_throttle
-    check_throttle = api_throttle(message_from_id, deviceID, apiName='repeaterQuery')
-    if check_throttle:
-        return check_throttle
-    if repeater_lookup == "rbook":
-        body = getRepeaterBook(str(lat), str(lon))
-    elif repeater_lookup == "artsci":
-        body = getArtSciRepeaters(str(lat), str(lon))
-    else:
-        return "Repeater-Suche ist nicht aktiviert."
-    return with_location_source_note(
-        body,
-        location_source_as_from_gps(source),
-        source=source,
-        label=label,
-    )
+    return build(lat, lon, source, label)
 
 def handle_moon(message_from_id, deviceID, channel_number, vox=False, message=""):
     if "?" in (message or ""):
@@ -1008,16 +1126,25 @@ def handle_moon(message_from_id, deviceID, channel_number, vox=False, message=""
         )
     if vox:
         return get_moon(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    resolved = _resolve_cmd_location(message, message_from_id, deviceID, ("moon",))
+
+    def build(lat, lon, source, label):
+        return with_location_source_note(
+            get_moon(str(lat), str(lon)),
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("moon",),
+        cmd_key="moon", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
     if isinstance(resolved, str):
         return resolved
     lat, lon, source, label = resolved
-    return with_location_source_note(
-        get_moon(str(lat), str(lon)),
-        location_source_as_from_gps(source),
-        source=source,
-        label=label,
-    )
+    return build(lat, lon, source, label)
 
 def handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus):
     try:
@@ -1033,7 +1160,7 @@ def handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus):
             msg += f"\nPKI {pkiStatus[0]} pubKey: {pkiStatus[1]}"
 
         loc = get_node_location(message_from_id, deviceID)
-        if loc != [my_settings.latitudeValue, my_settings.longitudeValue]:
+        if loc:
             msg += f"\nPosition: {loc[0]}, {loc[1]}"
 
             if positionMetadata and message_from_id in positionMetadata:
@@ -1697,7 +1824,7 @@ def onReceive(packet, interface):
                                 )
                         elif my_settings.useDMForResponse:
                             # respond to channel message via direct message
-                            send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode, reply_id=packet_id)
+                            send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM, reply_id=packet_id), channel_number, message_from_id, rxNode, reply_id=packet_id)
                         else:
                             # or respond to channel message on the channel itself
                             if channel_number == my_settings.publicChannel and my_settings.antiSpam:
@@ -1705,10 +1832,10 @@ def onReceive(packet, interface):
                                 logger.warning(f"System: AntiSpam protection, sending DM to: {get_name_from_number(message_from_id, 'long', rxNode)}")
                             
                                 # respond to channel message via direct message
-                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode, reply_id=packet_id)
+                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM, reply_id=packet_id), channel_number, message_from_id, rxNode, reply_id=packet_id)
                             else:
                                 # respond to channel message on the channel itself
-                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, 0, rxNode, reply_id=packet_id)
+                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM, reply_id=packet_id), channel_number, 0, rxNode, reply_id=packet_id)
 
                 else:
                     # message is not for us to respond to

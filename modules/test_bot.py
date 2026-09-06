@@ -1090,7 +1090,7 @@ class TestBot(unittest.TestCase):
             "📍 Standort: JO40AA",
         )
         self.assertEqual(format_location_source_note(True), "📍 Standort bekannt")
-        self.assertIn("Bot-Standort", format_location_source_note(False))
+        self.assertIn("Standort unbekannt", format_location_source_note(False))
 
     def test_handle_wxc_help_mentions_place(self):
         from mesh_bot import handle_wxc

@@ -88,7 +88,7 @@ cp config.template config.ini
 - **Wetter** über **Open-Meteo**: `!wx`, `!wxc`, `!uv`, `!regen`, `!blitz`
 - **METAR** (`!metar`, optional ICAO): nächstgelegener Flughafen
 - **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
-- **Standort-Auflösung** (für Wetter, Warnungen, Blitz, …): zuerst frische NodeDB-Position (≤ 24 h), dann [Mesh-Karte](https://map.meshhessen.de), sonst Bot-Standort aus `config.ini`
+- **Standort-Auflösung** (für Wetter, Warnungen, Blitz, …): zuerst Ort/Coords/Grid in der Nachricht, sonst frische NodeDB-Position (≤ 24 h) bzw. [Mesh-Karte](https://map.meshhessen.de); fehlt alles → Positionsanfrage per Mesh, Timeout mit Hinweis auf Ort/Koordinaten (kein Bot-Standort-Fallback)
 - **Optional Ort/Koordinaten/Maidenhead-Grid** bei vielen Standort-Befehlen: z. B. `!wx Fulda`, `!blitz Friedberg`, `!regen 50.55 9.68` (auch deutsches Dezimal-Komma `50,55 9,68`), `!wx JO40AA`. Ohne Angabe bleibt die Node-/Bot-Auflösung. Nicht betroffen: `!metar` (ICAO), `!loc` (Node), `!whereami`, `!howfar`, `!howtall`
 
 ### Ping, Trace & DM-Zustellung

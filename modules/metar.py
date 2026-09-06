@@ -97,7 +97,7 @@ def format_metar_header(lat, lon, icao: str, station_name: str, dist_km: float, 
     if from_gps is True:
         header += "\n📍 Standort bekannt"
     elif from_gps is False:
-        header += "\n📍 Standort unbekannt – Bot-Standort"
+        header += "\n📍 Standort unbekannt"
     return header
 
 
