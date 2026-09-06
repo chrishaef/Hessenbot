@@ -24,6 +24,7 @@ bbs_admin_list = [] # list of admin users, imported from config
 repeater_channels = [] # list of channels to listen on for repeater mode, imported from config
 channel_test_enabled = False # reply in-channel to a bare "test" on selected channels
 channel_test_channels = [] # channels where the in-channel "test" reply is active
+channel_test_modes = "" # "1=long,2=react:👍" — see parse_channel_test_modes()
 antiSpam = True # anti-spam feature to prevent flooding public channel
 ping_enabled = True # ping feature to respond to pings, ack's etc.
 sitrep_enabled = True # sitrep feature to respond to sitreps
@@ -120,7 +121,7 @@ if 'newsBroadcast' not in config:
     config.write(open(config_file, 'w'))
 
 if 'channelTest' not in config:
-    config['channelTest'] = {'enabled': 'False', 'channels': ''}
+    config['channelTest'] = {'enabled': 'False', 'channels': '', 'modes': ''}
     config.write(open(config_file, 'w'))
 
 if 'emergencyHandler' not in config:
@@ -299,6 +300,8 @@ try:
     channel_test_channels = [
         c.strip() for c in config['channelTest'].get('channels', '').split(',') if c.strip()
     ]
+    # Per channel: "1=long,2=react:👍,3=react" — missing entry defaults to long
+    channel_test_modes = config['channelTest'].get('modes', '')
     explicitCmd = config['general'].getboolean('explicitCmd', True) # default on
     zuluTime = config['general'].getboolean('zuluTime', False) # aka 24 hour time
     log_messages_to_file = config['general'].getboolean('LogMessagesToFile', False) # default off
@@ -656,3 +659,67 @@ except Exception as e:
     print("System: Check the config.ini against config.template file for missing sections or values.")
     print("System: Exiting...")
     exit(1)
+
+
+CHANNEL_TEST_DEFAULT_EMOJI = "👍"
+CHANNEL_TEST_EMOJI_CHOICES = ("👍", "❤️", "😂", "🎉", "✅", "👋", "🔥", "🙏")
+
+
+def parse_channel_test_modes(raw: str) -> dict:
+    """Parse modes string → {channel: (mode, emoji)}.
+
+    Examples: ``1=long``, ``2=react:👍``, ``3=react`` (default emoji).
+    """
+    out = {}
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        ch, rest = part.split("=", 1)
+        ch = ch.strip()
+        if not ch.isdigit():
+            continue
+        rest = rest.strip()
+        if not rest:
+            continue
+        if ":" in rest:
+            mode, emoji = rest.split(":", 1)
+            mode = mode.strip().lower()
+            emoji = (emoji or "").strip() or CHANNEL_TEST_DEFAULT_EMOJI
+        else:
+            mode = rest.lower()
+            emoji = CHANNEL_TEST_DEFAULT_EMOJI
+        if mode not in ("long", "react"):
+            mode = "long"
+        if mode == "long":
+            emoji = ""
+        elif emoji not in CHANNEL_TEST_EMOJI_CHOICES:
+            emoji = CHANNEL_TEST_DEFAULT_EMOJI
+        out[ch] = (mode, emoji)
+    return out
+
+
+def serialize_channel_test_modes(modes: dict) -> str:
+    """Serialize {ch: (mode, emoji)} → config string."""
+    parts = []
+    for ch in sorted(modes.keys(), key=lambda x: (len(str(x)), str(x))):
+        mode, emoji = modes[ch]
+        mode = str(mode or "long").lower()
+        if mode == "react":
+            em = emoji or CHANNEL_TEST_DEFAULT_EMOJI
+            parts.append(f"{ch}=react:{em}")
+        else:
+            parts.append(f"{ch}=long")
+    return ",".join(parts)
+
+
+def channel_test_mode(channel_number) -> tuple:
+    """Return (mode, emoji) for a channel. Default (\"long\", \"\")."""
+    try:
+        ch = str(int(channel_number))
+    except (TypeError, ValueError):
+        ch = str(channel_number).strip()
+    modes = parse_channel_test_modes(globals().get("channel_test_modes", ""))
+    if ch not in modes:
+        return "long", ""
+    return modes[ch]

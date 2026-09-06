@@ -2314,14 +2314,26 @@ def create_app(
             channels = list(request.form.getlist("channels"))
             manual = (request.form.get("channels_manual") or "").replace(";", ",")
             channels.extend(part for part in manual.split(",") if part.strip())
-            # dedupe, keep only digit channel numbers
             seen = []
             for c in channels:
                 c = c.strip()
                 if c.isdigit() and c not in seen:
                     seen.append(c)
+            modes = {}
+            default_em = getattr(st, "CHANNEL_TEST_DEFAULT_EMOJI", "👍")
+            choices = set(getattr(st, "CHANNEL_TEST_EMOJI_CHOICES", (default_em,)))
+            for ch in seen:
+                mode = (request.form.get(f"mode_{ch}") or "long").strip().lower()
+                if mode == "react":
+                    emoji = (request.form.get(f"emoji_{ch}") or default_em).strip()
+                    if emoji not in choices:
+                        emoji = default_em
+                    modes[ch] = ("react", emoji)
+                else:
+                    modes[ch] = ("long", "")
+            # Modes for newly typed manual channels not yet in form selects → long
             try:
-                ops.save_channel_test_to_config(enabled, seen)
+                ops.save_channel_test_to_config(enabled, seen, modes)
             except OSError as e:
                 if getattr(e, "errno", None) == 13:
                     flash(ops.runtime_file_permission_hint(st.config_file), "error")
@@ -2339,7 +2351,9 @@ def create_app(
 
         return _render_admin_template(
             ops.build_channel_test_html(
-                st.channel_test_enabled, st.channel_test_channels
+                st.channel_test_enabled,
+                st.channel_test_channels,
+                getattr(st, "channel_test_modes", ""),
             ),
             title="Channel-Test",
             active_tab="channeltest",

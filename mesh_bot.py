@@ -1676,8 +1676,23 @@ def onReceive(packet, interface):
                             f"{get_name_from_number(message_from_id, 'short', rxNode)}"
                         )
                     else:
-                        _test_resp = handle_ping(message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number)
-                        send_message(_test_resp, channel_number, 0, rxNode, reply_id=packet_id)
+                        from modules.settings import channel_test_mode
+
+                        _ct_mode, _ct_emoji = channel_test_mode(channel_number)
+                        if _ct_mode == "react":
+                            send_emoji_reaction(
+                                _ct_emoji or "👍",
+                                channel_number,
+                                packet_id,
+                                rxNode,
+                            )
+                        else:
+                            _test_resp = handle_ping(
+                                message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number
+                            )
+                            send_message(
+                                _test_resp, channel_number, 0, rxNode, reply_id=packet_id
+                            )
                         if my_settings.log_messages_to_file:
                             msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | " + message_log_string)
                 elif messageTrap(message_string):

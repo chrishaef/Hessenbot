@@ -305,11 +305,13 @@ training = False
 # repeater module
 [channelTest]
 # Reply in-channel (not DM) to a bare "test"/"Test" without the leading "!",
-# on the selected channels only. Same response as !test. Managed in the web admin
-# (tab "Channel-Test"). All other commands keep requiring DM and/or "!".
+# on the selected channels only. Managed in the web admin (tab "Channel-Test").
+# Per channel: long message (!test text) or short mesh reaction (emoji tapback).
 enabled = False
 # comma separated channel numbers, e.g. 0,2
 channels =
+# optional modes: 1=long,2=react:👍,3=react:✅  (default per channel = long)
+modes =
 
 [repeater]
 enabled = False

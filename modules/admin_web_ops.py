@@ -830,20 +830,35 @@ def list_radio_channels(
     return [seen[n] for n in sorted(seen)]
 
 
-def save_channel_test_to_config(enabled: bool, channels: List[str]) -> None:
-    """Persist [channelTest] enabled/channels and update live settings."""
+def save_channel_test_to_config(
+    enabled: bool,
+    channels: List[str],
+    modes: Optional[dict] = None,
+) -> None:
+    """Persist [channelTest] enabled/channels/modes and update live settings."""
     import modules.settings as st
 
     clean = [str(c).strip() for c in channels if str(c).strip()]
+    modes = modes or {}
+    mode_clean = {}
+    for ch in clean:
+        if ch in modes:
+            mode_clean[ch] = modes[ch]
+        else:
+            mode_clean[ch] = ("long", "")
+    modes_s = st.serialize_channel_test_modes(mode_clean)
+
     if "channelTest" not in st.config:
         st.config["channelTest"] = {}
     st.config["channelTest"]["enabled"] = "True" if enabled else "False"
     st.config["channelTest"]["channels"] = ",".join(clean)
+    st.config["channelTest"]["modes"] = modes_s
     with open(st.config_file, "w", encoding="utf-8") as fh:
         st.config.write(fh)
 
     st.channel_test_enabled = enabled
     st.channel_test_channels = clean
+    st.channel_test_modes = modes_s
 
 
 _DEFAULT_EXPENSIVE_CMDS = (
@@ -996,54 +1011,149 @@ def build_limits_settings_html(
 """
 
 
-def build_channel_test_html(enabled: bool, selected: List[str]) -> str:
-    """Form for the Channel-Test tab: toggle + channel checkboxes (with manual fallback)."""
+def build_channel_test_html(
+    enabled: bool,
+    selected: List[str],
+    modes_raw: str = "",
+) -> str:
+    """Modern Channel-Test form: per-channel long vs reaction + emoji picker."""
+    import modules.settings as st
+
     chk = " checked" if enabled else ""
     selected_set = {str(s).strip() for s in selected if str(s).strip()}
+    parsed_modes = st.parse_channel_test_modes(modes_raw)
     avail = available_channels_for_test()
+    emoji_choices = list(st.CHANNEL_TEST_EMOJI_CHOICES)
+    default_emoji = st.CHANNEL_TEST_DEFAULT_EMOJI
 
+    rows_meta: List[Dict[str, Any]] = []
+    seen_nums: set = set()
     if avail:
-        boxes = []
         for ch in avail:
             num = str(ch["number"])
-            sel = " checked" if num in selected_set else ""
-            boxes.append(
-                f'<div class="form-check">'
-                f'<input class="form-check-input" type="checkbox" name="channels" '
-                f'value="{html.escape(num, quote=True)}" id="ct{num}"{sel}>'
-                f'<label class="form-check-label" for="ct{num}">'
-                f'{html.escape(ch["label"])} <span class="text-muted">(#{num})</span></label></div>'
+            seen_nums.add(num)
+            rows_meta.append({"number": num, "label": ch["label"]})
+    for num in sorted(selected_set, key=lambda x: (len(x), x)):
+        if num not in seen_nums and num.isdigit():
+            rows_meta.append({"number": num, "label": f"Kanal #{num}"})
+            seen_nums.add(num)
+
+    channel_rows = []
+    for ch in rows_meta:
+        num = ch["number"]
+        active = num in selected_set
+        mode, emoji = parsed_modes.get(num, ("long", ""))
+        if mode != "react":
+            mode = "long"
+            emoji = ""
+        if mode == "react" and not emoji:
+            emoji = default_emoji
+        active_chk = " checked" if active else ""
+        long_sel = " selected" if mode == "long" else ""
+        react_sel = " selected" if mode == "react" else ""
+        react_hidden = "" if mode == "react" else " is-hidden"
+        emoji_btns = []
+        for em in emoji_choices:
+            is_sel = (mode == "react" and em == emoji) or (
+                mode == "long" and em == default_emoji
             )
+            active_em = " is-active" if (mode == "react" and em == emoji) else ""
+            checked = " checked" if is_sel else ""
+            emoji_btns.append(
+                f'<label class="ct-emoji-btn{active_em}">'
+                f'<input type="radio" name="emoji_{html.escape(num, quote=True)}" '
+                f'value="{html.escape(em, quote=True)}"{checked}>'
+                f"<span>{html.escape(em)}</span></label>"
+            )
+        channel_rows.append(
+            f"""
+<div class="ct-channel-row" data-channel="{html.escape(num, quote=True)}">
+  <div class="ct-channel-main">
+    <div class="form-check form-switch ct-channel-enable">
+      <input class="form-check-input ct-enable" type="checkbox" name="channels"
+             value="{html.escape(num, quote=True)}" id="ctEn{html.escape(num)}"
+             {active_chk}>
+      <label class="form-check-label" for="ctEn{html.escape(num)}">
+        <strong>{html.escape(ch["label"])}</strong>
+        <span class="text-muted small">#{html.escape(num)}</span>
+      </label>
+    </div>
+    <div class="ct-channel-mode">
+      <label class="form-label small mb-1" for="ctMode{html.escape(num)}">Antwort</label>
+      <select class="form-select form-select-sm ct-mode" name="mode_{html.escape(num, quote=True)}"
+              id="ctMode{html.escape(num)}">
+        <option value="long"{long_sel}>Lange Testnachricht</option>
+        <option value="react"{react_sel}>Reaction (Airtime sparen)</option>
+      </select>
+    </div>
+  </div>
+  <div class="ct-emoji-picker{react_hidden}" data-picker-for="{html.escape(num, quote=True)}">
+    <span class="small text-muted me-2">Emoji</span>
+    <div class="ct-emoji-group">{"".join(emoji_btns)}</div>
+  </div>
+</div>
+"""
+        )
+
+    if channel_rows:
         channel_block = (
-            '<label class="form-label">Kanäle</label>'
-            '<div class="mb-2">' + "".join(boxes) + "</div>"
+            '<div class="ct-channel-list mb-3">' + "".join(channel_rows) + "</div>"
         )
     else:
         channel_block = (
-            '<label class="form-label">Kanäle (kommagetrennte Nummern)</label>'
-            '<p class="small text-muted mb-2">Keine Kanäle vom Radio gelesen — '
-            "Nummern manuell eintragen.</p>"
+            '<p class="small text-muted mb-3">Keine Kanäle vom Radio gelesen — '
+            "unten Nummern manuell eintragen, speichern, Seite neu laden.</p>"
         )
 
-    manual = html.escape(",".join(sorted(selected_set, key=lambda x: (len(x), x))))
     return f"""
-<p class="text-muted small mb-3">Bei aktivierter Funktion antwortet der Bot auf ein einfaches
-<code>test</code> / <code>Test</code> (ohne <code>!</code>) direkt im Kanal — gleiche Antwort wie
-<code>!test</code>. Nach dem Anlegen eines neuen Kanals diese Seite neu laden und den Slot
-hier erneut anhaken. Gilt nur für die ausgewählten Kanäle; alle anderen Befehle bleiben unverändert
-(DM und <code>!</code>).</p>
-<form method="post">
-  <div class="form-check form-switch mb-3">
+<div class="section-card mb-3">
+  <h2 class="h5 mb-1">Channel-Test</h2>
+  <p class="small text-muted mb-0">
+    Auf <code>test</code> / <code>Test</code> (ohne <code>!</code>) im gewählten Kanal antworten.
+    <strong>Lange Testnachricht</strong> = wie <code>!test</code>.
+    <strong>Reaction</strong> = nur ein Emoji auf die Originalnachricht (weniger Airtime).
+    Andere Befehle bleiben unverändert (DM / <code>!</code>).
+  </p>
+</div>
+<form method="post" id="ctForm" class="section-card">
+  <div class="form-check form-switch mb-4">
     <input class="form-check-input" type="checkbox" name="enabled" id="ctEnabled"{chk}>
-    <label class="form-check-label" for="ctEnabled">Funktion aktiv</label>
+    <label class="form-check-label fw-semibold" for="ctEnabled">Funktion aktiv</label>
   </div>
+  <h3 class="h6 text-uppercase text-muted mb-3">Kanäle</h3>
   {channel_block}
-  <label class="form-label">Zusätzliche Kanal-Nummern (optional, kommagetrennt)</label>
-  <input type="text" name="channels_manual" class="form-control mb-3" value="{manual}"
-         placeholder="z. B. 2,3">
-  <button type="submit" class="btn btn-success w-100">Speichern</button>
+  <label class="form-label" for="ctManual">Weitere Kanal-Nummern (optional)</label>
+  <input type="text" name="channels_manual" id="ctManual" class="form-control mb-3"
+         value="" placeholder="z. B. 4,5 — nach Speichern erscheinen sie oben">
+  <button type="submit" class="btn btn-success">Speichern</button>
 </form>
-<p class="small text-muted mt-3">Einstellungen in <code>config.ini</code> → <code>[channelTest]</code>.</p>
+<p class="small text-muted mt-3 mb-0">
+  Gespeichert in <code>config.ini</code> → <code>[channelTest]</code>
+  (<code>channels</code>, <code>modes</code>).
+</p>
+<script>
+(function () {{
+  function syncRow(row) {{
+    var sel = row.querySelector(".ct-mode");
+    var picker = row.querySelector(".ct-emoji-picker");
+    if (!sel || !picker) return;
+    if (sel.value === "react") picker.classList.remove("is-hidden");
+    else picker.classList.add("is-hidden");
+  }}
+  document.querySelectorAll(".ct-channel-row").forEach(function (row) {{
+    syncRow(row);
+    var sel = row.querySelector(".ct-mode");
+    if (sel) sel.addEventListener("change", function () {{ syncRow(row); }});
+    row.querySelectorAll(".ct-emoji-btn input").forEach(function (inp) {{
+      inp.addEventListener("change", function () {{
+        row.querySelectorAll(".ct-emoji-btn").forEach(function (b) {{
+          b.classList.toggle("is-active", b.querySelector("input") === inp);
+        }});
+      }});
+    }});
+  }});
+}})();
+</script>
 """
 
 

@@ -2043,6 +2043,48 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
         mark_interface_for_retry(nodeInt, f"send_message failed: {e}")
         return False
 
+
+def send_emoji_reaction(emoji: str, channel: int, reply_to_id, nodeInt: int = 1) -> bool:
+    """Send a Meshtastic tapback/reaction on a channel message (emoji + reply_id)."""
+    import modules.settings as st
+
+    interface = globals().get(f"interface{nodeInt}")
+    if interface is None:
+        logger.error(f"System: send_emoji_reaction — interface{nodeInt} missing")
+        return False
+    try:
+        rid = int(reply_to_id)
+    except (TypeError, ValueError):
+        logger.warning(f"System: send_emoji_reaction — invalid reply_to_id={reply_to_id!r}")
+        return False
+    text = (emoji or getattr(st, "CHANNEL_TEST_DEFAULT_EMOJI", "👍") or "👍").strip()
+    if not text:
+        text = "👍"
+    try:
+        from meshtastic import mesh_pb2
+        from meshtastic import portnums_pb2
+
+        mesh_packet = mesh_pb2.MeshPacket()
+        mesh_packet.channel = int(channel)
+        mesh_packet.decoded.payload = text.encode("utf-8")
+        mesh_packet.decoded.portnum = portnums_pb2.PortNum.TEXT_MESSAGE_APP
+        mesh_packet.decoded.reply_id = rid
+        mesh_packet.decoded.emoji = 1
+        mesh_packet.id = interface._generatePacketId()
+        interface._sendPacket(mesh_packet, "^all", wantAck=False)
+        logger.info(
+            f"Device:{nodeInt} {format_channel_log(channel, nodeInt)} "
+            f"SendingReaction: {CustomFormatter.white}{text} "
+            f"{CustomFormatter.purple}replyId:{CustomFormatter.white}{rid}"
+        )
+        time.sleep(responseDelay)
+        return True
+    except Exception as e:
+        logger.error(f"System: send_emoji_reaction failed: {e}")
+        mark_interface_for_retry(nodeInt, f"send_emoji_reaction failed: {e}")
+        return False
+
+
 def send_raw_bytes(nodeid, raw_bytes, nodeInt=1, channel=0, portnum=256, want_ack=True, reply_id=None):
     # Send raw bytes to a node using the Meshtastic interface.
     interface = globals()[f'interface{nodeInt}']
