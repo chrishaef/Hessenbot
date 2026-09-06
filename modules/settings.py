@@ -662,7 +662,7 @@ except Exception as e:
 
 
 CHANNEL_TEST_DEFAULT_EMOJI = "👍"
-CHANNEL_TEST_EMOJI_CHOICES = ("👍", "❤️", "😂", "🎉", "✅", "👋", "🔥", "🙏")
+CHANNEL_TEST_EMOJI_CHOICES = ("👍", "✅")
 
 
 def parse_channel_test_modes(raw: str) -> dict:

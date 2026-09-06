@@ -2044,6 +2044,31 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
         return False
 
 
+def hop_count_emoji(hops) -> str:
+    """Meshtastic-style keycap digit for hop count (0–9, clamped)."""
+    keycaps = (
+        "0️⃣",
+        "1️⃣",
+        "2️⃣",
+        "3️⃣",
+        "4️⃣",
+        "5️⃣",
+        "6️⃣",
+        "7️⃣",
+        "8️⃣",
+        "9️⃣",
+    )
+    try:
+        n = int(hops)
+    except (TypeError, ValueError):
+        n = 0
+    if n < 0:
+        n = 0
+    if n > 9:
+        n = 9
+    return keycaps[n]
+
+
 def send_emoji_reaction(emoji: str, channel: int, reply_to_id, nodeInt: int = 1) -> bool:
     """Send a Meshtastic tapback/reaction on a channel message (emoji + reply_id)."""
     import modules.settings as st

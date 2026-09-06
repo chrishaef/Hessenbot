@@ -1686,6 +1686,13 @@ def onReceive(packet, interface):
                                 packet_id,
                                 rxNode,
                             )
+                            # Zweite Reaction: Hop-Anzahl als Ziffern-Emoji (0–9)
+                            send_emoji_reaction(
+                                hop_count_emoji(hop_count),
+                                channel_number,
+                                packet_id,
+                                rxNode,
+                            )
                         else:
                             _test_resp = handle_ping(
                                 message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number

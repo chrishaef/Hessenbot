@@ -1099,11 +1099,17 @@ def build_channel_test_html(
         channel_block = (
             '<div class="ct-channel-list mb-3">' + "".join(channel_rows) + "</div>"
         )
+        manual_block = ""
     else:
         channel_block = (
-            '<p class="small text-muted mb-3">Keine Kanäle vom Radio gelesen — '
-            "unten Nummern manuell eintragen, speichern, Seite neu laden.</p>"
+            '<p class="small text-muted mb-2">Keine Kanäle vom Radio gelesen. '
+            "Nummern manuell eintragen, speichern, Seite neu laden.</p>"
         )
+        manual_block = """
+  <label class="form-label" for="ctManual">Kanal-Nummern (kommagetrennt)</label>
+  <input type="text" name="channels_manual" id="ctManual" class="form-control mb-3"
+         value="" placeholder="z. B. 0,1,2">
+"""
 
     return f"""
 <div class="section-card mb-3">
@@ -1111,7 +1117,8 @@ def build_channel_test_html(
   <p class="small text-muted mb-0">
     Auf <code>test</code> / <code>Test</code> (ohne <code>!</code>) im gewählten Kanal antworten.
     <strong>Lange Testnachricht</strong> = wie <code>!test</code>.
-    <strong>Reaction</strong> = nur ein Emoji auf die Originalnachricht (weniger Airtime).
+    <strong>Reaction</strong> = gewähltes Emoji (👍 oder ✅) plus Hop-Anzahl als Ziffern-Emoji
+    auf die Originalnachricht (weniger Airtime).
     Andere Befehle bleiben unverändert (DM / <code>!</code>).
   </p>
 </div>
@@ -1122,9 +1129,7 @@ def build_channel_test_html(
   </div>
   <h3 class="h6 text-uppercase text-muted mb-3">Kanäle</h3>
   {channel_block}
-  <label class="form-label" for="ctManual">Weitere Kanal-Nummern (optional)</label>
-  <input type="text" name="channels_manual" id="ctManual" class="form-control mb-3"
-         value="" placeholder="z. B. 4,5 — nach Speichern erscheinen sie oben">
+  {manual_block}
   <button type="submit" class="btn btn-success">Speichern</button>
 </form>
 <p class="small text-muted mt-3 mb-0">
