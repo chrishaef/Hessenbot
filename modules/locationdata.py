@@ -266,9 +266,20 @@ def where_am_i(lat=0, lon=0, short=False, zip=False, redacted=False):
     # initialize Nominatim API
     geolocator = Nominatim(user_agent="mesh-bot")
 
-    # Config lat/lon is bot-self only — not used as node stand-in anymore.
+    # Bot-Config-Koordinaten: nie Straße/Hausnummer preisgeben (auch nach Rundung auf 2 Dezimalstellen).
     use_redacted = bool(redacted)
-    
+    if not use_redacted:
+        try:
+            lat_f, lon_f = float(lat), float(lon)
+            cfg_lat = float(my_settings.latitudeValue)
+            cfg_lon = float(my_settings.longitudeValue)
+            if (lat_f == cfg_lat and lon_f == cfg_lon) or (
+                lat_f == round(cfg_lat, 2) and lon_f == round(cfg_lon, 2)
+            ):
+                use_redacted = True
+        except (TypeError, ValueError):
+            pass
+
     try:
         # Nomatim API call to get address
         if short:
