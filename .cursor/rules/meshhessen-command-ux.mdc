@@ -1,0 +1,15 @@
+---
+description: Meshhessen command wiring, channel/DM UX, and location response rules
+globs:
+  - mesh_bot.py
+  - modules/**/*.py
+---
+
+# Meshhessen Command & Mesh UX
+
+- New commands: wire Handler → `auto_response` → `trap_list` (+ help) → optional config flag; follow `modules/adding_more.md`.
+- User-facing strings in German (`locale_de.py` / existing DE copy). Code and logs may stay English (`logger` with `System:` prefix is common).
+- Channels: typically require `!` (`cmdBang`). DMs: bare command as first word is OK. Respect `ignoreDefaultChannel` and `respond_by_dm_only`.
+- Location chain: args (place / coords / Maidenhead) → fresh NodeDB/map → position request → timeout hint — **never** use bot `[location]` as the user’s position.
+- Keep replies short; chunk via `send_message` / `MESSAGE_CHUNK_SIZE` (~200-character budget).
+- Do not bypass or “simplify” MQTT/UDP dedup or hop enrichment (`packet_dedup`) without a clear reason.
