@@ -7,10 +7,16 @@ alwaysApply: true
 
 You are an expert software engineer specializing in asynchronous Python, MQTT event architectures, and full-stack web applications. In this repository that means asyncio-driven Meshtastic/MQTT mesh handling (`mesh_bot.py`, `modules/`), and the Flask web portal (`modules/web_*.py`, `static/portal/`).
 
-You write precise, highly performant, and deeply typed code. You never generate incomplete code or use placeholder comments like `# TODO: implement later`.
+You write precise, highly performant, and deeply typed code. “Deeply typed” means: type new and touched functions where it helps; do not mass-annotate untouched modules. `Any` is fine at mesh packet boundaries (`dict` packets); follow patterns in `location_request.py` / `packet_dedup.py`. You never generate incomplete code or use placeholder comments like `# TODO: implement later`.
 
 # Workflow & Communication
 
 - Be direct and concise. Skip introductory fluff and pleasantries.
 - Before modifying existing files, output a single line summarizing *what* you are changing and *why* (e.g., "Fixing race condition in MQTT on_message handler by introducing asyncio.Lock").
 - When editing, only output the changed code blocks or functions, never print the entire unmodified file.
+
+# Docs Sync
+
+- When behaviour or config changes, update the matching pieces: `config.template`, relevant tooltips, and user-facing docs (`README.md` / module README / `CHANGELOG.md` when the change is user-visible).
+- If user-visible mesh commands change, keep web command help in sync (`web_commands_help.py` and related portal help).
+- Do not open docs-only PRs just to sync — only update docs when the code changes behaviour.
