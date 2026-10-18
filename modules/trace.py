@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import google.protobuf.json_format
+from google.protobuf.message import DecodeError
 from meshtastic import mesh_pb2, portnums_pb2
 
 from modules.log import logger
@@ -26,6 +28,23 @@ _UNK_SNR = -128
 _TRACE_HOP_LIMIT = 7
 _TRACE_INTERFACE_COOLDOWN_S = 65.0
 _TRACE_RESULT_MIN_GAP_S = 5.0  # min seconds after job start before result DM (after ack)
+
+# ROUTING_APP NAK reasons we map to short DE hints (unknown → raw reason).
+_ROUTING_ERROR_HINTS: Dict[str, str] = {
+    "NO_ROUTE": "keine Route",
+    "TIMEOUT": "Zeitüberschreitung",
+    "MAX_RETRANSMIT": "MAX_RETRANSMIT",
+    "NO_RESPONSE": "keine Antwort",
+    "NO_CHANNEL": "Kanal unbekannt/ohne Key",
+    "NO_INTERFACE": "kein Interface",
+    "GOT_NAK": "NAK",
+    "TOO_LARGE": "Paket zu groß",
+    "DUTY_CYCLE_LIMIT": "Duty-Cycle",
+    "RATE_LIMIT_EXCEEDED": "Rate-Limit",
+    "PKI_FAILED": "PKI fehlgeschlagen",
+    "PKI_UNKNOWN_PUBKEY": "unbekannter Public Key",
+    "NOT_AUTHORIZED": "nicht autorisiert",
+}
 
 
 @dataclass(frozen=True)
@@ -75,6 +94,77 @@ def _local_node_num(node_int: int) -> int | None:
         return None
 
 
+def _coerce_payload_bytes(value: Any) -> Optional[bytes]:
+    """Normalize decoded.payload to bytes (library may leave base64 str)."""
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return b""
+        try:
+            return base64.b64decode(s, validate=True)
+        except Exception:
+            return None
+    return None
+
+
+def _routing_error_reason(decoded: Dict[str, Any]) -> Optional[str]:
+    """Return non-NONE ROUTING errorReason, or None if not a routing NAK."""
+    routing = decoded.get("routing")
+    if not isinstance(routing, dict):
+        return None
+    reason = routing.get("errorReason") or routing.get("error_reason")
+    if reason is None or str(reason) in ("", "NONE", "0"):
+        return None
+    return str(reason)
+
+
+def _is_routing_app(decoded: Dict[str, Any]) -> bool:
+    return str(decoded.get("portnum") or "") == "ROUTING_APP"
+
+
+def _format_routing_failure(dest_label: str, reason: str) -> str:
+    hint = _ROUTING_ERROR_HINTS.get(reason, reason)
+    return f"Trace zu {dest_label}: Routing-Fehler ({hint})."
+
+
+def _route_discovery_dict(
+    packet: dict,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Extract RouteDiscovery as a MessageToDict-style dict.
+
+    Prefers the library-decoded ``decoded.traceroute`` map (avoids re-parse).
+    Falls back to ParseFromString on payload bytes.
+
+    Returns (as_dict, error_code). error_code is set on failure:
+    empty | decode | missing
+    """
+    decoded = packet.get("decoded") if isinstance(packet.get("decoded"), dict) else {}
+    pre = decoded.get("traceroute")
+    if isinstance(pre, dict):
+        # Drop non-JSON ``raw`` protobuf object from meshtastic handler.
+        return {k: v for k, v in pre.items() if k != "raw"}, None
+
+    payload = _coerce_payload_bytes(decoded.get("payload"))
+    if payload is None:
+        return None, "missing"
+    if not payload:
+        return None, "empty"
+
+    route_discovery = mesh_pb2.RouteDiscovery()
+    try:
+        route_discovery.ParseFromString(payload)
+    except DecodeError:
+        return None, "decode"
+
+    as_dict = google.protobuf.json_format.MessageToDict(route_discovery)
+    return as_dict, None
+
+
 def _trace_reached_dest(
     packet: dict,
     dest_id: int,
@@ -100,32 +190,55 @@ def _trace_reached_dest(
 
 
 def format_traceroute_packet(packet: dict, node_int: int, dest_id: int) -> str:
-    """Format a TRACEROUTE_APP response packet for mesh DM."""
+    """Format a TRACEROUTE_APP (or ROUTING_APP NAK) response packet for mesh DM."""
     if not packet:
         return "Trace: keine Antwort vom Netz."
 
-    payload = (packet.get("decoded") or {}).get("payload")
-    if not payload:
-        return "Trace: leere Antwort."
-
-    route_discovery = mesh_pb2.RouteDiscovery()
-    route_discovery.ParseFromString(payload)
-    as_dict = google.protobuf.json_format.MessageToDict(route_discovery)
-
     dest_label = _node_label(dest_id, node_int)
-    dest_s = int(dest_id)
-    my_num = _local_node_num(node_int)
+    decoded = packet.get("decoded") if isinstance(packet.get("decoded"), dict) else {}
+
+    # wantResponse NAKs/ACKs arrive as ROUTING_APP; never parse those as RouteDiscovery
+    # (nested route_request wire bytes → DecodeError on RouteDiscovery).
+    if _is_routing_app(decoded):
+        routing_reason = _routing_error_reason(decoded)
+        if routing_reason is not None:
+            logger.info(
+                f"Trace: routing error dest={dest_label} reason={routing_reason} "
+                f"from={packet.get('from')} to={packet.get('to')}"
+            )
+            return _format_routing_failure(dest_label, routing_reason)
+        return (
+            f"Trace zu {dest_label}: Ziel nicht erreicht "
+            "(Routing-ACK ohne Route — ggf. zu weit, offline oder MAX_RETRANSMIT)."
+        )
+
+    as_dict, err = _route_discovery_dict(packet)
+    if err == "empty":
+        return "Trace: leere Antwort."
+    if err == "missing":
+        return "Trace: leere Antwort."
+    if err == "decode" or as_dict is None:
+        logger.info(
+            f"Trace: RouteDiscovery decode failed dest={dest_label} "
+            f"portnum={decoded.get('portnum')} "
+            f"payload_type={type(decoded.get('payload')).__name__}"
+        )
+        return (
+            f"Trace zu {dest_label}: Antwort unlesbar "
+            "(Protokoll/Firmware — bitte meshtastic-Lib und Node-FW prüfen)."
+        )
 
     pkt_to = packet.get("to")
     pkt_from = packet.get("from")
+    my_num = _local_node_num(node_int)
 
     route = as_dict.get("route") or []
-    snr_towards = as_dict.get("snrTowards") or []
+    snr_towards = as_dict.get("snrTowards") or as_dict.get("snr_towards") or []
     len_towards = len(route)
     snr_t_valid = len(snr_towards) == len_towards + 1
 
-    route_back = as_dict.get("routeBack") or []
-    snr_back = as_dict.get("snrBack") or []
+    route_back = as_dict.get("routeBack") or as_dict.get("route_back") or []
+    snr_back = as_dict.get("snrBack") or as_dict.get("snr_back") or []
     len_back = len(route_back)
 
     if not _trace_reached_dest(packet, dest_id, route, route_back, node_int):
@@ -243,13 +356,26 @@ def _run_trace_job(job: _TraceJob) -> None:
     import modules.settings as st
 
     job_started = time.monotonic()
+    dest_label = _node_label(job.dest_id, job.node_int)
     try:
         result = run_traceroute(job.dest_id, job.node_int, job.channel)
+    except DecodeError as e:
+        # Should be handled in format_traceroute_packet; keep a clear DE fallback.
+        logger.debug(f"Trace: DecodeError dest={job.dest_id} requester={job.requester_id}: {e}")
+        result = (
+            f"Trace zu {dest_label}: Antwort unlesbar "
+            "(Protokoll/Firmware — bitte meshtastic-Lib und Node-FW prüfen)."
+        )
     except Exception as e:
         logger.debug(f"Trace: failed dest={job.dest_id} requester={job.requester_id}: {e}")
         err = str(e).strip()
         if "Timed out" in err or "timeout" in err.lower():
-            result = f"Trace zu {_node_label(job.dest_id, job.node_int)}: Zeitüberschreitung (keine Antwort)."
+            result = f"Trace zu {dest_label}: Zeitüberschreitung (keine Antwort)."
+        elif "RouteDiscovery" in err or "Wire format was corrupt" in err:
+            result = (
+                f"Trace zu {dest_label}: Antwort unlesbar "
+                "(Protokoll/Firmware — bitte meshtastic-Lib und Node-FW prüfen)."
+            )
         else:
             result = f"Trace fehlgeschlagen: {err[:120]}"
     min_gap = max(

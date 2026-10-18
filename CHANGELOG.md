@@ -20,6 +20,7 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Fixed
 
+- **`!trace`**: ROUTING_APP-NAKs (z. B. mit `route_request`) nicht mehr als `RouteDiscovery` parsen — verhindert `Trace fehlgeschlagen: Error parsing message with type 'meshtastic.protobuf.RouteDiscovery'`; klarere DE-Hinweise bei Routing-Fehler / unlesbarer Antwort
 - DM: `!ping` und `ping` beide gültig (`messageTrap` strippt optionales `!`)
 - Diverse Admin-/Dashboard- und Hop-/MQTT-Korrekturen (siehe Commits seit 1.1.0)
 
