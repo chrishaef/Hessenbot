@@ -2581,7 +2581,7 @@ def build_blitzwatch_public_html(
     <div class="col-8">
       <label class="form-label" for="bwCode">Code</label>
       <input class="form-control form-control-lg text-center font-monospace bw-pin-input"
-             id="bwCode" name="code" inputmode="numeric" pattern="[0-9]{5}"
+             id="bwCode" name="code" inputmode="numeric" pattern="[0-9]{{5}}"
              maxlength="5" minlength="5" autocomplete="one-time-code" required
              placeholder="•••••">
     </div>

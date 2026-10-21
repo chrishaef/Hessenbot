@@ -287,6 +287,20 @@ class TestBlitzwatch(unittest.TestCase):
             )
             self.assertIn("Blitzwatch-Code:", out_set)
 
+    def test_public_html_pin_pattern_not_fstring_eaten(self):
+        """f-string must emit pattern=\"[0-9]{5}\", not pattern=\"[0-9]5\"."""
+        from modules import admin_web_ops as ops
+
+        with patch(
+            "modules.web_commands_help.render_blitzwatch_guide",
+            return_value="",
+        ):
+            html = ops.build_blitzwatch_public_html(
+                node_id=None, global_on=True, location_on=True
+            )
+        self.assertIn('pattern="[0-9]{5}"', html)
+        self.assertNotIn('pattern="[0-9]5"', html)
+
 
 if __name__ == "__main__":
     unittest.main()
