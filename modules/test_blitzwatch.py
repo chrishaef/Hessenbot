@@ -212,6 +212,45 @@ class TestBlitzwatch(unittest.TestCase):
                 self.assertEqual(home["radius_km"], 6)
                 self.assertEqual(home["label"], "Relais")
 
+    def test_collect_candidates_survives_nodes_dict_mutation(self):
+        """iface.nodes may grow mid-cycle (MQTT); must not raise RuntimeError."""
+        self.bw.set_home_fixed(55, 50.0, 8.0, "Relais", radius_km=6)
+        nodes = {"x": {"num": 55}}
+        fake_iface = types.SimpleNamespace(nodes=nodes)
+
+        fake_system = types.ModuleType("modules.system")
+        fake_system._nodedb_fresh_position = lambda *a, **k: None
+        fake_system.get_name_from_number = lambda *a, **k: "N55"
+        fake_system.interface1_enabled = True
+        fake_system.interface1 = fake_iface
+        fake_system.myNodeNum1 = 1
+        for i in range(2, 10):
+            setattr(fake_system, f"interface{i}_enabled", False)
+            setattr(fake_system, f"myNodeNum{i}", None)
+
+        real_get = self.bw.get_node_prefs
+        mutate_n = {"n": 0}
+
+        def get_prefs_mutating(nid):
+            # Concurrent mesh update: new node appears while we iterate.
+            mutate_n["n"] += 1
+            nodes[f"extra-{mutate_n['n']}"] = {"num": 9000 + mutate_n["n"]}
+            return real_get(nid)
+
+        with patch.dict(sys.modules, {"modules.system": fake_system}):
+            with patch.object(self.bw, "get_node_prefs", side_effect=get_prefs_mutating):
+                import modules.system as sysmod
+
+                sysmod.interface1_enabled = True
+                sysmod.interface1 = fake_iface
+                for i in range(2, 10):
+                    setattr(sysmod, f"interface{i}_enabled", False)
+                    setattr(sysmod, f"myNodeNum{i}", None)
+                sysmod.myNodeNum1 = 1
+                cands = self.bw._collect_watch_candidates(1)
+        self.assertTrue(any(c["node_id"] == 55 for c in cands))
+        self.assertGreater(mutate_n["n"], 0)
+
     def test_channel_meta_cooldown(self):
         self.bw.set_meta(self.bw.META_CHANNEL_TS, "100.0")
         self.assertEqual(self.bw.get_meta(self.bw.META_CHANNEL_TS), "100.0")
