@@ -969,7 +969,11 @@ def _collect_watch_candidates(deviceID: int) -> list[dict[str, Any]]:
             continue
         iface = sysmod.__dict__.get(f"interface{i}")
         nodes = getattr(iface, "nodes", None) or {}
-        for node in nodes.values():
+        # Snapshot: Meshtastic may mutate iface.nodes while we walk it
+        # (RuntimeError: dictionary changed size during iteration).
+        for node in list(nodes.values()) if isinstance(nodes, dict) else list(nodes):
+            if not isinstance(node, dict):
+                continue
             num = node.get("num")
             if num is None:
                 continue
