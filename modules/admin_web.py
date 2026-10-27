@@ -3,7 +3,6 @@
 # Started in a background thread when [webAdmin] enabled in config.ini.
 
 import glob
-import hmac
 import json
 import os
 import secrets
@@ -110,7 +109,6 @@ def create_app(
     admin_username: str,
     admin_password: str,
     secret_key: str,
-    api_token: str = "",
 ):
     app = Flask(
         __name__,
@@ -1046,41 +1044,83 @@ def create_app(
         return jsonify({"nodes": nodes, "error": err})
 
     # ── Service-API (Token statt Browser-Login): DM-Versand für externe Dienste ──
-    # z. B. MQTT-Webadmin Watchcat. Aktiv nur mit [webAdmin] api_token bzw.
-    # Env HESSENBOT_API_TOKEN; ohne Token antwortet die API mit 503.
-    def _api_token_ok() -> bool:
-        if not api_token:
-            return False
-        auth = request.headers.get("Authorization", "")
-        supplied = auth[7:].strip() if auth.startswith("Bearer ") else ""
-        if not supplied:
-            supplied = (request.headers.get("X-Api-Token") or "").strip()
-        return bool(supplied) and hmac.compare_digest(supplied, api_token)
+    # Verwaltung: Admin-Tab „API“. Auth über modules.service_api (Hash / Env).
+    def _service_api_client_ip() -> str:
+        return (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
 
-    def _api_auth_error():
-        if not api_token:
-            return jsonify({"ok": False, "error": "api_disabled"}), 503
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    def _service_api_authorize():
+        """Returns (service_api_module, None) or (None, (response, status, error_code))."""
+        from modules import service_api as sapi
+
+        if not sapi.is_active():
+            body, code = sapi.auth_error_payload()
+            return None, (jsonify(body), code, body.get("error", "api_disabled"))
+        supplied = sapi.extract_bearer_or_header(
+            request.headers.get("Authorization", ""),
+            request.headers.get("X-Api-Token") or "",
+        )
+        if not sapi.verify_token(supplied):
+            body, code = sapi.auth_error_payload()
+            return None, (jsonify(body), code, body.get("error", "unauthorized"))
+        return sapi, None
 
     @app.route("/api/v1/dm", methods=["POST"])
     @limiter.limit("30 per minute")
     def api_v1_dm():
-        if not _api_token_ok():
-            return _api_auth_error()
+        from modules import service_api as sapi
+
+        sapi_mod, err = _service_api_authorize()
+        client_ip = _service_api_client_ip()
+        if err is not None:
+            resp, code, err_code = err
+            sapi.log_request(
+                endpoint="/api/v1/dm",
+                method="POST",
+                status=code,
+                client_ip=client_ip,
+                error=err_code,
+            )
+            return resp, code
 
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="json_body_required",
+            )
             return jsonify({"ok": False, "error": "json_body_required"}), 400
         dest_raw = str(data.get("node_id") or "").strip()
         text = str(data.get("text") or "").strip()
         if not dest_raw:
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="node_id_required",
+            )
             return jsonify({"ok": False, "error": "node_id_required"}), 400
         if not text:
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="text_required",
+            )
             return jsonify({"ok": False, "error": "text_required"}), 400
+        if len(text) > sapi_mod.max_text_len():
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="text_too_long",
+            )
+            return jsonify({
+                "ok": False,
+                "error": "text_too_long",
+                "message": f"Maximal {sapi_mod.max_text_len()} Zeichen.",
+            }), 400
         try:
             interface = int(data["interface"]) if data.get("interface") is not None else None
             channel = int(data["channel"]) if data.get("channel") is not None else None
         except (TypeError, ValueError):
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="invalid_channel_or_interface",
+            )
             return jsonify({"ok": False, "error": "invalid_channel_or_interface"}), 400
 
         # Mesh-Stack erst nach kompletter Validierung laden (schwerer Import)
@@ -1093,6 +1133,10 @@ def create_app(
 
         dest_node, resolve_err = chat.resolve_dest_node(dest_raw, interface)
         if resolve_err or not dest_node:
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="dest_not_resolved", detail=dest_raw[:40],
+            )
             return (
                 jsonify({
                     "ok": False,
@@ -1108,21 +1152,45 @@ def create_app(
             interface=interface,
             dest_node=dest_node,
         )
+        dest_id = f"!{dest_node:08x}"
+        status = 200 if ok else 502
+        sapi_mod.log_request(
+            endpoint="/api/v1/dm",
+            method="POST",
+            status=status,
+            client_ip=client_ip,
+            error="" if ok else "send_failed",
+            dest_node_id=dest_id,
+            detail=(msg or "")[:80],
+        )
         return (
             jsonify({
                 "ok": ok,
                 "message": msg,
                 "dest_node": dest_node,
-                "dest_node_id": f"!{dest_node:08x}",
+                "dest_node_id": dest_id,
             }),
-            200 if ok else 502,
+            status,
         )
 
     @app.route("/api/v1/whoami")
     @limiter.limit("30 per minute")
     def api_v1_whoami():
-        if not _api_token_ok():
-            return _api_auth_error()
+        from modules import service_api as sapi
+
+        sapi_mod, err = _service_api_authorize()
+        client_ip = _service_api_client_ip()
+        if err is not None:
+            resp, code, err_code = err
+            sapi.log_request(
+                endpoint="/api/v1/whoami",
+                method="GET",
+                status=code,
+                client_ip=client_ip,
+                error=err_code,
+            )
+            return resp, code
+
         import modules.system as sm
         from modules import admin_web_ops as ops
 
@@ -1133,7 +1201,193 @@ def create_app(
             if not isinstance(num, int) or num in (0, 777):
                 continue
             radios.append({"interface": i, "node_num": num, "node_id": f"!{num:08x}"})
+        sapi_mod.log_request(
+            endpoint="/api/v1/whoami",
+            method="GET",
+            status=200,
+            client_ip=client_ip,
+            detail=f"{len(radios)} radios",
+        )
         return jsonify({"ok": True, "radios": radios})
+
+    @app.route("/admin/api", methods=["GET", "POST"])
+    @login_required
+    def service_api_admin():
+        from modules import service_api as sapi
+
+        once_token = session.pop("api_token_once", None)
+
+        if request.method == "POST":
+            action = (request.form.get("action") or "").strip()
+            if action == "enable":
+                sapi.set_enabled(True)
+                flash("Service-API eingeschaltet.", "success")
+            elif action == "disable":
+                sapi.set_enabled(False)
+                flash("Service-API ausgeschaltet.", "success")
+            elif action == "generate":
+                plain = sapi.generate_token()
+                session["api_token_once"] = plain
+                if not sapi.is_enabled():
+                    sapi.set_enabled(True)
+                flash(
+                    "Neuer API-Key erzeugt. Kopiere ihn jetzt — er wird nicht erneut angezeigt.",
+                    "success",
+                )
+                return redirect(url_for("service_api_admin"))
+            elif action == "revoke":
+                sapi.revoke_token()
+                flash("API-Key widerrufen. Die API ist ohne Key nicht nutzbar.", "success")
+            elif action == "clear_logs":
+                n = sapi.clear_memory_logs()
+                flash(f"Anzeige-Log geleert ({n} Einträge). Datei logs/service_api.log bleibt erhalten.", "success")
+            else:
+                flash("Unbekannte Aktion.", "error")
+            return redirect(url_for("service_api_admin"))
+
+        st = sapi.status_snapshot()
+        logs = sapi.recent_logs(80)
+
+        status_cls = "alert-success" if st["active"] else "alert-warning"
+        if st["active"]:
+            status_txt = "aktiv — Anfragen mit gültigem Token werden angenommen"
+        elif st["enabled"] and not st["has_token"]:
+            status_txt = "eingeschaltet, aber kein Token — bitte Key erzeugen oder Env setzen"
+        elif not st["enabled"] and st["has_token"]:
+            status_txt = "Token vorhanden, API ausgeschaltet"
+        else:
+            status_txt = "deaktiviert"
+
+        once_block = ""
+        if once_token:
+            esc = html_escape(once_token)
+            once_block = f"""
+<div class="alert alert-danger" role="alert">
+  <strong>Neuer API-Key (nur jetzt sichtbar):</strong>
+  <div class="input-group mt-2">
+    <input type="text" class="form-control font-monospace" id="api-token-once" readonly value="{esc}">
+    <button type="button" class="btn btn-outline-light" id="api-token-copy">Kopieren</button>
+  </div>
+  <p class="small mb-0 mt-2">Speichere den Key im MQTT-Webadmin / Client. Nach dem Verlassen dieser Seite ist er nicht mehr abrufbar.</p>
+</div>
+<script>
+(function () {{
+  var btn = document.getElementById("api-token-copy");
+  var inp = document.getElementById("api-token-once");
+  if (btn && inp) btn.addEventListener("click", function () {{
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(inp.value);
+    }} else {{ inp.select(); document.execCommand("copy"); }}
+    btn.textContent = "Kopiert";
+  }});
+}})();
+</script>
+"""
+
+        src = html_escape(st["token_source"])
+        fp = html_escape(st["token_fingerprint"] or "—")
+        env_note = (
+            '<p class="small text-warning mb-2"><strong>Env-Override aktiv:</strong> '
+            "<code>HESSENBOT_API_TOKEN</code> hat Vorrang vor dem Config-Hash. "
+            "„Key erzeugen“ schreibt weiterhin den Hash, Auth nutzt aber das Env.</p>"
+            if st["env_override"]
+            else ""
+        )
+
+        log_rows = []
+        for e in logs:
+            log_rows.append(
+                "<tr>"
+                f"<td class=\"small text-nowrap\">{html_escape(str(e.get('ts', '')))}</td>"
+                f"<td><code>{html_escape(str(e.get('method', '')))}</code> "
+                f"{html_escape(str(e.get('endpoint', '')))}</td>"
+                f"<td>{html_escape(str(e.get('status', '')))}</td>"
+                f"<td class=\"small\">{html_escape(str(e.get('ip', '')))}</td>"
+                f"<td class=\"small\"><code>{html_escape(str(e.get('dest', '') or '—'))}</code></td>"
+                f"<td class=\"small\">{html_escape(str(e.get('error') or e.get('detail') or '—'))}</td>"
+                "</tr>"
+            )
+        if not log_rows:
+            log_rows.append(
+                '<tr><td colspan="6" class="text-muted small">Noch keine API-Anfragen in dieser Laufzeit.</td></tr>'
+            )
+
+        enable_btn = (
+            '<button type="submit" name="action" value="disable" class="btn btn-outline-warning">'
+            "API ausschalten</button>"
+            if st["enabled"]
+            else '<button type="submit" name="action" value="enable" class="btn btn-success">'
+            "API einschalten</button>"
+        )
+
+        body = f"""
+{once_block}
+<p class="alert {status_cls}">Status: <strong>{html_escape(status_txt)}</strong>
+  · Token-Quelle: <code>{src}</code>
+  · Hash-Präfix: <code>{fp}</code></p>
+{env_note}
+
+<h2 class="h5 section-title">Steuerung</h2>
+<form method="post" class="d-flex flex-wrap gap-2 mb-3">
+  {enable_btn}
+  <button type="submit" name="action" value="generate" class="btn btn-primary"
+          onclick="return confirm('Neuen API-Key erzeugen? Der bisherige Config-Key wird ungültig.');">
+    Neuen API-Key erzeugen</button>
+  <button type="submit" name="action" value="revoke" class="btn btn-outline-danger"
+          onclick="return confirm('API-Key wirklich widerrufen?');">
+    Key widerrufen</button>
+</form>
+<p class="small text-muted">Der Klartext-Key wird nur einmal nach dem Erzeugen angezeigt.
+  In der Config liegt ausschließlich der SHA-256-Hash. Rate-Limit: {html_escape(st["rate_limit"])},
+  max. Textlänge: {st["max_text_len"]} Zeichen.</p>
+
+<h2 class="h5 section-title mt-4">Dokumentation</h2>
+<p class="small">Auth: Header <code>Authorization: Bearer &lt;token&gt;</code> oder
+  <code>X-Api-Token: &lt;token&gt;</code>. Ohne aktiven Token bzw. bei ausgeschalteter API:
+  <code>503 api_disabled</code>; falscher Token: <code>401 unauthorized</code>.</p>
+
+<h3 class="h6 mt-3">POST /api/v1/dm</h3>
+<pre class="small bg-dark text-light p-3 rounded">curl -sS -X POST "http://&lt;host&gt;:&lt;port&gt;/api/v1/dm" \\
+  -H "Authorization: Bearer YOUR_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"node_id":"!aabbccdd","text":"Hallo","channel":2,"interface":1}}'</pre>
+<p class="small"><code>node_id</code>: <code>!hex</code>, Dezimalnummer oder NodeDB-Name.
+  <code>channel</code>/<code>interface</code> optional (Defaults wie Admin-Chat).
+  Antwort <code>200</code>: <code>{{ok,message,dest_node,dest_node_id}}</code>;
+  Fehler u. a. <code>400</code> Validierung / <code>dest_not_resolved</code> / <code>text_too_long</code>,
+  <code>502</code> Sendefehler.</p>
+
+<h3 class="h6 mt-3">GET /api/v1/whoami</h3>
+<pre class="small bg-dark text-light p-3 rounded">curl -sS "http://&lt;host&gt;:&lt;port&gt;/api/v1/whoami" \\
+  -H "Authorization: Bearer YOUR_TOKEN"</pre>
+<p class="small">Liefert <code>{{ok,radios:[{{interface,node_num,node_id}}]}}</code>
+  (nicht initialisierte Interfaces / Platzhalter 777 werden gefiltert).</p>
+
+<p class="small text-muted">Sicherheit: Token geheim halten, Web-UI nur im LAN/VPN oder hinter Reverse-Proxy,
+  starken Admin-Login nutzen. Kein Delivery-Status-Endpunkt in v1 (ACK-Statistik bleibt bot-seitig).</p>
+
+<h2 class="h5 section-title mt-4">Request-Log</h2>
+<p class="small text-muted">Laufzeit-Puffer (max. 200) und Anhang in <code>logs/service_api.log</code>.
+  Tokens werden nicht geloggt.</p>
+<form method="post" class="mb-2">
+  <button type="submit" name="action" value="clear_logs" class="btn btn-sm btn-outline-secondary">
+    Anzeige leeren</button>
+</form>
+<div class="table-scroll">
+<table class="nodes-table table-dark table-bordered">
+<thead><tr><th>Zeit</th><th>Request</th><th>Status</th><th>IP</th><th>Ziel</th><th>Info</th></tr></thead>
+<tbody>{"".join(log_rows)}</tbody>
+</table>
+</div>
+"""
+        return _render_admin_template(
+            """
+  {{ body|safe }}
+""",
+            title="Service-API",
+            active_tab="api",
+            body=Markup(body),
+        )
 
     @app.route("/live/messages")
     @login_required
@@ -2730,9 +2984,15 @@ def start_admin_web_background():
         else _abs_path("logs")
     )
 
-    api_token = os.environ.get(
-        "HESSENBOT_API_TOKEN", getattr(my_settings, "web_admin_api_token", "") or ""
-    ).strip()
+    from modules import service_api as sapi
+
+    env_api = os.environ.get("HESSENBOT_API_TOKEN", "").strip()
+    sapi.configure(
+        enabled=bool(getattr(my_settings, "web_admin_api_enabled", False)),
+        token_hash=getattr(my_settings, "web_admin_api_token_hash", "") or "",
+        env_token=env_api,
+        log_dir=log_d,
+    )
 
     app = create_app(
         alert_path=alert_p,
@@ -2741,7 +3001,6 @@ def start_admin_web_background():
         admin_username=my_settings.web_admin_username,
         admin_password=pw,
         secret_key=sk,
-        api_token=api_token,
     )
 
     host = my_settings.web_admin_host
@@ -2760,5 +3019,12 @@ def start_admin_web_background():
     logger.info(
         f"Web UI listening on http://{host}:{port}/ (stats) and http://{host}:{port}/admin (login)"
     )
-    if api_token:
-        logger.info("Web admin: Service-API aktiv (POST /api/v1/dm, GET /api/v1/whoami)")
+    if sapi.is_active():
+        logger.info(
+            "Web admin: Service-API aktiv (POST /api/v1/dm, GET /api/v1/whoami) — Quelle=%s",
+            sapi.token_source(),
+        )
+    elif sapi.is_enabled():
+        logger.warning(
+            "Web admin: Service-API eingeschaltet, aber kein Token (Admin → API oder HESSENBOT_API_TOKEN)."
+        )

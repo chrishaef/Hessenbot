@@ -162,6 +162,8 @@ if 'webAdmin' not in config:
         'impressumPhone': '',
         'impressumExtra': '',
         'datenschutzExtra': '',
+        'api_enabled': 'False',
+        'api_token_hash': '',
         'api_token': '',
     }
     config.write(open(config_file, 'w'))
@@ -187,10 +189,13 @@ if 'webAdmin' in config:
     if _imp_added:
         config.write(open(config_file, 'w'))
 
-if 'webAdmin' in config and 'api_token' not in config['webAdmin']:
-    # Bestehende Installationen: Service-API-Feld (POST /api/v1/dm) nachziehen
-    config['webAdmin']['api_token'] = ''
-    config.write(open(config_file, 'w'))
+if 'webAdmin' in config:
+    # Service-API: Enable-Flag + Token-Hash; Legacy-Klartext einmalig migrieren
+    from modules.service_api import migrate_plaintext_token_if_needed
+
+    if migrate_plaintext_token_if_needed(config):
+        config.write(open(config_file, 'w'))
+
 
 if 'location' not in config:
     config['location'] = {'locations_db': 'data/locations.db', 'public_location_admin_manage': 'False', 'delete_public_locations_admins_only': 'False'}
@@ -619,8 +624,11 @@ try:
     web_admin_news_file = config['webAdmin'].get('news_file', '').strip()
     web_admin_log_dir = config['webAdmin'].get('log_dir', '').strip()
     web_admin_public_url = config['webAdmin'].get('publicUrl', '').strip()
-    # Service-API (POST /api/v1/dm, GET /api/v1/whoami): leerer Token = API deaktiviert
-    web_admin_api_token = os.environ.get('HESSENBOT_API_TOKEN', config['webAdmin'].get('api_token', '')).strip()
+    # Service-API: Schalter + SHA-256-Hash (Klartext nur einmal im Admin-Tab „API“).
+    # Env HESSENBOT_API_TOKEN (Klartext) überschreibt den Config-Hash zur Laufzeit.
+    web_admin_api_enabled = config['webAdmin'].getboolean('api_enabled', False)
+    web_admin_api_token_hash = config['webAdmin'].get('api_token_hash', '').strip().lower()
+    web_admin_api_token = os.environ.get('HESSENBOT_API_TOKEN', '').strip()  # nur Env; Config-Klartext ist deprecated
     web_admin_impressum_operator = config['webAdmin'].get('impressumOperator', '').strip()
     web_admin_impressum_address = config['webAdmin'].get('impressumAddress', '').strip()
     web_admin_impressum_email = config['webAdmin'].get('impressumEmail', '').strip()

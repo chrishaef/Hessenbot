@@ -89,6 +89,7 @@ FIELD_LABELS = {
     ("webAdmin", "impressumPhone"): "Impressum: Telefon (optional)",
     ("webAdmin", "impressumExtra"): "Impressum: Zusatztext (optional)",
     ("webAdmin", "datenschutzExtra"): "Datenschutz: Zusatztext (optional)",
+    ("webAdmin", "api_enabled"): "Service-API aktiv (besser im Tab „API“ steuern)",
     ("messagingSettings", "cmdRateLimitEnabled"): "Befehls-Rate-Limit aktiv",
     ("messagingSettings", "cmdRateLimitMax"): "Max. Befehle / Fenster",
     ("messagingSettings", "cmdRateLimitWindow"): "Rate-Limit-Fenster (Sekunden)",
@@ -106,6 +107,17 @@ PASSWORD_KEYS = frozenset(
         "n2yoAPIKey",
         "newsAPI_KEY",
         "secret_key",
+        "api_token",
+        "api_token_hash",
+    }
+)
+
+# Nur über Admin-Tab „API“ pflegen — nicht im generischen Einstellungsformular.
+SETTINGS_SKIP_KEYS = frozenset(
+    {
+        ("webAdmin", "api_token"),
+        ("webAdmin", "api_token_hash"),
+        ("webAdmin", "api_enabled"),
     }
 )
 
@@ -217,6 +229,8 @@ def build_settings_form_html(config) -> str:
         )
 
         for key in config[section]:
+            if (section, key) in SETTINGS_SKIP_KEYS:
+                continue
             raw = config[section][key]
             fname = field_name(section, key)
             label = html.escape(field_label(section, key))
@@ -276,6 +290,8 @@ def apply_form_to_config(config, form, *, config_file: str) -> None:
         if not parsed:
             continue
         section, key = parsed
+        if (section, key) in SETTINGS_SKIP_KEYS:
+            continue
         if section not in config:
             config[section] = {}
         if key in PASSWORD_KEYS and not (value or "").strip():
