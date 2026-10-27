@@ -554,3 +554,7 @@ impressumPhone =
 impressumExtra =
 # Optionaler Zusatztext für /datenschutz
 datenschutzExtra =
+# Service-API: Token für POST /api/v1/dm und GET /api/v1/whoami (DM-Versand durch
+# externe Dienste, z. B. MQTT-Webadmin Watchcat). Leer = Service-API deaktiviert.
+# Bevorzugt per Env HESSENBOT_API_TOKEN setzen statt hier im Klartext.
+api_token =

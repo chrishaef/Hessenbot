@@ -144,6 +144,7 @@ cp config.template config.ini
 | `/impressum` | Impressum (Angaben aus `[webAdmin]`) |
 | `/datenschutz` | Datenschutzhinweise |
 | `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Blitzwatch, Einstellungen, … |
+| `/api/v1/dm` | Service-API (Token): Text-DM an eine Node senden — für externe Dienste wie das MQTT-Webadmin (Watchcat) |
 
 **Öffentliches Dashboard:** Metriken, Aktivitätscharts, Leaderboard (24-Stunden-Ansicht), BBS, NodeDB — ohne interne Log-Warnungen/Fehler-Kacheln.
 
@@ -155,6 +156,7 @@ cp config.template config.ini
 - **Blitzwatch (Admin):** NodeDB-Liste mit Suche; Nutzer-Einstellungen (Home, Radius, Zusatzorte)
 - Einheitliche **Top-Navigation** (Statistik, Befehle, Blitzwatch, BBS, NodeDB, FAQ); Footer: Impressum · Datenschutz · GitHub
 - Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template)); optional `publicUrl`, Impressumsfelder
+- **Service-API** (optional): `POST /api/v1/dm` sendet eine Text-DM an eine Node (`{"node_id": "!aabbccdd", "text": "…"}`, optional `channel`/`interface`), `GET /api/v1/whoami` liefert die Bot-Node-IDs. Auth per `Authorization: Bearer <token>` (oder `X-Api-Token`); Token über `[webAdmin] api_token` bzw. Env `HESSENBOT_API_TOKEN` — leer = API aus (503). Lange Texte chunkt der Bot wie gewohnt; DM-Zustell-ACKs laufen über die bestehende DM-Statistik
 
 ### Kernfunktionen (aus meshing-around, beibehalten)
 

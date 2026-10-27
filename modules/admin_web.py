@@ -3,6 +3,7 @@
 # Started in a background thread when [webAdmin] enabled in config.ini.
 
 import glob
+import hmac
 import json
 import os
 import secrets
@@ -109,6 +110,7 @@ def create_app(
     admin_username: str,
     admin_password: str,
     secret_key: str,
+    api_token: str = "",
 ):
     app = Flask(
         __name__,
@@ -1042,6 +1044,96 @@ def create_app(
         iface = request.args.get("iface", chat.default_mesh_interface(), type=int)
         err, nodes = chat.list_send_targets(iface)
         return jsonify({"nodes": nodes, "error": err})
+
+    # ── Service-API (Token statt Browser-Login): DM-Versand für externe Dienste ──
+    # z. B. MQTT-Webadmin Watchcat. Aktiv nur mit [webAdmin] api_token bzw.
+    # Env HESSENBOT_API_TOKEN; ohne Token antwortet die API mit 503.
+    def _api_token_ok() -> bool:
+        if not api_token:
+            return False
+        auth = request.headers.get("Authorization", "")
+        supplied = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        if not supplied:
+            supplied = (request.headers.get("X-Api-Token") or "").strip()
+        return bool(supplied) and hmac.compare_digest(supplied, api_token)
+
+    def _api_auth_error():
+        if not api_token:
+            return jsonify({"ok": False, "error": "api_disabled"}), 503
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    @app.route("/api/v1/dm", methods=["POST"])
+    @limiter.limit("30 per minute")
+    def api_v1_dm():
+        if not _api_token_ok():
+            return _api_auth_error()
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "json_body_required"}), 400
+        dest_raw = str(data.get("node_id") or "").strip()
+        text = str(data.get("text") or "").strip()
+        if not dest_raw:
+            return jsonify({"ok": False, "error": "node_id_required"}), 400
+        if not text:
+            return jsonify({"ok": False, "error": "text_required"}), 400
+        try:
+            interface = int(data["interface"]) if data.get("interface") is not None else None
+            channel = int(data["channel"]) if data.get("channel") is not None else None
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "invalid_channel_or_interface"}), 400
+
+        # Mesh-Stack erst nach kompletter Validierung laden (schwerer Import)
+        from modules import admin_mesh_chat as chat
+
+        if interface is None:
+            interface = chat.default_mesh_interface()
+        if channel is None:
+            channel = chat.default_mesh_channel()
+
+        dest_node, resolve_err = chat.resolve_dest_node(dest_raw, interface)
+        if resolve_err or not dest_node:
+            return (
+                jsonify({
+                    "ok": False,
+                    "error": "dest_not_resolved",
+                    "message": resolve_err or "Empfänger unbekannt.",
+                }),
+                400,
+            )
+
+        ok, msg = chat.send_mesh_message(
+            text,
+            channel=channel,
+            interface=interface,
+            dest_node=dest_node,
+        )
+        return (
+            jsonify({
+                "ok": ok,
+                "message": msg,
+                "dest_node": dest_node,
+                "dest_node_id": f"!{dest_node:08x}",
+            }),
+            200 if ok else 502,
+        )
+
+    @app.route("/api/v1/whoami")
+    @limiter.limit("30 per minute")
+    def api_v1_whoami():
+        if not _api_token_ok():
+            return _api_auth_error()
+        import modules.system as sm
+        from modules import admin_web_ops as ops
+
+        radios = []
+        for i in ops.iter_radio_interfaces():
+            num = getattr(sm, f"myNodeNum{i}", None)
+            # 777 = Platzhalter aus system.py für nicht initialisierte Interfaces
+            if not isinstance(num, int) or num in (0, 777):
+                continue
+            radios.append({"interface": i, "node_num": num, "node_id": f"!{num:08x}"})
+        return jsonify({"ok": True, "radios": radios})
 
     @app.route("/live/messages")
     @login_required
@@ -2638,6 +2730,10 @@ def start_admin_web_background():
         else _abs_path("logs")
     )
 
+    api_token = os.environ.get(
+        "HESSENBOT_API_TOKEN", getattr(my_settings, "web_admin_api_token", "") or ""
+    ).strip()
+
     app = create_app(
         alert_path=alert_p,
         news_path=news_p,
@@ -2645,6 +2741,7 @@ def start_admin_web_background():
         admin_username=my_settings.web_admin_username,
         admin_password=pw,
         secret_key=sk,
+        api_token=api_token,
     )
 
     host = my_settings.web_admin_host
@@ -2663,3 +2760,5 @@ def start_admin_web_background():
     logger.info(
         f"Web UI listening on http://{host}:{port}/ (stats) and http://{host}:{port}/admin (login)"
     )
+    if api_token:
+        logger.info("Web admin: Service-API aktiv (POST /api/v1/dm, GET /api/v1/whoami)")

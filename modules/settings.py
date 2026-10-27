@@ -162,6 +162,7 @@ if 'webAdmin' not in config:
         'impressumPhone': '',
         'impressumExtra': '',
         'datenschutzExtra': '',
+        'api_token': '',
     }
     config.write(open(config_file, 'w'))
 elif 'publicUrl' not in config['webAdmin']:
@@ -185,6 +186,11 @@ if 'webAdmin' in config:
             _imp_added = True
     if _imp_added:
         config.write(open(config_file, 'w'))
+
+if 'webAdmin' in config and 'api_token' not in config['webAdmin']:
+    # Bestehende Installationen: Service-API-Feld (POST /api/v1/dm) nachziehen
+    config['webAdmin']['api_token'] = ''
+    config.write(open(config_file, 'w'))
 
 if 'location' not in config:
     config['location'] = {'locations_db': 'data/locations.db', 'public_location_admin_manage': 'False', 'delete_public_locations_admins_only': 'False'}
@@ -613,6 +619,8 @@ try:
     web_admin_news_file = config['webAdmin'].get('news_file', '').strip()
     web_admin_log_dir = config['webAdmin'].get('log_dir', '').strip()
     web_admin_public_url = config['webAdmin'].get('publicUrl', '').strip()
+    # Service-API (POST /api/v1/dm, GET /api/v1/whoami): leerer Token = API deaktiviert
+    web_admin_api_token = os.environ.get('HESSENBOT_API_TOKEN', config['webAdmin'].get('api_token', '')).strip()
     web_admin_impressum_operator = config['webAdmin'].get('impressumOperator', '').strip()
     web_admin_impressum_address = config['webAdmin'].get('impressumAddress', '').strip()
     web_admin_impressum_email = config['webAdmin'].get('impressumEmail', '').strip()
