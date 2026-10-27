@@ -49,3 +49,5 @@ Out of scope / expected behaviour:
 - Prefer binding the web UI behind a reverse proxy / VPN when exposing beyond LAN
 - Keep Python dependencies and the host OS updated
 - Fill in Impressum / contact fields if the portal is public
+- Service-API (`/api/v1/*`): enable only when needed (Admin → **API**); generate the token there (shown once) or set `HESSENBOT_API_TOKEN`; never commit the plaintext token; treat the API like admin access (LAN/VPN / reverse proxy)
+

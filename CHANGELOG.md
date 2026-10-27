@@ -6,6 +6,9 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Added
 
+- **Service-API**: `POST /api/v1/dm` / `GET /api/v1/whoami` für externe Dienste (z. B. MQTT-Webadmin Watchcat); Admin-Tab **API** (Enable, Key einmalig erzeugen, Doku, Request-Log); Token als SHA-256-Hash (`api_token_hash`), Schalter `api_enabled`, optional Env `HESSENBOT_API_TOKEN`; Rate-Limit 30/min; Audit in `logs/service_api.log`
+
+
 - **Positionsanfrage**: Fehlt bei ortsabhängigen Befehlen (`!wx`, `!blitz`, `!metar`, `!whereami`, `!map`, …) die Node-Position, fordert der Bot sie per Mesh an, wartet kurz und führt den Befehl automatisch nach; Timeout mit Hinweis auf Ort/Koordinaten
 - **Channel-Test**: pro Kanal lange Antwort oder Emoji-Reaction (👍/✅), optional Hop-Ziffern-Reaction; Admin-UI
 - **Befehls-Throttling**: Notify-once + teure-Befehl-Cooldowns; Admin-Seite **Limits**

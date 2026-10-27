@@ -143,11 +143,14 @@ cp config.template config.ini
 | `/faq` | Hilfe & PKI-Check |
 | `/impressum` | Impressum (Angaben aus `[webAdmin]`) |
 | `/datenschutz` | Datenschutzhinweise |
-| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Blitzwatch, Einstellungen, … |
+| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Blitzwatch, Einstellungen, **API**, … |
+| `/admin/api` | Service-API: einschalten, API-Key einmalig erzeugen, Doku, Request-Log |
+| `/api/v1/dm` | Service-API (Token): Text-DM an eine Node senden — für externe Dienste wie das MQTT-Webadmin (Watchcat) |
+| `/api/v1/whoami` | Service-API (Token): verbundene Bot-Radios / Node-IDs |
 
 **Öffentliches Dashboard:** Metriken, Aktivitätscharts, Leaderboard (24-Stunden-Ansicht), BBS, NodeDB — ohne interne Log-Warnungen/Fehler-Kacheln.
 
-**Admin-Bereich** (Tabs): Übersicht, DM, News, Kanal, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, **Blitzwatch**, BBS, Umfragen, Einstellungen, Banliste, Logs.
+**Admin-Bereich** (Tabs): Übersicht, DM, News, Kanal, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, **Blitzwatch**, BBS, Umfragen, Einstellungen, **API**, Banliste, Logs.
 
 - **MOTD** und **News**: Text bearbeiten plus automatischer Versand — Zeitplan mit klarer UI; Kanalwahl aus der Meshtastic-Instanz
 - **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …) mit derselben Intervall-UI und Kanalwahl vom Radio
@@ -155,6 +158,8 @@ cp config.template config.ini
 - **Blitzwatch (Admin):** NodeDB-Liste mit Suche; Nutzer-Einstellungen (Home, Radius, Zusatzorte)
 - Einheitliche **Top-Navigation** (Statistik, Befehle, Blitzwatch, BBS, NodeDB, FAQ); Footer: Impressum · Datenschutz · GitHub
 - Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template)); optional `publicUrl`, Impressumsfelder
+- **Service-API** (optional, Tab **API**): `POST /api/v1/dm` sendet eine Text-DM (`{"node_id": "!aabbccdd", "text": "…"}`, optional `channel`/`interface`), `GET /api/v1/whoami` liefert Bot-Node-IDs. Auth per `Authorization: Bearer <token>` (oder `X-Api-Token`). Key wird im Admin zufällig erzeugt und **nur einmal** angezeigt; in der Config liegt der SHA-256-Hash (`api_token_hash`), Schalter `api_enabled`. Optional Env `HESSENBOT_API_TOKEN`. Ohne aktiven Token: `503`. Rate-Limit 30/min; Request-Audit in `logs/service_api.log`. Lange Texte chunkt der Bot wie gewohnt; DM-Zustell-ACKs über die bestehende DM-Statistik
+
 
 ### Kernfunktionen (aus meshing-around, beibehalten)
 

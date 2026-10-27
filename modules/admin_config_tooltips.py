@@ -280,6 +280,9 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("webAdmin", "impressumPhone"): "Optionale Telefonnummer für das Impressum.",
     ("webAdmin", "impressumExtra"): "Optionaler Zusatztext auf der Impressumsseite (Haftungshinweise, Amateurfunk-Hinweis, …).",
     ("webAdmin", "datenschutzExtra"): "Optionaler Zusatztext auf der Datenschutzseite (z. B. Hosting-Anbieter, Auftragsverarbeiter).",
+    ("webAdmin", "api_enabled"): "Service-API einschalten (POST /api/v1/dm, GET /api/v1/whoami). Token im Admin-Tab „API“ erzeugen; ohne Token bleibt die API aus.",
+    ("webAdmin", "api_token_hash"): "SHA-256-Hash des API-Tokens (kein Klartext). Nur über Admin → API erzeugen/widerrufen; optional Env HESSENBOT_API_TOKEN.",
+    ("webAdmin", "api_token"): "Veraltet — Klartext nicht mehr verwenden. Token im Tab „API“ erzeugen oder HESSENBOT_API_TOKEN setzen.",
 }
 
 # interface3…9 — gleiche Bedeutung wie interface2

@@ -554,3 +554,10 @@ impressumPhone =
 impressumExtra =
 # Optionaler Zusatztext für /datenschutz
 datenschutzExtra =
+# Service-API (POST /api/v1/dm, GET /api/v1/whoami) — Verwaltung im Admin-Tab „API“:
+# Token wird dort zufällig erzeugt und nur einmal angezeigt; hier liegt nur der Hash.
+api_enabled = False
+api_token_hash =
+# Veraltet: Klartext-Token nicht mehr setzen (wird beim Start nach api_token_hash migriert).
+# Optionaler Env-Override: HESSENBOT_API_TOKEN=<klartext>
+api_token =
