@@ -863,6 +863,7 @@ def bbs_ack_maintenance_tick(device_id: int = 1) -> None:
 
 
 def bbs_pending_user_acks_for(node_id: int) -> list[dict]:
+    """ACK-pflichtige Mails, die der Empfänger bestätigen darf (nur nach Zustellung)."""
     _ensure_dm_list_normalized()
     try:
         target = int(node_id)
@@ -876,7 +877,8 @@ def bbs_pending_user_acks_for(node_id: int) -> list[dict]:
             continue
         if dm_to(msg) != target:
             continue
-        if dm_state(msg) in (DM_STATE_AWAITING_USER_ACK, DM_STATE_QUEUED, DM_STATE_DELIVERING):
+        # Flow: ack <id> erst im State awaiting_user_ack (nicht queued/delivering)
+        if dm_state(msg) == DM_STATE_AWAITING_USER_ACK:
             out.append(msg)
     return out
 

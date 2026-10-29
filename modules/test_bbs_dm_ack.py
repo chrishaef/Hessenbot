@@ -109,6 +109,26 @@ class BbsDmAckTests(unittest.TestCase):
         out = self.bbs.bbs_handle_user_ack(1, None)
         self.assertIn("Mehrere", out)
 
+    def test_user_ack_rejected_while_queued_or_delivering(self):
+        self.bbs.bbs_post_dm(50, "noch nicht da", 60, require_user_ack=True)
+        entry = self.bbs.bbs_dm[1]
+        mid = entry["msg_id"]
+        self.assertEqual(entry["state"], self.bbs.DM_STATE_QUEUED)
+
+        # queued: kein User-ACK (fällt für bare ack auf None → Ping-Pfad)
+        self.assertIsNone(self.bbs.bbs_handle_user_ack(50, None))
+        self.assertIsNone(self.bbs.bbs_handle_user_ack(50, mid))
+        self.assertEqual(len(self.bbs.bbs_dm), 2)
+
+        entry["state"] = self.bbs.DM_STATE_DELIVERING
+        self.assertIsNone(self.bbs.bbs_handle_user_ack(50, mid))
+        self.assertEqual(len(self.bbs.bbs_dm), 2)
+        self.assertEqual(entry["state"], self.bbs.DM_STATE_DELIVERING)
+
+        entry["state"] = self.bbs.DM_STATE_AWAITING_USER_ACK
+        self.assertIn("Danke", self.bbs.bbs_handle_user_ack(50, mid))
+        self.assertEqual(len(self.bbs.bbs_dm), 1)
+
     def test_parse_ack_command(self):
         self.assertEqual(self.bbs.parse_ack_command("ack"), (True, None))
         self.assertEqual(self.bbs.parse_ack_command("!ack ab12"), (True, "ab12"))
