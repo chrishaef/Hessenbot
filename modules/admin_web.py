@@ -2453,43 +2453,86 @@ def create_app(
                 '<p class="alert alert-info">BBS ist unter <code>[bbs] enabled = False</code> '
                 "deaktiviert. Die DM-Liste im laufenden Bot kannst du hier trotzdem bearbeiten.</p>"
             )
+        ack_on = bool(getattr(st, "bbs_dm_user_ack_enabled", False))
         hint += (
-            "<p class=\"small text-muted\">Format pro Zeile: <code>[Ziel-Node, Text, Absender-Node]</code>. "
-            "Zeile <strong>0</strong> ist ein interner Platzhalter (wird in <code>bbsinfo</code> nicht mitgezählt) "
-            "und kann nicht gelöscht werden. Datei: <code>data/bbsdm.pkl</code>.</p>"
+            "<p class=\"small text-muted\">BBS-DM-Warteschlange (<code>data/bbsdm.pkl</code>). "
+            "Zeile <strong>0</strong> ist Platzhalter und zählt nicht in <code>bbsinfo</code>. "
+            f"Nutzer-Lesebestätigung: <strong>{'an' if ack_on else 'aus'}</strong> "
+            "(<code>bbsDmUserAckEnabled</code>).</p>"
         )
 
         rows_html = []
         for idx, row in enumerate(bbs.bbs_dm):
-            to_n = row[0] if len(row) > 0 else 0
-            text = row[1] if len(row) > 1 else ""
-            from_n = row[2] if len(row) > 2 else 0
+            to_n = bbs.dm_to(row)
+            text = bbs.dm_body(row)
+            from_n = bbs.dm_from(row)
             to_h = html_escape(bbs.bbs_party_display_label(to_n))
             from_h = html_escape(bbs.bbs_party_display_label(from_n))
-            preview = html_escape(text[:100] + ("…" if len(text) > 100 else ""))
-            if idx == 0:
+            preview = html_escape(text[:80] + ("…" if len(text) > 80 else ""))
+            status = html_escape(bbs.bbs_dm_status_label(row))
+            want_ack = "ja" if bbs.dm_require_user_ack(row) else "nein"
+            mid = html_escape(bbs.dm_msg_id(row) or "—")
+            attempts = "0"
+            mesh_ack = "—"
+            user_ack = "—"
+            last_at = "—"
+            if isinstance(row, dict):
+                attempts = str(int(row.get("attempt_count") or 0))
+                ma = row.get("mesh_acked")
+                if ma is True:
+                    mesh_ack = "ja"
+                elif ma is False:
+                    mesh_ack = "nein"
+                user_ack = "ja" if row.get("user_acked") else "nein"
+                la = row.get("last_attempt_at")
+                if la:
+                    try:
+                        last_at = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(la)))
+                    except (TypeError, ValueError, OSError):
+                        last_at = "—"
+            if idx == 0 or bbs.is_placeholder_dm(row, idx):
                 actions = '<span class="text-muted">(Platzhalter)</span>'
+                status, want_ack, mid, attempts, mesh_ack, user_ack, last_at = (
+                    "—", "—", "—", "—", "—", "—", "—"
+                )
             else:
                 actions = (
                     f'<a class="btn btn-sm btn-outline-info" href="{url_for("bbs_dm_read", idx=idx)}">Text</a> '
+                    f'<form method="post" action="{url_for("bbs_dm_redeliver", idx=idx)}" style="display:inline">'
+                    '<button type="submit" class="btn btn-sm btn-outline-warning">Erneut</button></form> '
+                    f'<form method="post" action="{url_for("bbs_dm_done", idx=idx)}" style="display:inline" '
+                    f'onsubmit="return confirm(\'DM #{idx} als erledigt markieren?\');">'
+                    '<button type="submit" class="btn btn-sm btn-outline-success">Erledigt</button></form> '
                     f'<form method="post" action="{url_for("bbs_dm_delete", idx=idx)}" style="display:inline" '
                     f'onsubmit="return confirm(\'DM-Zeile {idx} wirklich löschen?\');">'
                     '<button type="submit" class="btn btn-sm btn-danger">Löschen</button></form>'
                 )
             rows_html.append(
                 "<tr>"
-                f"<td><code>{idx}</code></td><td><code>{to_h}</code></td><td><code>{from_h}</code></td>"
-                f'<td class="cell-dm-text">{preview}</td><td>{actions}</td>'
+                f"<td><code>{idx}</code></td>"
+                f"<td><code>{to_h}</code></td>"
+                f"<td><code>{from_h}</code></td>"
+                f"<td>{status}</td>"
+                f"<td>{want_ack}</td>"
+                f"<td><code>{mid}</code></td>"
+                f"<td>{attempts}</td>"
+                f"<td>{mesh_ack}</td>"
+                f"<td>{user_ack}</td>"
+                f"<td>{html_escape(last_at)}</td>"
+                f'<td class="cell-dm-text">{preview}</td>'
+                f"<td>{actions}</td>"
                 "</tr>"
             )
-        table = "".join(rows_html) if rows_html else '<tr><td colspan="5">Keine Einträge.</td></tr>'
+        table = "".join(rows_html) if rows_html else '<tr><td colspan="12">Keine Einträge.</td></tr>'
 
         body = (
             hint
             + f'<p><a class="btn btn-success mb-3" href="{url_for("bbs_dm_new")}">Neue DM</a> '
             + f'<a class="btn btn-outline-secondary mb-3" href="{url_for("bbs_index")}">Öffentliches BBS</a></p>'
             + '<div class="table-scroll"><table class="nodes-table table-dark table-bordered table-bbs-dm">'
-            + "<thead><tr><th>#</th><th>An (Node)</th><th>Von (Node)</th><th>Text</th><th></th></tr></thead>"
+            + "<thead><tr><th>#</th><th>An</th><th>Von</th><th>Status</th><th>ACK?</th>"
+            + "<th>ID</th><th>Versuche</th><th>Node-ACK</th><th>Nutzer-ACK</th>"
+            + "<th>Letzte Aktion</th><th>Text</th><th></th></tr></thead>"
             + f"<tbody>{table}</tbody></table></div>"
         )
 
@@ -2511,13 +2554,25 @@ def create_app(
             flash("Eintrag nicht gefunden.", "error")
             return redirect(url_for("bbs_dm_index"))
         row = bbs.bbs_dm[idx]
-        to_n, text, from_n = row[0], row[1] if len(row) > 1 else "", row[2] if len(row) > 2 else 0
+        to_n = bbs.dm_to(row)
+        text = bbs.dm_body(row)
+        from_n = bbs.dm_from(row)
         to_h = html_escape(bbs.bbs_party_display_label(to_n))
         from_h = html_escape(bbs.bbs_party_display_label(from_n))
         body_esc = html_escape(text)
+        meta = ""
+        if isinstance(row, dict) and not bbs.is_placeholder_dm(row, idx):
+            meta = (
+                f"<p class=\"small text-muted\">Status: {html_escape(bbs.bbs_dm_status_label(row))} · "
+                f"ACK: {'ja' if bbs.dm_require_user_ack(row) else 'nein'} · "
+                f"ID: <code>{html_escape(bbs.dm_msg_id(row) or '—')}</code> · "
+                f"Versuche: {int(row.get('attempt_count') or 0)} · "
+                f"Node-ACK: {row.get('mesh_acked')} · Nutzer-ACK: {bool(row.get('user_acked'))}</p>"
+            )
         return _render_admin_template(
             f"""
   <p><strong>An:</strong> {to_h} &nbsp; <strong>Von:</strong> {from_h}</p>
+  {meta}
   <pre class="admin-pre">{body_esc}</pre>
   <div class="text-center mt-3">
     <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>
@@ -2531,11 +2586,13 @@ def create_app(
     @login_required
     def bbs_dm_new():
         import modules.bbstools as bbs
+        import modules.settings as st
 
         if request.method == "POST":
             raw_to = (request.form.get("to_node") or "").strip()
             body_txt = request.form.get("body") or ""
             raw_from = (request.form.get("from_node") or "").strip() or "0"
+            require_ack = request.form.get("require_user_ack") == "1"
 
             to_node = 0
             if raw_to.startswith("!") and len(raw_to) >= 2:
@@ -2560,13 +2617,37 @@ def create_app(
                 flash("Nachricht darf nicht leer sein.", "error")
             else:
                 try:
-                    flash(bbs.bbs_post_dm(to_node, body_txt.strip(), from_node), "success")
+                    flash(
+                        bbs.bbs_post_dm(
+                            to_node,
+                            body_txt.strip(),
+                            from_node,
+                            require_user_ack=require_ack,
+                        ),
+                        "success",
+                    )
                 except Exception as e:
                     flash(f"Speichern fehlgeschlagen: {e!s}", "error")
             return redirect(url_for("bbs_dm_index"))
 
+        ack_enabled = bool(getattr(st, "bbs_dm_user_ack_enabled", False))
+        ack_box = ""
+        if ack_enabled:
+            ack_box = (
+                '<div class="form-check mb-3">'
+                '<input class="form-check-input" type="checkbox" name="require_user_ack" value="1" id="require_user_ack">'
+                '<label class="form-check-label" for="require_user_ack">'
+                "Lesebestätigung verlangen (wie <code>bbspost ack @… #…</code>)"
+                "</label></div>"
+            )
+        else:
+            ack_box = (
+                '<p class="small text-muted mb-3">Lesebestätigung ist global aus '
+                "(<code>bbsDmUserAckEnabled = False</code>).</p>"
+            )
+
         return _render_admin_template(
-            """
+            f"""
   <p class="small text-muted">Wie <code>bbspost @Ziel #Text</code>: Ziel als Dezimal-Node-ID oder Meshtastic-<code>!hex</code>.</p>
   <form method="post">
     <label>Ziel-Node</label>
@@ -2575,10 +2656,11 @@ def create_app(
     <input type="text" name="from_node" class="form-control mb-3" value="0" placeholder="0">
     <label>Nachricht</label>
     <textarea name="body" rows="10" class="form-control mb-3" required></textarea>
+    {ack_box}
     <input type="submit" value="Absenden" class="btn btn-success w-100">
   </form>
   <div class="text-center mt-3">
-    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Abbrechen</a>
+    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-secondary btn-sm">Abbrechen</a>
   </div>
 """,
             title="Neue BBS-DM",
@@ -2592,6 +2674,26 @@ def create_app(
         from modules import bbstools as bbs
 
         ok, txt = bbs.bbs_delete_dm_at_index(idx)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("bbs_dm_index"))
+
+    @app.route("/bbs/dm/redeliver/<int:idx>", methods=["POST"])
+    @login_required
+    @limiter.limit("60 per minute")
+    def bbs_dm_redeliver(idx):
+        from modules import bbstools as bbs
+
+        ok, txt = bbs.bbs_admin_redeliver(idx)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("bbs_dm_index"))
+
+    @app.route("/bbs/dm/done/<int:idx>", methods=["POST"])
+    @login_required
+    @limiter.limit("60 per minute")
+    def bbs_dm_done(idx):
+        from modules import bbstools as bbs
+
+        ok, txt = bbs.bbs_admin_mark_done(idx)
         flash(txt, "success" if ok else "error")
         return redirect(url_for("bbs_dm_index"))
 

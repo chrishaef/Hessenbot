@@ -1880,7 +1880,8 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
     error_reason = routing.get('errorReason', routing.get('error_reason', ''))
     request_id = decoded.get('requestId', decoded.get('request_id', packet.get('id')))
     dest_name = get_name_from_number(dest_node, 'long', device_id)
-    if _significant_routing_error(error_reason):
+    mesh_ok = not _significant_routing_error(error_reason)
+    if not mesh_ok:
         is_pki = str(error_reason).startswith('PKI_')
         try:
             from modules.dm_delivery_stats import record_dm_delivery_outcome
@@ -1914,6 +1915,14 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
             f"System: DM delivery confirmed Device:{device_id} To:{dest_name} Node:{dest_node} "
             f"RequestId:{request_id}"
         )
+    # BBS-DM Nutzer-ACK path: Node-Empfang vs. Nutzer bestätigt getrennt melden
+    try:
+        if bbs_enabled:
+            from modules.bbstools import bbs_on_mesh_delivery_result
+
+            bbs_on_mesh_delivery_result(dest_node, mesh_ok, device_id)
+    except Exception as e:
+        logger.debug(f"System: BBS mesh-ACK hook failed: {e}")
 
 
 def _dm_delivery_ack_callback(dest_node, device_id):
@@ -4337,6 +4346,15 @@ async def watchdog():
         if bbs_enabled and bbsAPI_enabled:
             load_bbsdm()
             load_bbsdb()
+
+        # BBS-DM ACK: expire / NodeDB first delivery / retry (no live radio required for logic)
+        if bbs_enabled:
+            try:
+                from modules.bbstools import bbs_ack_maintenance_tick
+
+                bbs_ack_maintenance_tick(1)
+            except Exception as e:
+                logger.debug(f"System: BBS ACK maintenance tick failed: {e}")
 
 def saveAllData():
     try:

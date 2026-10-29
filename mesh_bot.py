@@ -39,7 +39,7 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
 
     # Command List processes system.trap_list. system.messageTrap() sends any commands to here
     default_commands = {
-    "ack": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
+    "ack": lambda: handle_ack_or_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "ask:": lambda: handle_llm(message_from_id, channel_number, deviceID, message, publicChannel),
     "askai": lambda: handle_llm(message_from_id, channel_number, deviceID, message, publicChannel),
     "bannode": lambda: handle_bbsban(message, message_from_id, isDM),
@@ -634,6 +634,22 @@ def handle_inventory(message, message_from_id, deviceID):
     name = get_name_from_number(message_from_id, 'short', deviceID)
     return process_inventory_command(message_from_id, message, name)
 
+def handle_ack_or_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number):
+    """Prefer BBS-DM Lesebestätigung (ack / ack <id>); else classic ping/QSL ack."""
+    if my_settings.bbs_enabled and bool(getattr(my_settings, "bbs_dm_user_ack_enabled", False)):
+        try:
+            from modules.bbstools import bbs_handle_user_ack, parse_ack_command
+
+            is_ack, msg_id = parse_ack_command(message)
+            if is_ack:
+                result = bbs_handle_user_ack(message_from_id, msg_id, deviceID)
+                if result is not None:
+                    return result
+        except Exception as e:
+            logger.debug(f"System: BBS user-ACK handler skipped: {e}")
+    return handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number)
+
+
 def handle_bbspost(message, message_from_id, deviceID):
     if "$" in message and not "example:" in message:
         subject = message.split("$")[1].split("#")[0]
@@ -641,11 +657,18 @@ def handle_bbspost(message, message_from_id, deviceID):
         if "#" in message:
             body = message.split("#", 1)[1]
             body = body.rstrip()
-            logger.info(f"System: BBS Post: {subject} Body: {body}")
+            logger.info(
+                f"System: BBS Post: subjectLen={len(subject)} BodyLen={len(body)}"
+            )
             return bbs_post_message(subject, body, message_from_id)
         elif not "example:" in message:
             return "Beispiel: bbspost $Betreff #✉️Nachricht"
     elif "@" in message and not "example:" in message:
+        # bbspost ack @empfänger #text → require_user_ack
+        at_idx = message.find("@")
+        require_user_ack = bool(
+            at_idx > 0 and re.search(r"\back\b", message[:at_idx], flags=re.IGNORECASE)
+        )
         toNode = message.split("@")[1].split("#")[0]
         toNode = toNode.rstrip()
         if toNode.startswith("!") and len(toNode) == 9:
@@ -663,10 +686,12 @@ def handle_bbspost(message, message_from_id, deviceID):
                 return "Knoten nicht gefunden: " + message.split("@")[1].split("#")[0]
             body = message.split("#", 1)[1]
             body = body.rstrip()
-            logger.info(f"System: BBS Post DM to: {toNode} Body: {body}")
-            return bbs_post_dm(toNode, body, message_from_id)
+            logger.info(
+                f"System: BBS Post DM to: {toNode} ack={require_user_ack} BodyLen={len(body)}"
+            )
+            return bbs_post_dm(toNode, body, message_from_id, require_user_ack=require_user_ack)
         else:
-            return "Beispiel: bbspost @Kurzname/!hex #✉️Nachricht"
+            return "Beispiel: bbspost @Kurzname/!hex #✉️Nachricht oder bbspost ack @Knoten #Text"
     elif not "example:" in message:
         return "Beispiel: bbspost $Betreff #✉️Text oder bbspost @Knoten #✉️Text"
 
@@ -1507,19 +1532,18 @@ def onReceive(packet, interface):
             if node.get('nodeID') == message_from_id:
                 node['lastSeen'] = time.time()
                 break
-    # BBS DM MAIL CHECKER
+    # BBS DM MAIL CHECKER (NodeDB/packet trigger; ACK-mails stay until user ack / expire)
     if bbs_enabled and decoded:
-        msg = bbs_check_dm(message_from_id)
-        if msg:
-            logger.info(
-                f"System: BBS DM Delivery: from={msg[2]} to={message_from_id}"
-            )
-            logger.debug(
-                f"System: BBS DM Delivery body for {get_name_from_number(message_from_id, 'long', rxNode)}: {msg[1]}"
-            )
-            message = "Mail: " + msg[1] + "  From: " + get_name_from_number(msg[2], 'long', rxNode)
-            bbs_delete_dm(msg[0], msg[1])
-            send_message(message, channel_number, message_from_id, rxNode)
+        try:
+            from modules.bbstools import bbs_try_deliver_for_node
+
+            result = bbs_try_deliver_for_node(message_from_id, rxNode, channel_number)
+            if result:
+                logger.info(
+                    f"System: BBS DM Delivery: to={message_from_id} result={result}"
+                )
+        except Exception as e:
+            logger.error(f"System: BBS DM delivery error: {e}")
 
     # CHECK with ban_hammer() if the node is banned
     if str(message_from_id) in my_settings.bbs_ban_list or str(message_from_id) in my_settings.autoBanlist:
