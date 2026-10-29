@@ -1327,6 +1327,11 @@ _CONFIG_ATTR_ALIASES = {
     "sentryAlertAway": "sentryAlertFar",
     "sentryAlertFar": "sentryAlertFar",
     "bee": "bee_enabled",
+    "bbsDmUserAckEnabled": "bbs_dm_user_ack_enabled",
+    "bbsDmAckRetrySeconds": "bbs_dm_ack_retry_seconds",
+    "bbsDmAckMaxAttempts": "bbs_dm_ack_max_attempts",
+    "bbsDmAckExpireSeconds": "bbs_dm_ack_expire_seconds",
+    "bbsDmNotifySender": "bbs_dm_notify_sender",
 }
 
 
