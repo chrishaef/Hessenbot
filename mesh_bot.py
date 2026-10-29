@@ -657,7 +657,9 @@ def handle_bbspost(message, message_from_id, deviceID):
         if "#" in message:
             body = message.split("#", 1)[1]
             body = body.rstrip()
-            logger.info(f"System: BBS Post: {subject} Body: {body}")
+            logger.info(
+                f"System: BBS Post: subjectLen={len(subject)} BodyLen={len(body)}"
+            )
             return bbs_post_message(subject, body, message_from_id)
         elif not "example:" in message:
             return "Beispiel: bbspost $Betreff #✉️Nachricht"
@@ -685,7 +687,7 @@ def handle_bbspost(message, message_from_id, deviceID):
             body = message.split("#", 1)[1]
             body = body.rstrip()
             logger.info(
-                f"System: BBS Post DM to: {toNode} Body: {body} ack={require_user_ack}"
+                f"System: BBS Post DM to: {toNode} ack={require_user_ack} BodyLen={len(body)}"
             )
             return bbs_post_dm(toNode, body, message_from_id, require_user_ack=require_user_ack)
         else:
