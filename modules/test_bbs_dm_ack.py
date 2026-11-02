@@ -200,6 +200,87 @@ class BbsDmAckTests(unittest.TestCase):
         self.assertFalse(require_ack("bbspost @alice #hi"))
         self.assertFalse(require_ack("bbspost @acknode #hi"))
 
+    def test_normalize_inserts_placeholder_without_clobber(self):
+        # External writer omitted sentinel row — real mail must stay deliverable.
+        real = self.bbs.migrate_dm_entry([42, "echte mail", 99])
+        self.bbs.bbs_dm = [real]
+        self.bbs._ensure_dm_list_normalized()
+        self.assertTrue(self.bbs._is_explicit_placeholder(self.bbs.bbs_dm[0]))
+        self.assertEqual(self.bbs.dm_to(self.bbs.bbs_dm[1]), 42)
+        self.assertEqual(self.bbs.dm_body(self.bbs.bbs_dm[1]), "echte mail")
+        self.assertFalse(self.bbs.bbs_dm[1].get("placeholder"))
+
+    def test_load_resets_delivering_to_queued(self):
+        import pickle
+
+        entry = self.bbs.migrate_dm_entry({
+            "to": 7,
+            "body": "stuck",
+            "from": 8,
+            "require_user_ack": True,
+            "state": self.bbs.DM_STATE_DELIVERING,
+            "msg_id": "ab12",
+            "placeholder": False,
+        })
+        with open("data/bbsdm.pkl", "wb") as f:
+            pickle.dump([self.bbs.make_placeholder_dm(), entry], f)
+        self.bbs.bbs_dm = []
+        self.bbs.load_bbsdm()
+        self.assertEqual(self.bbs.bbs_dm[1]["state"], self.bbs.DM_STATE_QUEUED)
+
+    def test_maintenance_skips_non_ack_and_keeps_on_send_fail(self):
+        self.bbs.bbs_post_dm(100, "normal", 200, require_user_ack=False)
+        entry = self.bbs.bbs_dm[1]
+        with mock.patch.object(self.bbs, "node_known_in_nodedb", return_value=True), mock.patch.object(
+            self.bbs, "_send_dm_to_recipient", return_value=True
+        ) as send:
+            self.bbs.bbs_ack_maintenance_tick(1)
+            send.assert_not_called()
+        self.assertEqual(len(self.bbs.bbs_dm), 2)
+        self.assertEqual(entry["state"], self.bbs.DM_STATE_QUEUED)
+
+        with mock.patch.object(self.bbs, "node_known_in_nodedb", return_value=True), mock.patch.object(
+            self.bbs, "_send_dm_to_recipient", return_value=False
+        ):
+            result = self.bbs.bbs_deliver_entry(entry, device_id=1)
+        self.assertEqual(result, "send_failed")
+        self.assertEqual(len(self.bbs.bbs_dm), 2)
+        self.assertEqual(entry["state"], self.bbs.DM_STATE_QUEUED)
+
+    def test_admin_redeliver_resets_expiry(self):
+        self.bbs.bbs_post_dm(11, "retry-admin", 22, require_user_ack=True)
+        entry = self.bbs.bbs_dm[1]
+        entry["attempt_count"] = 99
+        entry["created_at"] = time.time() - 99999
+        entry["state"] = self.bbs.DM_STATE_AWAITING_USER_ACK
+        with mock.patch.object(self.bbs, "node_known_in_nodedb", return_value=True), mock.patch.object(
+            self.bbs, "_send_dm_to_recipient", return_value=True
+        ) as send:
+            ok, txt = self.bbs.bbs_admin_redeliver(1)
+        self.assertTrue(ok)
+        self.assertIn("awaiting_user_ack", txt)
+        send.assert_called_once()
+        self.assertEqual(len(self.bbs.bbs_dm), 2)
+        self.assertEqual(entry["state"], self.bbs.DM_STATE_AWAITING_USER_ACK)
+
+    def test_mesh_ack_correlates_by_request_id(self):
+        self.bbs.bbs_post_dm(55, "mesh", 66, require_user_ack=True)
+        entry = self.bbs.bbs_dm[1]
+        entry["state"] = self.bbs.DM_STATE_AWAITING_USER_ACK
+        entry["mesh_request_id"] = 4242
+        self._notify_mock.reset_mock()
+
+        # Foreign DM ACK to same dest must not flip mesh_acked
+        self.bbs.bbs_on_mesh_delivery_result(55, True, request_id=9999)
+        self.assertIsNone(entry["mesh_acked"])
+        self.assertFalse(self._notify_mock.called)
+
+        self.bbs.bbs_on_mesh_delivery_result(55, True, request_id=4242)
+        self.assertTrue(entry["mesh_acked"] is True)
+        self.assertTrue(
+            any("Node-Empfang bestätigt" in str(c) for c in self._notify_mock.call_args_list)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

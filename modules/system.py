@@ -1920,7 +1920,7 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
         if bbs_enabled:
             from modules.bbstools import bbs_on_mesh_delivery_result
 
-            bbs_on_mesh_delivery_result(dest_node, mesh_ok, device_id)
+            bbs_on_mesh_delivery_result(dest_node, mesh_ok, device_id, request_id=request_id)
     except Exception as e:
         logger.debug(f"System: BBS mesh-ACK hook failed: {e}")
 
@@ -1931,7 +1931,23 @@ def _dm_delivery_ack_callback(dest_node, device_id):
     return _on_dm_routing_response
 
 
-def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_id=None):
+def _extract_mesh_packet_id(packet):
+    """Best-effort packet id from meshtastic sendText/sendData return value."""
+    if packet is None:
+        return None
+    try:
+        if isinstance(packet, dict):
+            raw = packet.get("id", packet.get("requestId", packet.get("request_id")))
+        else:
+            raw = getattr(packet, "id", None)
+        if raw is None:
+            return None
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_id=None, packet_ids_out=None):
     # Send a message to a channel or DM
     interface = globals()[f'interface{nodeInt}']
     # Check if the message is empty
@@ -2003,7 +2019,11 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
                         f"{m.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
                         f"{format_dm_peer_for_log(nodeid, nodeInt)}"
                     )
-                _send_with_reply(**send_kwargs)
+                sent = _send_with_reply(**send_kwargs)
+                if packet_ids_out is not None:
+                    pid = _extract_mesh_packet_id(sent)
+                    if pid is not None:
+                        packet_ids_out.append(pid)
 
                 if (idx + 1) % 4 == 0:
                     time.sleep(responseDelay + 1)
@@ -2030,7 +2050,11 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
                     f"{message.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
                     f"{format_dm_peer_for_log(nodeid, nodeInt)}"
                 )
-            _send_with_reply(**send_kwargs)
+            sent = _send_with_reply(**send_kwargs)
+            if packet_ids_out is not None:
+                pid = _extract_mesh_packet_id(sent)
+                if pid is not None:
+                    packet_ids_out.append(pid)
             time.sleep(responseDelay)
         return True
     except Exception as e:

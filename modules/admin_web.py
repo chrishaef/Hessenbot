@@ -2559,7 +2559,6 @@ def create_app(
         from_n = bbs.dm_from(row)
         to_h = html_escape(bbs.bbs_party_display_label(to_n))
         from_h = html_escape(bbs.bbs_party_display_label(from_n))
-        body_esc = html_escape(text)
         meta = ""
         if isinstance(row, dict) and not bbs.is_placeholder_dm(row, idx):
             meta = (
@@ -2569,17 +2568,20 @@ def create_app(
                 f"Versuche: {int(row.get('attempt_count') or 0)} · "
                 f"Node-ACK: {row.get('mesh_acked')} · Nutzer-ACK: {bool(row.get('user_acked'))}</p>"
             )
+        # Body as Jinja var (not f-string interpolate) — avoids SSTI/RCE via mesh DM text.
+        # url_for braces doubled so the f-string leaves {{ url_for(...) }} for Jinja.
         return _render_admin_template(
             f"""
   <p><strong>An:</strong> {to_h} &nbsp; <strong>Von:</strong> {from_h}</p>
   {meta}
-  <pre class="admin-pre">{body_esc}</pre>
+  <pre class="admin-pre">{{{{ dm_body }}}}</pre>
   <div class="text-center mt-3">
-    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>
+    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
   </div>
 """,
             title=f"BBS-DM #{idx}",
             active_tab="bbs",
+            dm_body=text,
         )
 
     @app.route("/bbs/dm/new", methods=["GET", "POST"])
