@@ -87,8 +87,8 @@
               data: data.dmDeliveryValues,
               backgroundColor: [
                 "rgba(25, 135, 84, 0.85)",
-                "rgba(255, 193, 7, 0.85)",
                 "rgba(220, 53, 69, 0.85)",
+                "rgba(255, 193, 7, 0.85)",
               ],
               borderWidth: 0,
             },

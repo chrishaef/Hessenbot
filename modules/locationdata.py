@@ -18,6 +18,207 @@ import sqlite3
 trap_list_location = ("whereami", "wx", "rlist", "howfar", "map", "loc",)
 
 _place_name_cache: dict[tuple[float, float], tuple[float, str]] = {}
+_geocode_cache: dict[str, tuple[float, object]] = {}
+
+_OPEN_METEO_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+
+
+def _valid_lat_lon(lat: float, lon: float):
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    if int(lat) == 0 and int(lon) == 0:
+        return None
+    return (lat, lon)
+
+
+def parse_lat_lon_from_text(text: str):
+    """Parse lat/lon from message text. Supports ``50.34 8.76``, ``50.34,8.76``, ``50,34 8,76``."""
+    import re
+
+    if not text or not str(text).strip():
+        return None
+    s = str(text).strip()
+
+    # German decimals with whitespace separator: 50,34 8,76
+    m = re.fullmatch(r"(-?\d+),(\d+)\s+(-?\d+),(\d+)", s)
+    if m:
+        try:
+            lat = float(f"{m.group(1)}.{m.group(2)}")
+            lon = float(f"{m.group(3)}.{m.group(4)}")
+        except ValueError:
+            return None
+        return _valid_lat_lon(lat, lon)
+
+    # Dot decimals with comma/semicolon separator: 50.34, 8.76
+    m = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)", s)
+    if m:
+        try:
+            return _valid_lat_lon(float(m.group(1)), float(m.group(2)))
+        except ValueError:
+            return None
+
+    m = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)", s)
+    if m:
+        try:
+            return _valid_lat_lon(float(m.group(1)), float(m.group(2)))
+        except ValueError:
+            return None
+
+    return None
+
+
+def parse_maidenhead_from_text(text: str):
+    """Parse Maidenhead locator (``JO40``, ``JO40AA``, ``JO40AA00``) → center lat/lon + normalized grid.
+
+    Returns ``(lat, lon, grid_label)`` or ``None`` if not a valid locator.
+    """
+    import re
+
+    if not text or not str(text).strip():
+        return None
+    s = str(text).strip().upper()
+    # Optional prefixes used in FM/ham chat
+    s = re.sub(r"^(?:GRID|LOCATOR|QTH|MH)\s*[:=]?\s*", "", s)
+    s = s.replace(" ", "")
+
+    # Field+square required (4); optional subsquare (6) and extended square (8)
+    if not re.fullmatch(r"[A-R]{2}[0-9]{2}(?:[A-X]{2}(?:[0-9]{2})?)?", s):
+        return None
+    try:
+        lat, lon = mh.to_location(s, center=True)
+    except Exception as e:
+        logger.debug(f"Location: maidenhead parse failed for {s!r}: {e}")
+        return None
+    valid = _valid_lat_lon(float(lat), float(lon))
+    if not valid:
+        return None
+    return valid[0], valid[1], s
+
+
+def geocode_place_name(name: str, country: str = "DE", max_age: float = 86400):
+    """Forward-geocode a place name via Open-Meteo (cached). Returns (lat, lon, display_name)."""
+    query = (name or "").strip()
+    if not query:
+        return None
+    cache_key = f"{country.lower()}|{query.lower()}"
+    now = time.time()
+    cached = _geocode_cache.get(cache_key)
+    if cached and (now - cached[0]) < max_age:
+        return cached[1]
+
+    params = {
+        "name": query,
+        "count": 1,
+        "language": "de",
+        "format": "json",
+    }
+    if country:
+        params["countryCode"] = country
+    try:
+        resp = requests.get(_OPEN_METEO_GEOCODE_URL, params=params, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results") or []
+        if not results:
+            if country:
+                result = geocode_place_name(query, country="", max_age=max_age)
+                _geocode_cache[cache_key] = (now, result)
+                return result
+            _geocode_cache[cache_key] = (now, None)
+            return None
+        hit = results[0]
+        lat = float(hit["latitude"])
+        lon = float(hit["longitude"])
+        display = hit.get("name") or hit.get("admin1") or query
+        admin = hit.get("admin1") or ""
+        country_code = hit.get("country_code") or ""
+        if admin and admin.lower() != str(display).lower():
+            display = f"{display}, {admin}"
+        elif country_code and country_code.upper() != "DE":
+            display = f"{display} ({country_code.upper()})"
+        result = (lat, lon, str(display))
+        _geocode_cache[cache_key] = (now, result)
+        return result
+    except Exception as e:
+        logger.debug(f"Location: geocode_place_name failed for {query!r}: {e}")
+        _geocode_cache[cache_key] = (now, None)
+        return None
+
+
+def extract_location_arg(
+    message: str,
+    command_tokens=(),
+    *,
+    skip_numeric: bool = False,
+) -> str:
+    """Strip bang, command tokens and optional pure-digit tokens; return location query remainder."""
+    text = (message or "").strip()
+    if text.startswith("!"):
+        text = text[1:].strip()
+    tokens_l = {str(t).lower().rstrip("?") for t in (command_tokens or ())}
+    out = []
+    for part in text.replace("?", " ").split():
+        pl = part.lower().rstrip("?")
+        if pl in tokens_l:
+            continue
+        if skip_numeric and part.isdigit():
+            continue
+        out.append(part)
+    return " ".join(out).strip()
+
+
+def resolve_message_location(
+    message: str,
+    node_id,
+    device_id: int = 1,
+    *,
+    command_tokens=(),
+    skip_numeric: bool = False,
+):
+    """Resolve lat/lon from message args or node location.
+
+    Returns ``(lat, lon, source, label)`` where source is one of
+    ``arg-coords``, ``arg-grid``, ``arg-place``, ``gps``, ``missing``, or ``error``
+    (then label is the error message and lat/lon are None).
+    Never uses bot/config lat/lon as a stand-in for the node.
+    """
+    query = extract_location_arg(
+        message or "",
+        command_tokens,
+        skip_numeric=skip_numeric,
+    )
+
+    if query:
+        coords = parse_lat_lon_from_text(query)
+        if coords:
+            lat, lon = coords
+            label = f"{lat:.2f}, {lon:.2f}"
+            return lat, lon, "arg-coords", label
+
+        grid = parse_maidenhead_from_text(query)
+        if grid:
+            lat, lon, grid_label = grid
+            return lat, lon, "arg-grid", grid_label
+
+        # Pure number left over (e.g. satpass NORAD already skipped) → node fallback
+        if query.replace(" ", "").isdigit():
+            query = ""
+        else:
+            geo = geocode_place_name(query)
+            if not geo:
+                return None, None, "error", f"Ort nicht gefunden: {query}"
+            lat, lon, display = geo
+            return lat, lon, "arg-place", display
+
+    from modules.system import get_node_location_with_source
+
+    result = get_node_location_with_source(node_id, device_id)
+    if not result:
+        return None, None, "missing", ""
+    lat, lon, from_gps = result[0], result[1], result[2]
+    if not from_gps or lat is None or lon is None:
+        return None, None, "missing", ""
+    return lat, lon, "gps", ""
 
 
 def get_place_name(lat=0, lon=0, max_age: float = 86400) -> str:
@@ -53,7 +254,7 @@ def get_place_name(lat=0, lon=0, max_age: float = 86400) -> str:
         return "?"
 
 
-def where_am_i(lat=0, lon=0, short=False, zip=False):
+def where_am_i(lat=0, lon=0, short=False, zip=False, redacted=False):
     whereIam = ""
     grid = mh.to_maiden(float(lat), float(lon))
     location = lat, lon
@@ -64,7 +265,21 @@ def where_am_i(lat=0, lon=0, short=False, zip=False):
     
     # initialize Nominatim API
     geolocator = Nominatim(user_agent="mesh-bot")
-    
+
+    # Bot-Config-Koordinaten: nie Straße/Hausnummer preisgeben (auch nach Rundung auf 2 Dezimalstellen).
+    use_redacted = bool(redacted)
+    if not use_redacted:
+        try:
+            lat_f, lon_f = float(lat), float(lon)
+            cfg_lat = float(my_settings.latitudeValue)
+            cfg_lon = float(my_settings.longitudeValue)
+            if (lat_f == cfg_lat and lon_f == cfg_lon) or (
+                lat_f == round(cfg_lat, 2) and lon_f == round(cfg_lon, 2)
+            ):
+                use_redacted = True
+        except (TypeError, ValueError):
+            pass
+
     try:
         # Nomatim API call to get address
         if short:
@@ -85,21 +300,28 @@ def where_am_i(lat=0, lon=0, short=False, zip=False):
             whereIam = location.raw['address'].get('postcode', '')
             return whereIam
         
-        if float(lat) == my_settings.latitudeValue and float(lon) == my_settings.longitudeValue:
-            # redacted address when no GPS and using default location
-            location = geolocator.reverse(str(lat) + ", " + str(lon))
-            address = location.raw['address']
+        location = geolocator.reverse(str(lat) + ", " + str(lon))
+        address = location.raw['address']
+        if use_redacted:
+            # redacted address when no GPS / bot config location
             address_components = {
                 'city': 'Ort',
+                'town': 'Ort',
+                'village': 'Ort',
                 'state': 'Bundesland',
                 'postcode': 'PLZ',
                 'county': 'Kreis',
                 'country': 'Land'
             }
-            whereIam += ', '.join([f"{label}: {address.get(component, '')}" for component, label in address_components.items() if component in address])
+            parts = []
+            seen_labels = set()
+            for component, label in address_components.items():
+                if component not in address or label in seen_labels:
+                    continue
+                parts.append(f"{label}: {address[component]}")
+                seen_labels.add(label)
+            whereIam += ', '.join(parts)
         else:
-            location = geolocator.reverse(lat + ", " + lon)
-            address = location.raw['address']
             address_components = {
                 'house_number': 'Nr',
                 'road': 'Straße',
@@ -1010,24 +1232,11 @@ def log_locationData_toMap(userID, location, message):
         return False
 
 def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
+    from modules.location_request import resolve_or_request_location
     from modules.system import get_node_location
     map_idx = message.lower().index("map")
     command = message[map_idx + len("map"):].strip()
-    location = get_node_location(userID, deviceID)
-    lat = location[0]
-    lon = location[1]
-    """
-    Handles 'map' commands from meshbot.
-    Usage:
-      map save <name> [description]  - Save current location with a name
-      map save public <name> [desc]   - Save public location (all can see)
-      map <name>                      - Get heading and distance to a saved location
-      map public <name>               - Get heading to public location (ignores private)
-      map delete <name>               - Delete a location
-      map list                        - List all saved locations
-      map log <description>          - Log current location with description (CSV, legacy)
-    """
-    command = str(command)  # Ensure command is always a string
+    command = str(command)
 
     if command.strip().lower() == "help":
         return (
@@ -1040,6 +1249,42 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
             f"'map log <description>' - Log CSV\n"
         )
 
+    cmd_l = command.lower().strip()
+    needs_gps = not (cmd_l == "list" or cmd_l.startswith("delete "))
+
+    def _run_with_loc(lat, lon, location):
+        return _map_handler_body(
+            userID, deviceID, channel_number, command, snr, rssi, hop, lat, lon, location
+        )
+
+    if needs_gps:
+        def build(lat, lon, source, label):
+            location = [lat, lon]
+            return _run_with_loc(lat, lon, location)
+
+        resolved = resolve_or_request_location(
+            message,
+            userID,
+            deviceID,
+            command_tokens=("map",),
+            cmd_key="map",
+            timeout_kind="gps_only",
+            build_response=build,
+        )
+        if resolved is None:
+            return ""
+        if isinstance(resolved, str):
+            return resolved
+        lat, lon, source, label = resolved
+        return build(lat, lon, source, label)
+
+    location = get_node_location(userID, deviceID)
+    lat = location[0] if location else None
+    lon = location[1] if location else None
+    return _run_with_loc(lat, lon, location)
+
+
+def _map_handler_body(userID, deviceID, channel_number, command, snr, rssi, hop, lat, lon, location):
     # Handle "save" command
     if command.lower().startswith("save "):
         save_cmd = command[5:].strip()
@@ -1073,7 +1318,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
             else:
                 description = f"Meta:{hop}"
         
-        if not location or len(location) != 2 or lat == 0 or lon == 0:
+        if not location or len(location) != 2 or lat in (None, 0) or lon in (None, 0):
             return "🚫 Standortdaten fehlen oder ungültig."
         
         # Get altitude for the node
@@ -1112,7 +1357,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
         
         if saved_location:
             # Calculate heading and distance from current location
-            if not location or len(location) != 2 or lat == 0 or lon == 0:
+            if not location or len(location) != 2 or lat in (None, 0) or lon in (None, 0):
                 result = f"📍{saved_location['name']} (Public): {saved_location['lat']:.5f}, {saved_location['lon']:.5f}"
                 if saved_location.get('altitude') is not None:
                     result += f" @ {saved_location['altitude']:.1f}m"
@@ -1201,7 +1446,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
             description += f" Meta:{hop}"
 
         # location should be a tuple: (lat, lon)
-        if not location or len(location) != 2:
+        if not location or len(location) != 2 or lat is None or lon is None:
             return "🚫 Standortdaten fehlen oder ungültig."
 
         success = log_locationData_toMap(userID, location, description)
@@ -1217,7 +1462,7 @@ def mapHandler(userID, deviceID, channel_number, message, snr, rssi, hop):
         
         if saved_location:
             # Calculate heading and distance from current location
-            if not location or len(location) != 2 or lat == 0 or lon == 0:
+            if not location or len(location) != 2 or lat in (None, 0) or lon in (None, 0):
                 result = f"📍{saved_location['name']}: {saved_location['lat']:.5f}, {saved_location['lon']:.5f}"
                 if saved_location.get('altitude') is not None:
                     result += f" @ {saved_location['altitude']:.1f}m"

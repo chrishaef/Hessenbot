@@ -297,10 +297,15 @@ def _split_mesh_chunks(text: str, max_len: int = None) -> list[str]:
     return chunks
 
 
-def _warning_location_line(lat, lon, from_gps: bool) -> str:
-    if from_gps:
-        return "Standort: ✓"
-    return f"Location: ✗ Fallback {_short_coord(lat, lon)}"
+def _warning_location_line(lat, lon, from_gps=None, *, source=None, label=None) -> str:
+    from modules.system import format_location_source_note
+
+    note = format_location_source_note(from_gps, source=source, label=label)
+    if source in ("arg-coords", "arg-grid", "arg-place"):
+        return note or "📍 Standort (Angabe)"
+    if from_gps is True or source == "gps":
+        return note or "📍 Standort bekannt"
+    return f"{note}\nFallback {_short_coord(lat, lon)}"
 
 
 def _fetch_warning_items(lat, lon) -> list[dict]:
@@ -315,12 +320,21 @@ def _fetch_warning_items(lat, lon) -> list[dict]:
     return [item for item in data if isinstance(item, dict)]
 
 
-def build_warning_messages(lat, lon, from_gps: bool, max_alerts: int = 5, include_detail: bool = False) -> list[str]:
+def build_warning_messages(
+    lat,
+    lon,
+    from_gps=None,
+    max_alerts: int = 5,
+    include_detail: bool = False,
+    *,
+    source=None,
+    label=None,
+) -> list[str]:
     """
     Mesh-sized reply parts for !warning.
     include_detail=True adds the full description text (for DM responses).
     """
-    header = _warning_location_line(lat, lon, from_gps)
+    header = _warning_location_line(lat, lon, from_gps, source=source, label=label)
     items = _fetch_warning_items(lat, lon)
 
     if not items:

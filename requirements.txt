@@ -4,7 +4,6 @@ ephem
 requests
 maidenhead
 beautifulsoup4
-dadjokes
 geopy
 schedule
 flask>=3.0

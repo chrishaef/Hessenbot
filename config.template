@@ -30,6 +30,8 @@ packetDedupEnabled = True
 packetDedupTtlSeconds = 300
 # Max entries in the dedup cache (oldest expire first)
 packetDedupMaxEntries = 8192
+# Wait for richer duplicate (e.g. UDP after MQTT) before hop count / !ping reply (milliseconds)
+packetDedupHopWaitMs = 800
 # if False will respond on all channels but the default channel
 respond_by_dm_only = True
 # Allows auto-ping feature in a channel, False forces to 1 ping only
@@ -40,7 +42,7 @@ defaultChannel = 0
 ignoreDefaultChannel = True
 # ignoreChannels is a comma separated list of channels to ignore, e.g. 4,5
 ignoreChannels = 2,3,4 
-# require ! to be the first character in a command
+# require ! as first character for channel commands; DMs also accept bare first-word commands
 cmdBang = True
 # require explicit command, the message will only be processed if it starts with a command word
 explicitCmd = True
@@ -53,10 +55,6 @@ welcome_message = Hessenbot (Meshhessen) — dein Mesh-Assistent. Probiere: ping
 
 # whoami
 whoami = True
-
-# enable or disable the Joke module
-DadJokes = False
-DadJokesEmoji = False
 
 # enable or disable the Solar module
 spaceWeather = True
@@ -206,6 +204,16 @@ bbslink_enabled = False
 bbslink_whitelist =
 # enable API script access (increases disk i/o)
 bbsAPI_enabled = True
+# BBS-DM Nutzer-Lesebestätigung (bbspost ack @… #… / ack <id>)
+bbsDmUserAckEnabled = False
+# Retry-Intervall in Sekunden ohne Nutzer-ACK (Default 15 min)
+bbsDmAckRetrySeconds = 900
+# Max. Zustellversuche für ACK-pflichtige DMs
+bbsDmAckMaxAttempts = 5
+# Ablauf nach Sekunden ohne Nutzer-ACK (Default 2 h)
+bbsDmAckExpireSeconds = 7200
+# Status-DMs an Absender bei Queue/Versuch/Node-ACK/Nutzer-ACK/Ablauf
+bbsDmNotifySender = True
 
 [polls]
 # Einfache Umfragen: !poll im Mesh, Verwaltung im Admin-Backend (/umfragen)
@@ -230,6 +238,10 @@ delete_public_locations_admins_only = False
 
 # Default to metric units rather than imperial
 useMetric = True
+# If a command needs the node's GPS and none is known: request position over the mesh
+locationRequestEnabled = True
+locationRequestTimeoutSec = 25
+locationRequestCooldownSec = 60
 
 # repeaterList lookup location (rbook / artsci / False)
 repeaterLookup = rbook
@@ -242,9 +254,9 @@ satList = 25544,7530
 
 # use Open-Meteo API for weather data not NOAA useful for non US locations
 UseMeteoWxAPI = True
-# METAR of nearest airport for !metar (aviationweather.gov; needs GPS or config lat/lon)
+# METAR of nearest airport for !metar (aviationweather.gov; needs GPS or Ort/Coords)
 metar_enabled = True
-# Short Open-Meteo commands: !uv, !regen, !blitz (needs GPS or config lat/lon)
+# Short Open-Meteo commands: !uv, !regen, !blitz (needs GPS or Ort/Coords)
 wxExtraCommands = True
 # Live lightning for !blitz: DMI (EU, no key); optional Blitzortung.org account (better coverage)
 blitzLiveData = True
@@ -252,6 +264,16 @@ blitzRadiusKm = 150
 # Optional: free Blitzortung.org data login (https://www.blitzortung.org) — leave empty for DMI only
 blitzortungUser =
 blitzortungPassword =
+# Auto Blitzwatch: Home (GPS or fixed) + up to 3 extra locations; DM + channel alerts
+blitzWatchEnabled = True
+blitzWatchDefaultRadiusKm = 8
+blitzWatchMaxRadiusKm = 10
+# Cooldown per watch point (home / each extra slot) and for the channel message
+blitzWatchCooldownMin = 60
+blitzWatchPollMin = 5
+# Empty = defaultChannel (general.defaultChannel)
+blitzWatchChannel =
+blitzwatch_db = data/blitzwatch.db
 
 # Use Germany/DE Alert Broadcast Data (NINA/Katwarn/DWD via warnung.bund.de)
 enableDEalerts = True
@@ -297,11 +319,14 @@ training = False
 # repeater module
 [channelTest]
 # Reply in-channel (not DM) to a bare "test"/"Test" without the leading "!",
-# on the selected channels only. Same response as !test. Managed in the web admin
-# (tab "Channel-Test"). All other commands keep requiring DM and/or "!".
+# on the selected channels only. Managed in the web admin (tab "Channel-Test").
+# Per channel: long message (!test text) or short mesh reaction (emoji tapback).
 enabled = False
 # comma separated channel numbers, e.g. 0,2
 channels =
+# optional modes: 1=long,2=react:👍,3=react:✅:hops  (default per channel = long)
+# :hops = second reaction with hop-count digit emoji (0–9)
+modes =
 
 [repeater]
 enabled = False
@@ -322,9 +347,9 @@ message = "Hessenbot (Meshhessen) grüßt! DM für mehr Infos."
 # enable overides the above and uses the motd as the message
 schedulerMotd = False
 # value = Zeitplantyp (siehe Web-Admin Scheduler oder modules/scheduler.py). z.B. day, hour, min, mon…sun,
-# joke, link, weather, news, readrss, mwx, sysinfo, tide, solar, custom
+# link, weather, news, readrss, mwx, sysinfo, tide, solar, custom
 value =
-# interval = Zahl: bei day oft Tage; bei hour/min Stunden bzw. Minuten; bei joke Minuten;
+# interval = Zahl: bei day oft Tage; bei hour/min Stunden bzw. Minuten;
 # bei link/news/readrss/sysinfo Stunden (siehe Kurzübersicht im Web-Admin)
 interval = 
 # time = Uhrzeit HH:MM (24h), nötig u.a. für day mit Uhrzeit, Wochentage mon…sun, weather, mwx, tide, solar
@@ -384,7 +409,7 @@ voxInputDevice = default
 # "hey chirpy"
 voxOnTrapList = True
 voxTrapList = chirpy
-# allow use of 'weather' and 'joke' commands via VOX
+# allow use of 'weather' commands via VOX
 voxEnableCmd = True
 
 # Meshages Text-to-Speech (TTS) for incoming messages and DM
@@ -495,6 +520,15 @@ autoBanThreshold = 5
 apiThrottleValue = 20
 # Timeframe for offenses (in seconds)
 autoBanTimeframe = 3600
+# Global command rate limit (per node) — protects mesh airtime
+cmdRateLimitEnabled = True
+cmdRateLimitMax = 3
+cmdRateLimitWindow = 60
+# Only one "please slow down" DM per window; further hits stay silent
+cmdRateLimitNotifyOnce = True
+# Extra cooldown for expensive / multi-chunk commands (seconds, 0 = off)
+cmdExpensiveCooldownSec = 45
+cmdExpensiveCommands = wx,wxc,warning,dealert,blitz,uv,regen,trace,whereami,rlist,satpass,tide,river,earthquake
 
 [dataPersistence]
 # Enable or disable the data persistence loop service
@@ -510,10 +544,30 @@ port = 5000
 # Session signing; prefer env HESSENBOT_WEB_SECRET instead of storing in config
 secret_key =
 username = admin
-# Leave empty and set env HESSENBOT_WEB_PASSWORD, or set a strong password here
-password = hessenadmin
+# Passwort leer lassen und Env HESSENBOT_WEB_PASSWORD setzen, oder hier ein starkes Passwort eintragen.
+# Niemals ein öffentliches Default-Passwort verwenden — ohne Passwort startet der Admin-Login nicht.
+password =
 # Optional path overrides (project-relative if not absolute). Empty = use [fileMon] file_path / news_file_path and logs/
 alert_file =
 news_file =
 # empty = logs/ under repo root (/opt/Hessenbot/logs); absolute path also allowed
 log_dir =
+# Öffentliche Basis-URL des Portals (ohne Slash), z. B. https://bot.example.de
+# erscheint im DM-Text von !blitzwatch web / set
+publicUrl =
+# Impressum für die öffentliche Webseite (/impressum) — Pflichtangaben des Betreibers
+impressumOperator =
+impressumAddress =
+impressumEmail =
+impressumPhone =
+# Optionaler Zusatztext (z. B. Hinweis Amateurfunk / Haftung)
+impressumExtra =
+# Optionaler Zusatztext für /datenschutz
+datenschutzExtra =
+# Service-API (POST /api/v1/dm, GET /api/v1/whoami) — Verwaltung im Admin-Tab „API“:
+# Token wird dort zufällig erzeugt und nur einmal angezeigt; hier liegt nur der Hash.
+api_enabled = False
+api_token_hash =
+# Veraltet: Klartext-Token nicht mehr setzen (wird beim Start nach api_token_hash migriert).
+# Optionaler Env-Override: HESSENBOT_API_TOKEN=<klartext>
+api_token =

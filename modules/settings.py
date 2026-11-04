@@ -24,6 +24,7 @@ bbs_admin_list = [] # list of admin users, imported from config
 repeater_channels = [] # list of channels to listen on for repeater mode, imported from config
 channel_test_enabled = False # reply in-channel to a bare "test" on selected channels
 channel_test_channels = [] # channels where the in-channel "test" reply is active
+channel_test_modes = "" # "1=long,2=react:👍" — see parse_channel_test_modes()
 antiSpam = True # anti-spam feature to prevent flooding public channel
 ping_enabled = True # ping feature to respond to pings, ack's etc.
 sitrep_enabled = True # sitrep feature to respond to sitreps
@@ -120,7 +121,7 @@ if 'newsBroadcast' not in config:
     config.write(open(config_file, 'w'))
 
 if 'channelTest' not in config:
-    config['channelTest'] = {'enabled': 'False', 'channels': ''}
+    config['channelTest'] = {'enabled': 'False', 'channels': '', 'modes': ''}
     config.write(open(config_file, 'w'))
 
 if 'emergencyHandler' not in config:
@@ -154,8 +155,47 @@ if 'webAdmin' not in config:
         'alert_file': '',
         'news_file': '',
         'log_dir': '',
+        'publicUrl': '',
+        'impressumOperator': '',
+        'impressumAddress': '',
+        'impressumEmail': '',
+        'impressumPhone': '',
+        'impressumExtra': '',
+        'datenschutzExtra': '',
+        'api_enabled': 'False',
+        'api_token_hash': '',
+        'api_token': '',
     }
     config.write(open(config_file, 'w'))
+elif 'publicUrl' not in config['webAdmin']:
+    # Bestehende Installationen: Feld für !blitzwatch set / Admin-Einstellungen nachziehen
+    config['webAdmin']['publicUrl'] = ''
+    config.write(open(config_file, 'w'))
+
+_IMPRESSUM_KEYS = (
+    'impressumOperator',
+    'impressumAddress',
+    'impressumEmail',
+    'impressumPhone',
+    'impressumExtra',
+    'datenschutzExtra',
+)
+if 'webAdmin' in config:
+    _imp_added = False
+    for _k in _IMPRESSUM_KEYS:
+        if _k not in config['webAdmin']:
+            config['webAdmin'][_k] = ''
+            _imp_added = True
+    if _imp_added:
+        config.write(open(config_file, 'w'))
+
+if 'webAdmin' in config:
+    # Service-API: Enable-Flag + Token-Hash; Legacy-Klartext einmalig migrieren
+    from modules.service_api import migrate_plaintext_token_if_needed
+
+    if migrate_plaintext_token_if_needed(config):
+        config.write(open(config_file, 'w'))
+
 
 if 'location' not in config:
     config['location'] = {'locations_db': 'data/locations.db', 'public_location_admin_manage': 'False', 'delete_public_locations_admins_only': 'False'}
@@ -259,6 +299,7 @@ try:
     packet_dedup_enabled = config['general'].getboolean('packetDedupEnabled', True)
     packet_dedup_ttl_seconds = config['general'].getint('packetDedupTtlSeconds', 300)
     packet_dedup_max_entries = config['general'].getint('packetDedupMaxEntries', 8192)
+    packet_dedup_hop_wait_ms = config['general'].getint('packetDedupHopWaitMs', 800)
     useDMForResponse = config['general'].getboolean('respond_by_dm_only', True)
     publicChannel = config['general'].getint('defaultChannel', 0) # the meshtastic public channel
     ignoreChannels = config['general'].get('ignoreChannels', '').split(',') # ignore these channels
@@ -270,10 +311,17 @@ try:
     channel_test_channels = [
         c.strip() for c in config['channelTest'].get('channels', '').split(',') if c.strip()
     ]
+    # Per channel: "1=long,2=react:👍,3=react" — missing entry defaults to long
+    channel_test_modes = config['channelTest'].get('modes', '')
     explicitCmd = config['general'].getboolean('explicitCmd', True) # default on
     zuluTime = config['general'].getboolean('zuluTime', False) # aka 24 hour time
     log_messages_to_file = config['general'].getboolean('LogMessagesToFile', False) # default off
-    log_backup_count = config['general'].getint('LogBackupCount', 32) # default 32 days
+    # Template: log_backup_count · älterer Name: LogBackupCount
+    # SectionProxy has no has_option — use membership or ConfigParser.has_option(section, key)
+    if 'log_backup_count' in config['general']:
+        log_backup_count = config['general'].getint('log_backup_count')
+    else:
+        log_backup_count = config['general'].getint('LogBackupCount', 32) # default 32 days
     syslog_to_file = config['general'].getboolean('SyslogToFile', True) # default on
     LOGGING_LEVEL = config['general'].get('sysloglevel', 'DEBUG') # default DEBUG
     urlTimeoutSeconds = config['general'].getint('urlTimeout', 15) # default 15 seconds for URL fetch timeout
@@ -292,10 +340,13 @@ try:
     MOTD = config['general'].get('motd', MOTD)
     autoPingInChannel = config['general'].getboolean('autoPingInChannel', False)
     enableCmdHistory = config['general'].getboolean('enableCmdHistory', True)
-    lheardCmdIgnoreNode = config['general'].get('lheardCmdIgnoreNode', '').split(',')
+    # Template: lheardCmdIgnoreNodes · älterer Name: lheardCmdIgnoreNode
+    _lheard_ignore = config['general'].get(
+        'lheardCmdIgnoreNodes',
+        config['general'].get('lheardCmdIgnoreNode', ''),
+    )
+    lheardCmdIgnoreNode = _lheard_ignore.split(',')
     whoami_enabled = config['general'].getboolean('whoami', True)
-    dad_jokes_enabled = config['general'].getboolean('DadJokes', False)
-    dad_jokes_emojiJokes = config['general'].getboolean('DadJokesEmoji', False)
     bee_enabled = config['general'].getboolean('bee', False) # 🐝 off by default undocumented
     solar_conditions_enabled = config['general'].getboolean('spaceWeather', True)
     wikipedia_enabled = config['general'].getboolean('wikipedia', False)
@@ -344,14 +395,22 @@ try:
     reqLocationEnabled = config['sentry'].getboolean('reqLocationEnabled', False) # default False
     cmdShellSentryAlerts = config['sentry'].getboolean('cmdShellSentryAlerts', False) # default False
     sentryAlertNear = config['sentry'].get('sentryAlertNear', 'sentry_alert_near.sh') # default sentry_alert_near.sh
-    sentryAlertFar = config['sentry'].get('sentryAlertFar', 'sentry_alert_far.sh') # default sentry_alert_far.sh
+    # Template: sentryAlertAway · älterer Name: sentryAlertFar
+    sentryAlertFar = config['sentry'].get(
+        'sentryAlertAway',
+        config['sentry'].get('sentryAlertFar', 'sentry_alert_far.sh'),
+    )
 
     # location
     location_enabled = config['location'].getboolean('enabled', True)
     latitudeValue = config['location'].getfloat('lat', 48.50)
     longitudeValue = config['location'].getfloat('lon', -123.0)
     fuzz_config_location = config['location'].getboolean('fuzzConfigLocation', True) # default True
-    fuzzItAll = config['location'].getboolean('fuzzAllLocations', False) # default False, only fuzz config location
+    # Template: fuzzItAll · älterer Name: fuzzAllLocations
+    if 'fuzzItAll' in config['location']:
+        fuzzItAll = config['location'].getboolean('fuzzItAll')
+    else:
+        fuzzItAll = config['location'].getboolean('fuzzAllLocations', False)
     use_meteo_wxApi = config['location'].getboolean('UseMeteoWxAPI', False) # default False use NOAA
     metar_enabled = config['location'].getboolean('metar_enabled', True)
     wx_extra_commands = config['location'].getboolean('wxExtraCommands', True)
@@ -359,7 +418,19 @@ try:
     blitz_radius_km = config['location'].getint('blitzRadiusKm', 150)
     blitzortung_user = config['location'].get('blitzortungUser', '').strip()
     blitzortung_password = config['location'].get('blitzortungPassword', '').strip()
+    # Automatic lightning proximity alerts (!blitzwatch)
+    blitz_watch_enabled = config['location'].getboolean('blitzWatchEnabled', True)
+    blitz_watch_default_radius_km = config['location'].getint('blitzWatchDefaultRadiusKm', 8)
+    blitz_watch_max_radius_km = config['location'].getint('blitzWatchMaxRadiusKm', 10)
+    blitz_watch_cooldown_sec = config['location'].getint('blitzWatchCooldownMin', 60) * 60
+    blitz_watch_poll_sec = config['location'].getint('blitzWatchPollMin', 5) * 60
+    _bw_ch = config['location'].get('blitzWatchChannel', '').strip()
+    blitz_watch_channel = int(_bw_ch) if _bw_ch.isdigit() else None
+    blitzwatch_db = config['location'].get('blitzwatch_db', 'data/blitzwatch.db')
     use_metric = config['location'].getboolean('useMetric', False) # default Imperial units
+    location_request_enabled = config['location'].getboolean('locationRequestEnabled', True)
+    location_request_timeout_sec = config['location'].getint('locationRequestTimeoutSec', 25)
+    location_request_cooldown_sec = config['location'].getint('locationRequestCooldownSec', 60)
     repeater_lookup = config['location'].get('repeaterLookup', 'rbook') # default repeater lookup source
     n2yoAPIKey = config['location'].get('n2yoAPIKey', '') # default empty
     satListConfig = config['location'].get('satList', '25544').split(',') # default 25544 ISS
@@ -422,6 +493,11 @@ try:
     bbs_link_enabled = config['bbs'].getboolean('bbslink_enabled', False)
     bbs_link_whitelist = config['bbs'].get('bbslink_whitelist', '').split(',')
     bbsAPI_enabled = config['bbs'].getboolean('bbsAPI_enabled', False)
+    bbs_dm_user_ack_enabled = config['bbs'].getboolean('bbsDmUserAckEnabled', False)
+    bbs_dm_ack_retry_seconds = config['bbs'].getint('bbsDmAckRetrySeconds', 900)
+    bbs_dm_ack_max_attempts = config['bbs'].getint('bbsDmAckMaxAttempts', 5)
+    bbs_dm_ack_expire_seconds = config['bbs'].getint('bbsDmAckExpireSeconds', 7200)
+    bbs_dm_notify_sender = config['bbs'].getboolean('bbsDmNotifySender', True)
 
     # Umfragen
     polls_enabled = config['polls'].getboolean('enabled', True)
@@ -552,6 +628,18 @@ try:
     web_admin_alert_file = config['webAdmin'].get('alert_file', '').strip()
     web_admin_news_file = config['webAdmin'].get('news_file', '').strip()
     web_admin_log_dir = config['webAdmin'].get('log_dir', '').strip()
+    web_admin_public_url = config['webAdmin'].get('publicUrl', '').strip()
+    # Service-API: Schalter + SHA-256-Hash (Klartext nur einmal im Admin-Tab „API“).
+    # Env HESSENBOT_API_TOKEN (Klartext) überschreibt den Config-Hash zur Laufzeit.
+    web_admin_api_enabled = config['webAdmin'].getboolean('api_enabled', False)
+    web_admin_api_token_hash = config['webAdmin'].get('api_token_hash', '').strip().lower()
+    web_admin_api_token = os.environ.get('HESSENBOT_API_TOKEN', '').strip()  # nur Env; Config-Klartext ist deprecated
+    web_admin_impressum_operator = config['webAdmin'].get('impressumOperator', '').strip()
+    web_admin_impressum_address = config['webAdmin'].get('impressumAddress', '').strip()
+    web_admin_impressum_email = config['webAdmin'].get('impressumEmail', '').strip()
+    web_admin_impressum_phone = config['webAdmin'].get('impressumPhone', '').strip()
+    web_admin_impressum_extra = config['webAdmin'].get('impressumExtra', '').strip()
+    web_admin_datenschutz_extra = config['webAdmin'].get('datenschutzExtra', '').strip()
 
     # messaging settings
     responseDelay = config['messagingSettings'].getfloat('responseDelay', 0.7) # default 0.7
@@ -575,8 +663,17 @@ try:
     autoBanTimeframe = config['messagingSettings'].getint('autoBanTimeframe', 3600) # default 1 hour in seconds
     apiThrottleValue = config['messagingSettings'].getint('apiThrottleValue', 20) # default 20 requests
     cmdRateLimitEnabled = config['messagingSettings'].getboolean('cmdRateLimitEnabled', True)
-    cmdRateLimitMax = config['messagingSettings'].getint('cmdRateLimitMax', 5) # max commands per window
-    cmdRateLimitWindow = config['messagingSettings'].getint('cmdRateLimitWindow', 30) # window in seconds
+    cmdRateLimitMax = config['messagingSettings'].getint('cmdRateLimitMax', 3) # max commands per window
+    cmdRateLimitWindow = config['messagingSettings'].getint('cmdRateLimitWindow', 60) # window in seconds
+    cmdRateLimitNotifyOnce = config['messagingSettings'].getboolean('cmdRateLimitNotifyOnce', True)
+    cmdExpensiveCooldownSec = config['messagingSettings'].getint('cmdExpensiveCooldownSec', 45)
+    _exp_cmds = config['messagingSettings'].get(
+        'cmdExpensiveCommands',
+        'wx,wxc,warning,dealert,blitz,uv,regen,trace,whereami,rlist,satpass,tide,river,earthquake',
+    )
+    cmdExpensiveCommands = [
+        c.strip().lower().rstrip('?') for c in str(_exp_cmds).split(',') if c.strip()
+    ]
 
     # data persistence settings
     dataPersistence_enabled = config.getboolean('dataPersistence', 'enabled', fallback=True) # default True
@@ -629,7 +726,87 @@ cluster_mqtt_broker_url    = os.environ.get("HESSENBOT_MQTT_BROKER_URL", "")
 cluster_mqtt_check_enabled = os.environ.get(
     "HESSENBOT_MQTT_CHECK", "false"
 ).lower() in ("1", "true", "yes")
-    print(f"System: Error reading config file: {e}")
-    print("System: Check the config.ini against config.template file for missing sections or values.")
-    print("System: Exiting...")
-    exit(1)
+
+
+CHANNEL_TEST_DEFAULT_EMOJI = "👍"
+CHANNEL_TEST_EMOJI_CHOICES = ("👍", "✅")
+
+
+def parse_channel_test_modes(raw: str) -> dict:
+    """Parse modes string → {channel: (mode, emoji, hops)}.
+
+    Examples: ``1=long``, ``2=react:👍``, ``3=react:✅:hops``.
+    """
+    out = {}
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        ch, rest = part.split("=", 1)
+        ch = ch.strip()
+        if not ch.isdigit():
+            continue
+        rest = rest.strip()
+        if not rest:
+            continue
+        hops = False
+        if ":" in rest:
+            mode, rem = rest.split(":", 1)
+            mode = mode.strip().lower()
+            bits = [b.strip() for b in rem.split(":") if b.strip()]
+            emoji = CHANNEL_TEST_DEFAULT_EMOJI
+            for bit in bits:
+                if bit.lower() == "hops":
+                    hops = True
+                elif bit in CHANNEL_TEST_EMOJI_CHOICES:
+                    emoji = bit
+                elif bit:  # unknown token — treat as emoji if plausible
+                    emoji = bit
+        else:
+            mode = rest.lower()
+            emoji = CHANNEL_TEST_DEFAULT_EMOJI
+        if mode not in ("long", "react"):
+            mode = "long"
+        if mode == "long":
+            emoji = ""
+            hops = False
+        elif emoji not in CHANNEL_TEST_EMOJI_CHOICES:
+            emoji = CHANNEL_TEST_DEFAULT_EMOJI
+        out[ch] = (mode, emoji, hops)
+    return out
+
+
+def serialize_channel_test_modes(modes: dict) -> str:
+    """Serialize {ch: (mode, emoji[, hops])} → config string."""
+    parts = []
+    for ch in sorted(modes.keys(), key=lambda x: (len(str(x)), str(x))):
+        entry = modes[ch]
+        if len(entry) >= 3:
+            mode, emoji, hops = entry[0], entry[1], bool(entry[2])
+        else:
+            mode, emoji, hops = entry[0], entry[1], False
+        mode = str(mode or "long").lower()
+        if mode == "react":
+            em = emoji or CHANNEL_TEST_DEFAULT_EMOJI
+            s = f"{ch}=react:{em}"
+            if hops:
+                s += ":hops"
+            parts.append(s)
+        else:
+            parts.append(f"{ch}=long")
+    return ",".join(parts)
+
+
+def channel_test_mode(channel_number) -> tuple:
+    """Return (mode, emoji, hops_enabled). Default (\"long\", \"\", False)."""
+    try:
+        ch = str(int(channel_number))
+    except (TypeError, ValueError):
+        ch = str(channel_number).strip()
+    modes = parse_channel_test_modes(globals().get("channel_test_modes", ""))
+    if ch not in modes:
+        return "long", "", False
+    entry = modes[ch]
+    if len(entry) >= 3:
+        return entry[0], entry[1], bool(entry[2])
+    return entry[0], entry[1], False

@@ -1,0 +1,40 @@
+# Automatische Unit-Tests bei Push/PR auf main.
+# Läuft nicht den Bot und baut kein Docker-Image — nur schnelle pytest-Checks.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Prepare config for tests
+        run: cp config.template config.ini
+
+      - name: Run unit tests
+        run: |
+          python -m pytest modules/test_blitzwatch.py modules/test_location_args.py modules/test_location_request.py modules/test_throttle.py modules/test_service_api.py modules/test_bbs_dm_ack.py -q --tb=short

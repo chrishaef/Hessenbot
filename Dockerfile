@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1 \
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8 \
-    TZ=America/Los_Angeles
+    TZ=Europe/Berlin
 
 RUN apt-get update && \
     apt-get install -y \
@@ -37,7 +37,5 @@ RUN chmod +x /app/script/docker/entrypoint.sh
 
 # Expose Meshtastic TCP API port from the host
 #EXPOSE 4403
-# Meshing Around Web Dashboard port
-#EXPOSE 8420
 
 ENTRYPOINT ["/bin/bash", "/app/script/docker/entrypoint.sh"]

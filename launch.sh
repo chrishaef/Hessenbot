@@ -1,29 +1,24 @@
 #!/bin/bash
-# This script launches the meshing-around bot or the report generator in python virtual environment
+# Launch Hessenbot (mesh_bot) or utility scripts in the Python virtual environment.
 
-# launch.sh
 cd "$(dirname "$0")"
-
 
 if [[ ! -f "config.ini" ]]; then
     cp config.template config.ini
 fi
 
-# activate the virtual environment if it exists
 if [[ -d "venv" ]]; then
     source venv/bin/activate
 else
-    echo "Virtual environment not found, this tool just launches the .py in venv"
+    echo "Virtual environment not found — create with: python3 -m venv venv && ./venv/bin/pip install -r requirements.txt"
     exit 1
 fi
 
 export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 export HOME=$(pwd)
-# launch the application
-if [[ "$1" == pong* ]]; then
-    python3 pong_bot.py
-elif [[ "$1" == mesh* ]]; then
+
+if [[ "$1" == mesh* ]]; then
     python3 mesh_bot.py
 elif [[ "$1" == "html" ]]; then
     python3 etc/report_generator.py
@@ -32,7 +27,7 @@ elif [[ "$1" == "html5" ]]; then
 elif [[ "$1" == add* ]]; then
     python3 script/addFav.py
 else
-    echo "Please provide a bot to launch (pong/mesh) or a report to generate (html/html5) or addFav"
+    echo "Usage: ./launch.sh mesh | html | html5 | add"
     exit 1
 fi
 

@@ -18,7 +18,7 @@ modules_path = os.path.join(parent_path, 'modules')
 
 CHECKALL = os.path.isfile(os.path.join(parent_path, '.checkall'))
 
-exclude = ['test_bot', 'udp', 'system', 'log', 'gpio', 'web']
+exclude = ['test_bot', 'test_location_args', 'test_blitzwatch', 'udp', 'system', 'log', 'gpio', 'web']
 
 try:
     print("\nImporting Core Modules:")
@@ -58,12 +58,658 @@ class TestBot(unittest.TestCase):
         self.assertFalse(dm_chunk_wants_delivery_ack(12345, 1, want_ack_on_dm=True))
         self.assertFalse(dm_chunk_wants_delivery_ack(12345, 0, want_ack_on_dm=False))
 
+    def test_detect_missing_cmd_bang(self):
+        from unittest.mock import patch
+        from modules.system import detect_missing_cmd_bang
+
+        traps = ("ping", "wx", "cmd", "bbspost")
+        with patch("modules.system.cmdBang", True), patch("modules.system.trap_list", traps):
+            self.assertEqual(detect_missing_cmd_bang("ping"), "ping")
+            self.assertEqual(detect_missing_cmd_bang("wx"), "wx")
+            self.assertEqual(detect_missing_cmd_bang("cmd?"), "cmd")
+            self.assertEqual(detect_missing_cmd_bang("Ping"), "Ping")
+            self.assertIsNone(detect_missing_cmd_bang("!ping"))
+            self.assertIsNone(detect_missing_cmd_bang("!wx test"))
+            self.assertIsNone(detect_missing_cmd_bang("hallo"))
+            self.assertIsNone(detect_missing_cmd_bang(""))
+        with patch("modules.system.cmdBang", False), patch("modules.system.trap_list", traps):
+            self.assertIsNone(detect_missing_cmd_bang("ping"))
+
+    def test_message_trap_dm_allows_bare_command(self):
+        from unittest.mock import patch
+        from modules.system import messageTrap
+
+        traps = ("ping", "wx", "cmd")
+        with (
+            patch("modules.system.cmdBang", True),
+            patch("modules.system.explicitCmd", True),
+            patch("modules.system.trap_list", traps),
+        ):
+            # Channels (default): bang required
+            self.assertFalse(messageTrap("ping"))
+            self.assertTrue(messageTrap("!ping"))
+            # DMs: with and without bang
+            self.assertTrue(messageTrap("ping", require_bang=False))
+            self.assertTrue(messageTrap("!ping", require_bang=False))
+            self.assertTrue(messageTrap("!cmd?", require_bang=False))
+            self.assertTrue(messageTrap("cmd?", require_bang=False))
+            self.assertFalse(messageTrap("hallo ping", require_bang=False))
+            self.assertFalse(messageTrap("ping bitte", require_bang=True))
+
+    def test_missing_cmd_bang_hint_text(self):
+        from modules.locale_de import missing_cmd_bang_hint
+
+        hint = missing_cmd_bang_hint("ping")
+        self.assertIn("!ping", hint)
+        self.assertIn("!cmd", hint)
+
+    def test_collect_messages_reads_rotated_meshbot_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        line_y = (
+            "2026-05-30 23:56:03,123 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "ReceivedChannel: gestern abends From: Chris\n"
+        )
+        line_t = (
+            "2026-05-31 12:42:00,456 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "Ignoring Message: heute mittag From: Pete\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log.2026-05-30"), "w", encoding="utf-8") as f:
+                f.write(line_y)
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(line_t)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=80)
+        self.assertIsNone(err)
+        texts = [m.get("text", "") for m in msgs]
+        self.assertIn("gestern abends", texts)
+        self.assertIn("heute mittag", texts)
+        self.assertEqual(msgs[-1].get("text"), "heute mittag")
+
+    def test_collect_messages_finds_dms_in_busy_channel_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        channel_noise = (
+            "2026-05-31 12:00:00,100 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "Ignoring Message: chatter From: Node{i}\n"
+        )
+        dm_in = (
+            "2026-05-31 12:45:00,200 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris\n"
+        )
+        dm_out = (
+            "2026-05-31 12:45:01,300 |     INFO | Device:1 req.ACK Sending DM: "
+            "pong To: Chris\n"
+        )
+        dm_missing = (
+            "2026-05-31 12:46:00,400 |     INFO | Device:1 Channel:0 "
+            "Received DM (missing !): ping From: Chris\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                for i in range(3000):
+                    f.write(channel_noise.format(i=i))
+                f.write(dm_in)
+                f.write(dm_out)
+                f.write(dm_missing)
+            msgs, err = collect_messages(td, kind="dm", limit=80)
+        self.assertIsNone(err)
+        texts = [m.get("text", "") for m in msgs]
+        self.assertIn("!ping", texts)
+        self.assertIn("pong", texts)
+        self.assertIn("ping", texts)
+
+    def test_dm_peer_id_name_fallback(self):
+        from modules.admin_mesh_chat import collect_messages, dm_peer_id
+
+        self.assertEqual(dm_peer_id({"long": "Chris"}), "n:chris")
+        self.assertEqual(dm_peer_id({"id": "42424242"}), "42424242")
+        self.assertEqual(dm_peer_id({"hex": "!0284a8c8"}), "!0284a8c8")
+
+        import os
+        import tempfile
+
+        line = (
+            "2026-05-31 12:45:00,200 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(line)
+            msgs, err = collect_messages(td, kind="dm", limit=10)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(dm_peer_id(msgs[0]), "n:chris")
+
+        line_hex = (
+            "2026-05-31 12:46:00,200 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris [!0284a8c8]\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(line_hex)
+            msgs, err = collect_messages(td, kind="dm", limit=10)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(dm_peer_id(msgs[0]), str(0x0284A8C8))
+
+    def test_resolve_dest_node_name_and_empty(self):
+        from unittest.mock import patch
+        from modules.admin_mesh_chat import resolve_dest_node
+
+        self.assertEqual(resolve_dest_node("", 1), (None, "Bitte Empfänger wählen."))
+        self.assertEqual(resolve_dest_node("424242", 1), (424242, None))
+        self.assertEqual(resolve_dest_node("!0284a8c8", 1), (0x0284A8C8, None))
+
+        rows = [
+            {
+                "num": 99,
+                "is_self": False,
+                "node_id": "!00000063",
+                "shortName": "Chr",
+                "longName": "Chris | meshhessen.de",
+            }
+        ]
+        with patch("modules.admin_web_ops.list_node_rows", return_value=(None, rows)):
+            num, err = resolve_dest_node("n:chris", 1)
+            self.assertIsNone(err)
+            self.assertEqual(num, 99)
+
+    def test_channel_feed_orders_in_before_out_same_second(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        lines = (
+            "2026-06-01 20:57:25,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "ReceivedChannel: test From: Chris\n"
+            "2026-06-01 20:57:25,200 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "SendingChannel: Chris [!deadbeef] QSL reply\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(lines)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 2)
+        self.assertEqual(msgs[0].get("dir"), "in")
+        self.assertEqual(msgs[0].get("text"), "test")
+        self.assertEqual(msgs[1].get("dir"), "out")
+
+    def test_channel_feed_dedup_meshbot_and_messages_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        mesh = (
+            "2026-06-01 21:00:00,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "Ignoring Message: Hallo Welt From: TaunusMesh\n"
+        )
+        msglog = (
+            "2026-06-01 21:00:00,150 | Device:1 Channel:1|Mesh Hessen | "
+            "TaunusMesh | meshhessen.de | Hallo Welt\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].get("text"), "Hallo Welt")
+
+    def test_channel_feed_dedup_received_channel_and_delayed_messages_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        mesh = (
+            "2026-06-01 21:16:46,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "ReceivedChannel: Test From: Chris\n"
+            "2026-06-01 21:16:46,200 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "SendingChannel: Chris [!deadbeef] QSL reply\n"
+        )
+        msglog = (
+            "2026-06-01 21:16:48,150 | Device:1 Channel:1|Mesh Hessen | "
+            "Chris | Test\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        incoming = [m for m in msgs if m.get("dir") == "in"]
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0].get("text"), "Test")
+        self.assertEqual(len(msgs), 2)
+
+    def test_resolve_dest_node_numeric_and_hex(self):
+        from modules.admin_mesh_chat import resolve_dest_node
+
+        num, err = resolve_dest_node("42424242", 1)
+        self.assertIsNone(err)
+        self.assertEqual(num, 42424242)
+
+        num, err = resolve_dest_node("!0284a8c8", 1)
+        self.assertIsNone(err)
+        self.assertEqual(num, 0x0284A8C8)
+
+        num, err = resolve_dest_node("", 1)
+        self.assertIsNone(num)
+        self.assertIn("Empfänger", err or "")
+
+    def test_channel_feed_dedup_realm_prefix_and_short_name(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        body = (
+            "Man soll auch keine Pizza in den Teilchenbeschleuniger werfen. "
+            "Trotzdem musste erst ein Schild aufgestellt werden."
+        )
+        mesh = (
+            "2026-06-03 21:30:57,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            f"Ignoring Message: {body} From: TaunusMesh\n"
+        )
+        msglog = (
+            "2026-06-03 21:30:57,150 | Device:1 Channel:1|Mesh Hessen | "
+            f"TaunusMesh | meshhessen.de | {body}\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        incoming = [m for m in msgs if m.get("dir") == "in"]
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0].get("text"), body)
+
+    def test_dm_feed_dedup_meshbot_and_messages_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        mesh = (
+            "2026-06-01 12:00:00,100 |     INFO | Device:1 Channel:0 "
+            "Received DM: !ping From: Chris mobil 📲 *meshhessen.de*\n"
+        )
+        msglog = (
+            "2026-06-01 12:00:02,150 | Device:1 Channel:0 | "
+            "Chris 🌐🛰️ *meshhessen.de* | DM | ping\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            msgs, err = collect_messages(td, kind="dm", limit=20)
+        self.assertIsNone(err)
+        incoming = [m for m in msgs if m.get("dir") == "in"]
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0].get("text"), "!ping")
+
+    def test_dm_feed_dedup_outgoing_web_and_bot_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import (
+            _RING,
+            _RING_LOCK,
+            _merge_events,
+            collect_messages,
+            record_optimistic,
+        )
+
+        mesh = (
+            "2026-06-01 12:01:00,200 |     INFO | Device:1 req.ACK "
+            "Sending DM: Hallo zurück To: Chris mobil 📲 *meshhessen.de*\n"
+        )
+        with _RING_LOCK:
+            _RING.clear()
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(mesh)
+            msgs, err = collect_messages(td, kind="dm", limit=20)
+        self.assertIsNone(err)
+        record_optimistic(
+            {
+                "time": "2026-06-01T12:01:00",
+                "time_short": "12:01:00",
+                "dir": "out",
+                "kind": "dm",
+                "channel": 0,
+                "channel_label": "DM",
+                "device": 1,
+                "text": "Hallo zurück",
+                "id": "1127983492",
+                "short": "Chris",
+                "long": "Chris mobil",
+                "source": "web",
+            }
+        )
+        merged = _merge_events(msgs, [])
+        outgoing = [m for m in merged if m.get("dir") == "out"]
+        self.assertEqual(len(outgoing), 1)
+        self.assertEqual(outgoing[0].get("source"), "web")
+        # Peer identity must stay the remote node, not Web-Admin
+        self.assertNotEqual(outgoing[0].get("short"), "Web-Admin")
+        with _RING_LOCK:
+            _RING.clear()
+
+    def test_channel_feed_dedup_outgoing_web_and_bot_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import (
+            _RING,
+            _RING_LOCK,
+            _merge_events,
+            collect_messages,
+            record_optimistic,
+        )
+
+        mesh = (
+            "2026-06-01 21:30:00,200 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "req.ACK SendingChannel: Hallo vom Admin Panel\n"
+        )
+        with _RING_LOCK:
+            _RING.clear()
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(mesh)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=20)
+        self.assertIsNone(err)
+        record_optimistic(
+            {
+                "time": "2026-06-01T21:30:00",
+                "time_short": "21:30:00",
+                "dir": "out",
+                "kind": "channel",
+                "channel": 1,
+                "channel_label": "Mesh Hessen",
+                "device": 1,
+                "text": "Hallo vom Admin Panel",
+                "short": "Web-Admin",
+                "long": "Hessenbot Web-Admin",
+                "source": "web",
+            }
+        )
+        merged = _merge_events(msgs, [])
+        outgoing = [m for m in merged if m.get("dir") == "out"]
+        self.assertEqual(len(outgoing), 1)
+        self.assertEqual(outgoing[0].get("short"), "Web-Admin")
+        self.assertEqual(outgoing[0].get("source"), "web")
+        with _RING_LOCK:
+            _RING.clear()
+
+    def test_public_dashboard_dedup_meshbot_and_messages_log(self):
+        import os
+        import tempfile
+        from modules.web_dashboard import parse_meshbot_log
+
+        body = "Oh aehm. Temporale Verzerrung in der chrona ordina."
+        mesh = (
+            "2026-06-03 22:22:27,100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            f"Ignoring Message: {body} From: TaunusMesh\n"
+        )
+        msglog = (
+            "2026-06-03 22:22:27,150 | Device:1 Channel:1|Mesh Hessen | "
+            f"TaunusMesh | meshhessen.de | {body}\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            stats = parse_meshbot_log(os.path.join(td, "meshbot.log"))
+        incoming = [
+            m
+            for m in stats.get("recent_messages") or []
+            if m.get("kind") == "channel" and m.get("dir") == "in"
+        ]
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0].get("text"), body)
+
+    def test_public_dashboard_reads_fresh_messages_log_when_meshbot_stale(self):
+        import os
+        import tempfile
+        from modules.web_dashboard import parse_meshbot_log, _channel_recent_messages
+
+        stale_mesh = (
+            "2026-05-31 19:01:06,464 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "Ignoring Message: !cmd From: TaunusMesh\n"
+            "2026-05-31 19:38:32,822 |    DEBUG | System: Exiting\n"
+        )
+        fresh_msglog = (
+            "2026-06-03 20:41:06,252 | Device:1 Channel:1|Mesh Hessen | "
+            "Chris | Wieder so ruhig. Haben wir schon Sommerloch ?\n"
+            "2026-06-03 20:45:04,171 | Device:1 Channel:1|Mesh Hessen | "
+            "Arheilgen 01 | meshhessen.de | 4️⃣\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write(stale_mesh)
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(fresh_msglog)
+            stats = parse_meshbot_log(os.path.join(td, "meshbot.log"))
+        ch1 = _channel_recent_messages(stats, channel=1, limit=5)
+        texts = [m.get("text") for m in ch1]
+        self.assertIn("Wieder so ruhig. Haben wir schon Sommerloch ?", texts)
+        self.assertIn("4️⃣", texts)
+        self.assertNotIn("!cmd", texts)
+
+    def test_public_channel_toplist_ignores_dm_noise_in_recent_window(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import load_public_channel_toplist
+
+        mesh_lines = []
+        for i in range(45):
+            mesh_lines.append(
+                "2026-06-03 22:00:{sec:02d},100 |     INFO | Device:1 Channel:1|Mesh Hessen "
+                f"Ignoring Message: filler{i} From: Node{i}\n".format(sec=i % 60)
+            )
+        mesh_lines.append(
+            "2026-06-03 22:43:04,513 |     INFO | Device:1 Channel:1|Mesh Hessen "
+            "Ignoring Message: Aktuellste Kanalnachricht From: EsGe-WT1\n"
+        )
+        for i in range(30):
+            mesh_lines.append(
+                f"2026-06-03 22:44:{i:02d},100 |     INFO | Device:1 Received DM: noise{i} From: {1000 + i}\n"
+            )
+        msglog = (
+            "2026-06-03 22:43:04,514 | Device:1 Channel:1|Mesh Hessen | "
+            "EsGe-WT1 | Aktuellste Kanalnachricht\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "meshbot.log"), "w", encoding="utf-8") as f:
+                f.write("".join(mesh_lines))
+            with open(os.path.join(td, "messages.log"), "w", encoding="utf-8") as f:
+                f.write(msglog)
+            top = load_public_channel_toplist(td, 1, limit=5)
+        texts = [m.get("text") for m in top]
+        self.assertIn("Aktuellste Kanalnachricht", texts)
+
+    def test_peer_display_names_format(self):
+        from unittest.mock import patch
+
+        from modules.web_dashboard import (
+            _hhmm_from_event,
+            _peer_display_names,
+            _render_toplist_message_item,
+        )
+
+        chris_long = "Chris 🌐🛰️ *meshhessen.de*"
+
+        def fake_get_name(number, typ="long", node_int=1):
+            if int(number) == 1615824276:
+                return chris_long if typ == "long" else "CR36"
+            if int(number) == 424242:
+                return "TaunusMesh" if typ == "long" else "Taun"
+            return f"!{int(number):08x}"
+
+        with patch("modules.system.get_name_from_number", side_effect=fake_get_name):
+            short, long_name = _peer_display_names(
+                {"id": "424242", "long": "TaunusMesh | meshhessen.de", "device": 1}
+            )
+            self.assertEqual(short, "Taun")
+            self.assertEqual(long_name, "TaunusMesh")
+
+            short, long_name = _peer_display_names(
+                {"id": "1615824276", "long": chris_long, "device": 1}
+            )
+            self.assertEqual(short, "CR36")
+            self.assertEqual(long_name, chris_long)
+
+            short, long_name = _peer_display_names({"long": chris_long, "device": 1})
+            self.assertEqual(short, "?")
+            self.assertEqual(long_name, chris_long)
+
+        with patch("modules.system.get_name_from_number", side_effect=fake_get_name), patch(
+            "modules.nodedb.find_node_id_by_long_name", return_value=1615824276
+        ):
+            short, long_name = _peer_display_names({"long": chris_long, "device": 1})
+            self.assertEqual(short, "CR36")
+            self.assertEqual(long_name, chris_long)
+
+        entry = {
+            "time": "2026-06-03T22:22:27",
+            "id": "424242",
+            "long": "TaunusMesh",
+            "text": "Hallo",
+            "device": 1,
+        }
+        with patch("modules.system.get_name_from_number", side_effect=fake_get_name):
+            self.assertEqual(_hhmm_from_event(entry), "22:22")
+            html = _render_toplist_message_item(entry)
+            self.assertIn("22:22 Taun | TaunusMesh", html)
+
+    def test_collect_messages_finds_bot_sends_in_busy_channel_log(self):
+        import os
+        import tempfile
+        from modules.admin_mesh_chat import collect_messages
+
+        noise = (
+            "2026-05-31 12:00:00,100 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "Ignoring Message: chatter From: Node{i}\n"
+        )
+        bot_reply = (
+            "2026-05-31 12:45:01,300 |     INFO | Device:1 Channel:1|#1MeshHessen "
+            "req.ACK SendingChannel: !ping Antwort From Bot\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "meshbot.log")
+            with open(path, "w", encoding="utf-8") as f:
+                for i in range(5000):
+                    f.write(noise.format(i=i))
+                f.write(bot_reply)
+            msgs, err = collect_messages(td, kind="channel", channel=1, limit=80)
+        self.assertIsNone(err)
+        out_texts = [m.get("text", "") for m in msgs if m.get("dir") == "out"]
+        self.assertTrue(any("Antwort" in t for t in out_texts), out_texts)
+
+    def test_mqtt_hop_fallback_prefers_nodedb_and_packet_cache(self):
+        from unittest.mock import patch
+
+        import modules.settings as st
+        from modules import system as sysmod
+
+        st.mqtt_hop_fallbacks = True
+        sysmod._PACKET_HOP_CACHE.clear()
+        sysmod._TRACE_HOP_CACHE.clear()
+
+        mqtt_pkt = {
+            "decoded": {"viaMqtt": False},
+            "transport_mechanism": "TRANSPORT_MQTT",
+        }
+
+        # Good packet metadata still wins and warms the cache.
+        hops, src = sysmod.resolve_mesh_hop_count(
+            42, 1, 0, 6, 3, mqtt_pkt, "TRANSPORT_MQTT"
+        )
+        self.assertEqual((hops, src), (3, "packet"))
+        self.assertEqual(sysmod.mesh_hops_from_packet_cache(42), 3)
+
+        # Later MQTT copy with hopStart==hopLimit uses learned packet cache.
+        with patch.object(sysmod, "mesh_hops_from_nodedb", return_value=None):
+            hops, src = sysmod.resolve_mesh_hop_count(
+                42, 1, 0, 7, 7, mqtt_pkt, "TRANSPORT_MQTT"
+            )
+        self.assertEqual((hops, src), (3, "packet-cache"))
+
+        # NodeDB hopsAway preferred over packet-cache (app node-list behaviour).
+        with patch.object(sysmod, "mesh_hops_from_nodedb", return_value=2) as mock_ndb:
+            hops, src = sysmod.resolve_mesh_hop_count(
+                42, 1, 0, 7, 7, mqtt_pkt, "TRANSPORT_MQTT"
+            )
+            self.assertEqual((hops, src), (2, "nodedb"))
+            mock_ndb.assert_called()
+            # First call is without mqtt_hints.
+            self.assertEqual(mock_ndb.call_args_list[0].kwargs.get("mqtt_hints"), False)
+
+        # Trace cache is last resort after NodeDB/packet-cache miss.
+        sysmod._PACKET_HOP_CACHE.clear()
+        sysmod.record_mesh_hops_from_trace(99, 4)
+        with patch.object(sysmod, "mesh_hops_from_nodedb", return_value=None):
+            hops, src = sysmod.resolve_mesh_hop_count(
+                99, 1, 0, 5, 5, mqtt_pkt, "TRANSPORT_MQTT"
+            )
+        self.assertEqual((hops, src), (4, "trace-cache"))
+
+    def test_late_duplicate_warms_hop_cache(self):
+        from unittest.mock import patch
+
+        from modules import packet_dedup
+
+        packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
+
+        first = {
+            "from": 77,
+            "id": 501,
+            "to": 2,
+            "hopStart": 3,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "transport_mechanism": "TRANSPORT_MQTT",
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!test"},
+        }
+        richer = {
+            "from": 77,
+            "id": 501,
+            "to": 2,
+            "hopStart": 3,
+            "hopLimit": 2,
+            "hopsAway": 0,
+            "transport_mechanism": "TRANSPORT_MQTT",
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!test"},
+        }
+        self.assertFalse(packet_dedup.should_drop_duplicate_packet(first))
+        with patch("modules.system.record_mesh_hops_from_packet") as rec:
+            self.assertTrue(packet_dedup.should_drop_duplicate_packet(richer))
+            rec.assert_called_with(77, 1)
+
     def test_packet_dedup_by_id(self):
         from modules import packet_dedup
 
         packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
         packet_dedup._stats["dropped"] = 0
         packet_dedup._stats["accepted"] = 0
+        packet_dedup._stats["hop_enriched_wait"] = 0
         pkt = {
             "from": 1234567890,
             "id": 42,
@@ -75,6 +721,79 @@ class TestBot(unittest.TestCase):
         pkt2 = dict(pkt)
         pkt2["id"] = 43
         self.assertFalse(packet_dedup.should_drop_duplicate_packet(pkt2))
+
+    def test_wait_for_hop_enrichment_merges_late_udp(self):
+        import threading
+        import time
+
+        import modules.settings as st
+        from modules import packet_dedup
+
+        st.packet_dedup_hop_wait_ms = 200
+        packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
+        packet_dedup._stats["dropped"] = 0
+        packet_dedup._stats["accepted"] = 0
+        packet_dedup._stats["hop_enriched_wait"] = 0
+
+        mqtt_pkt = {
+            "from": 1,
+            "id": 99,
+            "to": 2,
+            "hopStart": 3,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!ping", "viaMqtt": True},
+            "transport_mechanism": "mqtt",
+        }
+        udp_pkt = {
+            "from": 1,
+            "id": 99,
+            "to": 2,
+            "hopStart": 5,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "rxSnr": 12.0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!ping", "viaMqtt": False},
+            "transport_mechanism": "udp",
+        }
+        self.assertFalse(packet_dedup.should_drop_duplicate_packet(mqtt_pkt))
+
+        def late_udp():
+            time.sleep(0.05)
+            packet_dedup.should_drop_duplicate_packet(udp_pkt)
+
+        t = threading.Thread(target=late_udp)
+        t.start()
+        merged = packet_dedup.wait_for_hop_enrichment(mqtt_pkt)
+        t.join()
+
+        self.assertTrue(merged)
+        self.assertEqual(mqtt_pkt["hopStart"], 5)
+        self.assertEqual(mqtt_pkt["rxSnr"], 12.0)
+
+    def test_wait_skipped_when_hop_metadata_rich(self):
+        import time
+
+        import modules.settings as st
+        from modules import packet_dedup
+
+        st.packet_dedup_hop_wait_ms = 200
+        packet_dedup._seen.clear()
+        packet_dedup._enrichment.clear()
+
+        pkt = {
+            "from": 2,
+            "id": 100,
+            "to": 3,
+            "hopStart": 5,
+            "hopLimit": 3,
+            "hopsAway": 0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "payload": b"!ping"},
+        }
+        t0 = time.time()
+        self.assertFalse(packet_dedup.wait_for_hop_enrichment(pkt))
+        self.assertLess(time.time() - t0, 0.05)
 
     def test_faq_pki_log_scan(self):
         import os
@@ -328,6 +1047,58 @@ class TestBot(unittest.TestCase):
     def test_getNextSatellitePass(self):
         from modules.space import getNextSatellitePass
         self.assertIsInstance(getNextSatellitePass('25544', lat, lon), str)
+
+    def test_parse_lat_lon_from_text(self):
+        from modules.locationdata import parse_lat_lon_from_text
+
+        self.assertEqual(parse_lat_lon_from_text("50.34 8.76"), (50.34, 8.76))
+        self.assertEqual(parse_lat_lon_from_text("50.34,8.76"), (50.34, 8.76))
+        self.assertEqual(parse_lat_lon_from_text("50,34 8,76"), (50.34, 8.76))
+        self.assertIsNone(parse_lat_lon_from_text("Friedberg"))
+
+    def test_extract_location_arg(self):
+        from modules.locationdata import extract_location_arg
+
+        self.assertEqual(extract_location_arg("!wx Friedberg", ("wx",)), "Friedberg")
+        self.assertEqual(
+            extract_location_arg("!satpass 25544 Frankfurt", ("satpass",), skip_numeric=True),
+            "Frankfurt",
+        )
+
+    def test_resolve_message_location_coords(self):
+        from modules.locationdata import resolve_message_location
+
+        lat_r, lon_r, source, label = resolve_message_location(
+            "!wx 50.34 8.76", 123, 1, command_tokens=("wx",)
+        )
+        self.assertEqual(source, "arg-coords")
+        self.assertAlmostEqual(lat_r, 50.34)
+
+        lat_r, lon_r, source, label = resolve_message_location(
+            "!wx JO40AA", 123, 1, command_tokens=("wx",)
+        )
+        self.assertEqual(source, "arg-grid")
+        self.assertEqual(label, "JO40AA")
+
+    def test_format_location_source_note_arg(self):
+        self.assertEqual(
+            format_location_source_note(source="arg-place", label="Friedberg"),
+            "📍 Standort: Friedberg",
+        )
+        self.assertEqual(
+            format_location_source_note(source="arg-grid", label="JO40AA"),
+            "📍 Standort: JO40AA",
+        )
+        self.assertEqual(format_location_source_note(True), "📍 Standort bekannt")
+        self.assertIn("Standort unbekannt", format_location_source_note(False))
+
+    def test_handle_wxc_help_mentions_place(self):
+        from mesh_bot import handle_wxc
+
+        help_text = handle_wxc(0, 1, message="!wx?")
+        self.assertIn("Friedberg", help_text)
+        self.assertIn("50.34", help_text)
+        self.assertIn("JO40AA", help_text)
 
 
 if __name__ == '__main__':

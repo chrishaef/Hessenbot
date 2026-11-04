@@ -3,12 +3,12 @@ set -euo pipefail
 
 # Install mesh_bot as a systemd service for the current user.
 # Defaults:
-#   - project path: /opt/meshing-around
+#   - project path: /opt/Hessenbot
 #   - service name: mesh_bot
 #   - service user: invoking user (SUDO_USER when using sudo)
 
 SERVICE_NAME="mesh_bot"
-PROJECT_PATH="/opt/meshing-around"
+PROJECT_PATH="/opt/Hessenbot"
 SERVICE_USER="${SUDO_USER:-${USER:-}}"
 SERVICE_GROUP=""
 USE_LAUNCH_SH=1
@@ -21,7 +21,7 @@ Usage:
   bash etc/install_service.sh [options]
 
 Options:
-  --project-path PATH   Project root path (default: /opt/meshing-around)
+  --project-path PATH   Project root path (default: /opt/Hessenbot)
   --user USER           Linux user to run the service as (default: invoking user)
   --group GROUP         Linux group to run the service as (default: user's primary group)
   --direct-python       Run python3 mesh_bot.py directly (skip launch.sh)
@@ -31,7 +31,7 @@ Options:
 
 Examples:
   sudo bash etc/install_service.sh
-  sudo bash etc/install_service.sh --project-path /opt/meshing-around --user $USER
+  sudo bash etc/install_service.sh --project-path /opt/Hessenbot --user $USER
 EOF
 }
 

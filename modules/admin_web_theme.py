@@ -42,19 +42,22 @@ PORTAL_ASSETS = """
 
 ADMIN_TABS: List[Tuple[str, str, str]] = [
     ("home", "Übersicht", "choose"),
-    ("dm", "DM", "edit_dm"),
+    ("dm", "Mesh-DM", "edit_dm"),
     ("news", "News", "edit_news"),
-    ("messages", "Messages", "live_messages"),
+    ("messages", "Kanal", "live_messages"),
     ("nodes", "NodeDB", "nodes_list"),
     ("nodesettings", "Node Settings", "node_settings_index"),
     ("meshadmin", "Admin", "mesh_admin_index"),
     ("motd", "MOTD", "motd_edit"),
     ("scheduler", "Scheduler", "scheduler_edit"),
     ("channeltest", "Channel-Test", "channel_test_index"),
+    ("blitzwatch", "Blitzwatch", "blitzwatch_admin_index"),
     ("bbs", "BBS", "bbs_index"),
     ("polls", "Umfragen", "polls_index"),
     ("settings", "Einstellungen", "settings_index"),
+    ("api", "API", "service_api_admin"),
     ("banlist", "Banliste", "banlist_index"),
+    ("limits", "Limits", "limits_index"),
     ("logs", "Logs", "logs"),
 ]
 
@@ -107,6 +110,7 @@ def portal_navbar(
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
         {_dash_nav_button("stats", "Statistik", "bar-chart-line", active=True)}
         {_dash_nav_link("Befehle", "terminal", chref)}
+        {_dash_nav_link("Blitzwatch", "lightning-charge", "/mein-blitzwatch")}
         {_dash_nav_button("bbs", "BBS", "inboxes")}
         {_dash_nav_button("nodedb", "NodeDB", "diagram-3")}
         {_dash_nav_link("FAQ/Hilfe", "life-preserver", fhref)}
@@ -116,6 +120,7 @@ def portal_navbar(
       <ul class="navbar-nav me-auto align-items-center gap-1 dash-view-nav">
         {_dash_nav_link("Statistik", "bar-chart-line", "/", active=(active == "stats"))}
         {_dash_nav_link("Befehle", "terminal", chref, active=(active == "commands"))}
+        {_dash_nav_link("Blitzwatch", "lightning-charge", "/mein-blitzwatch", active=(active == "blitzwatch"))}
         {_dash_nav_link("BBS", "inboxes", "/#bbs")}
         {_dash_nav_link("NodeDB", "diagram-3", "/#nodedb")}
         {_dash_nav_link("FAQ/Hilfe", "life-preserver", fhref, active=(active == "faq"))}
@@ -147,7 +152,21 @@ def portal_navbar(
 
 
 def portal_footer() -> str:
-    return '<footer class="portal-footer"><span>Hessenbot - powered by Meshhessen.de</span></footer>'
+    github = "https://github.com/chrishaef/Hessenbot"
+    return f"""<footer class="portal-footer">
+  <span>Hessenbot — powered by
+    <a href="https://meshhessen.de" target="_blank" rel="noopener noreferrer">Meshhessen.de</a>
+  </span>
+  <span class="sep">·</span>
+  <a href="/impressum">Impressum</a>
+  <span class="sep">·</span>
+  <a href="/datenschutz">Datenschutz</a>
+  <span class="sep">·</span>
+  <a href="{html_escape(github)}" target="_blank" rel="noopener noreferrer"
+     title="Quellcode und Dokumentation auf GitHub">
+    <i class="bi bi-github me-1"></i>GitHub
+  </a>
+</footer>"""
 
 
 def portal_particles_html() -> str:

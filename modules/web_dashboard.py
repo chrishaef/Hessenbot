@@ -10,18 +10,60 @@ import platform
 import re
 import subprocess
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta
 from html import escape as html_escape
 from typing import Any, Dict, List, Optional
+import threading
 
 from modules.paths import path_in_repo, repo_root
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
+# Host CPU metrics history (admin overview sparklines)
+_HOST_HIST_MAX = 60
+_HOST_SAMPLE_SEC = 5
+_host_history: deque = deque(maxlen=_HOST_HIST_MAX)
+_host_hist_lock = threading.Lock()
+_cpu_prev_times: Optional[tuple[int, int]] = None
+_host_sampler_started = False
+
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
+
+
+_LOG_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,(\d+))?")
+
+
+def _parse_log_timestamp(date_s: str, frac_s: Optional[str] = None) -> Optional[datetime]:
+    try:
+        dt = datetime.strptime(date_s, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    if frac_s:
+        dt = dt.replace(microsecond=int(frac_s.ljust(6, "0")[:6]))
+    return dt
+
+
+def _parse_ts_from_log_line(line: str) -> Optional[datetime]:
+    m = _LOG_TS_RE.match(line)
+    if not m:
+        return None
+    return _parse_log_timestamp(m.group(1), m.group(2))
+
+
+_REALM_TEXT_PREFIX_RE = re.compile(r"^[\w.*-]+\s*\|\s*", re.IGNORECASE)
+
+
+def _strip_realm_text_prefix(text: str) -> str:
+    """Remove leading ``meshhessen.de |`` style prefixes from message bodies."""
+    out = (text or "").strip()
+    while True:
+        stripped = _REALM_TEXT_PREFIX_RE.sub("", out, count=1).strip()
+        if stripped == out:
+            return out
+        out = stripped
 
 
 class _NodeDirectory:
@@ -178,31 +220,14 @@ def _extract_message_event(
 
 
 def _format_message_peer(entry: Dict[str, Any]) -> str:
-    short = entry.get("short") or ""
-    node_id = entry.get("id") or ""
-    hex_id = entry.get("hex") or ""
-    long_name = entry.get("long") or ""
-
-    if not hex_id and node_id.isdigit():
-        hex_id = f"!{int(node_id):08x}"
-
-    if short and hex_id and node_id:
-        return f"{short} · {hex_id} (#{node_id})"
-    if short and hex_id:
-        return f"{short} · {hex_id}"
-    if short and node_id:
-        return f"{short} · #{node_id}"
-    if hex_id:
-        return hex_id
-    if node_id:
-        return f"#{node_id}"
-    if long_name:
-        return long_name
-    return "?"
+    short, long_name = _peer_display_names(entry)
+    if long_name and long_name != short:
+        return f"{short} | {long_name}"
+    return short or long_name or "?"
 
 
 def _format_message_line(entry: Dict[str, Any]) -> str:
-    t = entry.get("time_short") or entry.get("time", "")[-8:]
+    t = _hhmm_from_event(entry) or (entry.get("time_short") or "")[:5]
     direction = "An" if entry.get("dir") == "out" else "Von"
     peer = _format_message_peer(entry)
 
@@ -288,33 +313,28 @@ def _tail_lines(log_path: str, max_lines: int, *, encoding: str = "utf-8") -> Li
     return lines[-max_lines:]
 
 
-def _parse_messages_log_tail(
-    log_path: str, nodes: _NodeDirectory, *, max_lines: int = 800
+def _parse_messages_log_lines(
+    lines: List[str], nodes: _NodeDirectory
 ) -> List[Dict[str, Any]]:
-    """Supplement recent messages from logs/messages.log (pipe format)."""
-    if not os.path.isfile(log_path):
-        return []
-    lines = _tail_lines(log_path, max_lines)
-
+    """Parse messages.log lines (pipe format)."""
     events: List[Dict[str, Any]] = []
     for line in lines:
         m = re.match(
-            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
+            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d+) \| "
             r"Device:(\d+) (Channel:\d+(?:\|[^|]+)?) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
             line.strip(),
         )
         if not m:
             m = re.match(
-                r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \| "
+                r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d+) \| "
                 r"Device:(\d+) Channel:(\d+) \| ([^|]+) \|(?: DM \|)?\s*(.*)$",
                 line.strip(),
             )
         if not m:
             continue
-        ts_s, dev_s, ch_field, name, _text = m.groups()
-        try:
-            ts = datetime.strptime(ts_s, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
+        ts_s, frac_s, dev_s, ch_field, name, _text = m.groups()
+        ts = _parse_log_timestamp(ts_s, frac_s)
+        if not ts:
             continue
         device = int(dev_s)
         if ch_field.startswith("Channel:"):
@@ -323,6 +343,7 @@ def _parse_messages_log_tail(
             channel, channel_label = int(ch_field), f"Kanal {ch_field}"
         peer = nodes.resolve(name.strip())
         is_dm = " DM |" in line
+        body = _strip_realm_text_prefix(_text.strip().replace("\n", " "))
         events.append(
             {
                 "time": ts.isoformat(),
@@ -332,11 +353,21 @@ def _parse_messages_log_tail(
                 "channel": channel,
                 "channel_label": channel_label,
                 "device": device,
-                "text": _text.strip().replace("\n", " "),
+                "text": body,
                 **peer,
             }
         )
     return events
+
+
+def _parse_messages_log_tail(
+    log_path: str, nodes: _NodeDirectory, *, max_lines: int = 800
+) -> List[Dict[str, Any]]:
+    """Supplement recent messages from logs/messages.log (pipe format, with rotation)."""
+    from modules.admin_mesh_chat import _parse_messages_logs_tail
+
+    log_dir = os.path.dirname(os.path.realpath(log_path))
+    return _parse_messages_logs_tail(log_dir, nodes, max_lines=max_lines)
 
 
 def _empty_log_stats() -> Dict[str, Any]:
@@ -374,30 +405,60 @@ _LEADERBOARD_24H_SEC = 86400
 
 # Cache parsed log stats so repeated dashboard requests (and the 5s auto-refresh
 # admin views) don't re-read and re-parse a multi-MB log every time. Keyed by log
-# path; served for up to _LOG_PARSE_TTL seconds and invalidated immediately when
-# the file shrinks (log rotation/truncation).
+# path; served for up to _LOG_PARSE_TTL seconds and invalidated when meshbot.log or
+# messages.log change (size/mtime, including the newest rotated backup).
 _LOG_PARSE_TTL = 30.0
 _log_parse_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _log_sources_fingerprint(log_path: str) -> tuple:
+    """Cheap change detector for meshbot.log + messages.log (+ latest rotation)."""
+    import glob
+
+    log_dir = os.path.dirname(os.path.realpath(log_path))
+    parts: List[tuple] = []
+    for basename in ("meshbot.log", "messages.log"):
+        primary = os.path.join(log_dir, basename)
+        try:
+            parts.append(
+                (basename, os.path.getsize(primary), int(os.path.getmtime(primary)))
+            )
+        except OSError:
+            parts.append((basename, -1, -1))
+        backups = sorted(
+            glob.glob(os.path.join(log_dir, f"{basename}.*")),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        if backups:
+            try:
+                parts.append(
+                    (
+                        f"{basename}.rot",
+                        os.path.getsize(backups[0]),
+                        int(os.path.getmtime(backups[0])),
+                    )
+                )
+            except OSError:
+                parts.append((f"{basename}.rot", -1, -1))
+    return tuple(parts)
 
 
 def parse_meshbot_log(log_path: str, max_lines: int = 25000) -> Dict[str, Any]:
     """Parse meshbot.log with a short-TTL cache (see _log_parse_cache)."""
     now = time.time()
-    try:
-        size = os.path.getsize(log_path)
-    except OSError:
-        size = -1
+    fp = _log_sources_fingerprint(log_path)
     cached = _log_parse_cache.get(log_path)
     if (
         cached is not None
         and (now - cached["ts"]) < _LOG_PARSE_TTL
-        and size >= cached["size"]
+        and cached.get("fp") == fp
         and not cached["stats"].get("log_error")
     ):
         return cached["stats"]
 
     stats = _parse_meshbot_log_uncached(log_path, max_lines)
-    _log_parse_cache[log_path] = {"ts": now, "size": size, "stats": stats}
+    _log_parse_cache[log_path] = {"ts": now, "fp": fp, "stats": stats}
     return stats
 
 
@@ -417,7 +478,6 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
     message_types: Counter = Counter()
     command_timestamps: List[tuple] = []
     message_timestamps: List[tuple] = []
-    recent_messages: List[Dict[str, Any]] = []
     nodes = _NodeDirectory()
     warnings: List[str] = []
     errors: List[str] = []
@@ -429,20 +489,16 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
         plain = _strip_ansi(line)
         timestamp_match = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+", line)
         if timestamp_match:
-            timestamp = datetime.strptime(timestamp_match.group(1), "%Y-%m-%d %H:%M:%S")
-            hourly[timestamp.strftime("%Y-%m-%d %H:00:00")] += 1
+            timestamp = _parse_ts_from_log_line(line)
+            if timestamp:
+                hourly[timestamp.strftime("%Y-%m-%d %H:00:00")] += 1
 
-        if "Bot detected Commands" in line or "LLM Query:" in line or "PlayingGame" in line:
+        if "Bot detected Commands" in line or "LLM Query:" in line:
             command = re.search(r"'cmd': '(\w+)'", line)
             user = re.search(r"From: (.+)$", line)
             if "LLM Query:" in line and timestamp:
                 command_counts["LLM Query"] += 1
                 command_timestamps.append((timestamp.isoformat(), "LLM Query"))
-            if "PlayingGame" in line:
-                game = re.search(r"PlayingGame (\w+)", line)
-                if game and timestamp:
-                    command_counts[game.group(1)] += 1
-                    command_timestamps.append((timestamp.isoformat(), game.group(1)))
             if command and timestamp:
                 cmd = command.group(1)
                 command_counts[cmd] += 1
@@ -457,7 +513,6 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
 
         evt = _extract_message_event(plain, timestamp, nodes) if timestamp else None
         if evt:
-            recent_messages.append(evt)
             if evt.get("dir") == "out":
                 message_types["Ausgehend"] += 1
             else:
@@ -477,7 +532,9 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
             unique_users.add(user_match.group(1).strip()[:80])
 
         if "WARNING |" in line:
-            warnings.append(line.strip()[:200])
+            # Eigenes Echo über MQTT/Kanal — kein Betriebsfehler, nicht in Warnlisten
+            if "loop or traffic replay detected" not in plain:
+                warnings.append(line.strip()[:200])
         if "ERROR |" in line or "CRITICAL |" in line:
             errors.append(line.strip()[:200])
 
@@ -557,18 +614,10 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
                     stats["node2_name"] = name
                     stats["node2_ID"] = node_id
 
-    msg_log_path = os.path.join(os.path.dirname(log_path), "messages.log")
-    msg_log_events = _parse_messages_log_tail(msg_log_path, nodes)
-    if msg_log_events:
-        merged = {e["time"]: e for e in recent_messages}
-        for e in msg_log_events:
-            if e["time"] not in merged:
-                if e.get("dir") == "out":
-                    message_types["Ausgehend"] += 1
-                else:
-                    message_types["Eingehend"] += 1
-            merged.setdefault(e["time"], e)
-        recent_messages = sorted(merged.values(), key=lambda x: x["time"])
+    log_dir = os.path.dirname(os.path.realpath(log_path))
+    from modules.admin_mesh_chat import build_merged_message_feed
+
+    recent_messages = build_merged_message_feed(log_dir, limit=120)
 
     node_rx_counts: defaultdict[int, int] = defaultdict(int)
     node_rx_counts_24h: defaultdict[int, int] = defaultdict(int)
@@ -600,7 +649,7 @@ def _parse_meshbot_log_uncached(log_path: str, max_lines: int = 25000) -> Dict[s
     stats["errors"] = errors[-15:][::-1]
     stats["command_timestamps"] = command_timestamps[-40:]
     stats["message_timestamps"] = message_timestamps[-40:]
-    stats["recent_messages"] = recent_messages[-40:]
+    stats["recent_messages"] = recent_messages
     stats["bbs_dm_delivered"] = bbs_dm_delivered[-25:]
     stats["bbs_dm_queued"] = bbs_dm_queued[-50:]
     stats["node_rx_counts_by_id"] = dict(node_rx_counts)
@@ -1093,51 +1142,121 @@ def _mesh_node_counts_for_dash(lb: Dict[str, Any], log: Dict[str, Any]) -> Dict[
 
 
 def _peer_short_name(entry: Dict[str, Any]) -> str:
-    short = (entry.get("short") or "").strip()
-    if short:
-        return short
-    node_id = entry.get("id")
-    if node_id:
-        try:
-            from modules.system import get_name_from_number
-
-            device = entry.get("device") or 1
-            name = get_name_from_number(int(node_id), "short", int(device))
-            if name and str(name).strip() and not str(name).startswith("!"):
-                return str(name).strip()
-        except Exception:
-            pass
-    long_name = (entry.get("long") or "").strip()
-    if long_name:
-        return long_name[:4]
-    return "?"
+    return _peer_display_names(entry)[0]
 
 
 def _peer_long_name(entry: Dict[str, Any]) -> str:
-    long_name = (entry.get("long") or "").strip()
-    if long_name:
-        return long_name
-    node_id = entry.get("id")
-    if node_id:
+    return _peer_display_names(entry)[1]
+
+
+_REALM_LONG_SUFFIX_RE = re.compile(r"\s*\|\s*\*?meshhessen\.de\*?\s*$", re.IGNORECASE)
+
+
+def _clean_peer_long_name(long_name: str) -> str:
+    long_name = (long_name or "").strip()
+    long_name = _REALM_LONG_SUFFIX_RE.sub("", long_name).strip()
+    if "|" in long_name:
+        left, right = [p.strip() for p in long_name.split("|", 1)]
+        if "meshhessen" in right.lower().replace("*", ""):
+            return left
+    return long_name
+
+
+def _resolve_peer_node_id(entry: Dict[str, Any]) -> Optional[int]:
+    """Node id from log fields or persistent NodeDB (never guessed from longName)."""
+    raw_id = entry.get("id")
+    if raw_id not in (None, ""):
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):
+            pass
+
+    hex_id = (entry.get("hex") or "").strip()
+    if hex_id.startswith("!"):
+        try:
+            return int(hex_id[1:], 16)
+        except ValueError:
+            pass
+
+    try:
+        from modules import nodedb as ndb
+
+        raw_long = (entry.get("long") or "").strip()
+        clean_long = _clean_peer_long_name(raw_long)
+        for candidate in (raw_long, clean_long):
+            if candidate:
+                nid = ndb.find_node_id_by_long_name(candidate)
+                if nid:
+                    return nid
+        entry_short = (entry.get("short") or "").strip()
+        if entry_short:
+            nid = ndb.find_node_id_by_short_name(entry_short)
+            if nid:
+                return nid
+    except Exception:
+        pass
+    return None
+
+
+def _peer_display_names(entry: Dict[str, Any]) -> tuple[str, str]:
+    """Return (shortName, longName) from NodeDB / NodeInfo — not derived from longName."""
+    device = int(entry.get("device") or 1)
+    node_id = _resolve_peer_node_id(entry)
+    short = ""
+    long_name = _clean_peer_long_name(entry.get("long") or "")
+
+    if node_id is not None:
         try:
             from modules.system import get_name_from_number
 
-            device = entry.get("device") or 1
-            name = get_name_from_number(int(node_id), "long", int(device))
-            if name and str(name).strip():
-                return str(name).strip()
+            resolved_short = get_name_from_number(node_id, "short", device)
+            if (
+                resolved_short
+                and str(resolved_short).strip()
+                and not str(resolved_short).startswith("!")
+            ):
+                short = str(resolved_short).strip()
+            resolved_long = get_name_from_number(node_id, "long", device)
+            if (
+                resolved_long
+                and str(resolved_long).strip()
+                and not str(resolved_long).startswith("!")
+            ):
+                long_name = _clean_peer_long_name(str(resolved_long).strip())
         except Exception:
             pass
-    return "—"
+
+        if not short or short == "?":
+            try:
+                from modules import nodedb as ndb
+
+                ndb._ensure_nodedb_loaded()
+                cached_short = ndb.get_node_short_name(node_id)
+                if cached_short and str(cached_short).strip():
+                    short = str(cached_short).strip()
+                if not long_name:
+                    cached_long = ndb.get_node_long_name(node_id)
+                    if cached_long and str(cached_long).strip():
+                        long_name = _clean_peer_long_name(str(cached_long).strip())
+            except Exception:
+                pass
+
+    if not long_name:
+        long_name = _clean_peer_long_name(entry.get("long") or "")
+    if not short:
+        short = "?"
+    if not long_name:
+        long_name = "—"
+    return short, long_name
 
 
 def _hhmm_from_event(entry: Dict[str, Any]) -> str:
     ts = entry.get("time") or ""
     try:
-        return datetime.fromisoformat(ts).strftime("%H.%M")
+        return datetime.fromisoformat(ts).strftime("%H:%M")
     except ValueError:
         raw = (entry.get("time_short") or "")[:5]
-        return raw.replace(":", ".") if raw else ""
+        return raw if raw else "—"
 
 
 def _channel_recent_messages(
@@ -1151,15 +1270,16 @@ def _channel_recent_messages(
         and e.get("dir") == "in"
         and e.get("channel") == channel
     ]
+    filtered.sort(key=lambda e: e.get("time") or "")
     return list(reversed(filtered[-limit:]))
 
 
 def _render_toplist_message_item(entry: Dict[str, Any]) -> str:
-    """HH.MM Short | Long, then message body on the next line."""
+    """HH:MM Shortname | Longname, then message body on the next line."""
+    short, long_name = _peer_display_names(entry)
     meta = (
         f"{html_escape(_hhmm_from_event(entry))} "
-        f"{html_escape(_peer_short_name(entry))} | "
-        f"{html_escape(_peer_long_name(entry))}"
+        f"{html_escape(short)} | {html_escape(long_name)}"
     )
     text = (entry.get("text") or "").strip().replace("\r\n", "\n").replace("\r", "\n")
     if text:
@@ -1202,10 +1322,20 @@ def _dashboard_messages_heading(channel: int) -> str:
     return html_escape(f"{generic} · {name}")
 
 
-def _render_toplist_html(log: Dict[str, Any], *, channel: Optional[int] = None) -> str:
+def _render_toplist_html(
+    log: Dict[str, Any],
+    *,
+    channel: Optional[int] = None,
+    log_dir: Optional[str] = None,
+) -> str:
     if channel is None:
         channel = _dashboard_messages_channel()
-    entries = _channel_recent_messages(log, channel=channel, limit=10)
+    if log_dir:
+        from modules.admin_mesh_chat import load_public_channel_toplist
+
+        entries = load_public_channel_toplist(log_dir, channel, limit=10)
+    else:
+        entries = _channel_recent_messages(log, channel=channel, limit=10)
     ch_title = _dashboard_channel_title(channel)
     if entries:
         items = "".join(_render_toplist_message_item(e) for e in entries)
@@ -1237,7 +1367,14 @@ def _activity_series(hourly: Dict[str, int], *, hours: int = 48) -> tuple[List[s
 
 def render_admin_log_alerts_html(log: Dict[str, Any]) -> str:
     """Recent warnings/errors from meshbot.log for the admin overview."""
-    warnings = [_strip_ansi(str(w)) for w in (log.get("warnings") or [])[:8]]
+    def _keep_alert(line: str) -> bool:
+        return "loop or traffic replay detected" not in line
+
+    warnings = [
+        _strip_ansi(str(w))
+        for w in (log.get("warnings") or [])
+        if _keep_alert(str(w))
+    ][:8]
     errors = [_strip_ansi(str(e)) for e in (log.get("errors") or [])[:8]]
     if not warnings and not errors:
         return (
@@ -1259,25 +1396,265 @@ def render_admin_log_alerts_html(log: Dict[str, Any]) -> str:
     return "".join(parts)
 
 
-def _host_info() -> Dict[str, str]:
-    if platform.system() != "Linux":
-        return {"uptime": "—", "memory": "—", "disk": "—"}
+def _linux_cpu_times() -> Optional[tuple[int, int]]:
+    """Return (idle, total) jiffies from /proc/stat."""
     try:
-
-        def run(cmd: str) -> str:
-            return (
-                subprocess.check_output(cmd, shell=True, timeout=3)
-                .decode("utf-8", errors="replace")
-                .strip()
-            )
-
-        return {
-            "uptime": run("uptime -p"),
-            "memory": f"{run('free -m | awk \'/Mem:/ {print $7}\'')} / {run('free -m | awk \'/Mem:/ {print $2}\'')} MB frei",
-            "disk": f"{run('df -h / | awk \'NR==2 {print $4}\'')} frei von {run('df -h / | awk \'NR==2 {print $2}\'')}",
-        }
+        with open("/proc/stat", encoding="utf-8") as fh:
+            parts = fh.readline().split()
+        if not parts or parts[0] != "cpu":
+            return None
+        vals = [int(x) for x in parts[1:]]
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+        return idle, sum(vals)
     except Exception:
-        return {"uptime": "—", "memory": "—", "disk": "—"}
+        return None
+
+
+def _sample_cpu_percent() -> Optional[float]:
+    """CPU utilization % (Linux /proc/stat delta)."""
+    global _cpu_prev_times
+    if platform.system() != "Linux":
+        return None
+    cur = _linux_cpu_times()
+    if cur is None:
+        return None
+    if _cpu_prev_times is None:
+        _cpu_prev_times = cur
+        time.sleep(0.12)
+        cur2 = _linux_cpu_times()
+        if cur2 is None:
+            return None
+        idle0, total0 = _cpu_prev_times
+        idle1, total1 = cur2
+        _cpu_prev_times = cur2
+    else:
+        idle0, total0 = _cpu_prev_times
+        idle1, total1 = cur
+        _cpu_prev_times = cur
+    dt = total1 - total0
+    if dt <= 0:
+        return None
+    di = idle1 - idle0
+    pct = 100.0 * (1.0 - (di / dt))
+    return max(0.0, min(100.0, round(pct, 1)))
+
+
+def _sample_cpu_temp_c() -> Optional[float]:
+    """CPU/SoC temperature °C (vcgencmd or thermal zones), same idea as script/sysEnv.sh."""
+    if platform.system() != "Linux":
+        return None
+    # Raspberry Pi
+    try:
+        out = (
+            subprocess.check_output(
+                ["vcgencmd", "measure_temp"], stderr=subprocess.DEVNULL, timeout=2
+            )
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
+        # temp=48.2'C
+        m = re.search(r"temp=([0-9.]+)", out)
+        if m:
+            return round(float(m.group(1)), 1)
+    except Exception:
+        pass
+    # thermal zones
+    base = "/sys/class/thermal"
+    try:
+        zones = sorted(
+            d for d in os.listdir(base) if d.startswith("thermal_zone")
+        )
+    except Exception:
+        return None
+    preferred: List[float] = []
+    others: List[float] = []
+    for z in zones:
+        zpath = os.path.join(base, z)
+        try:
+            with open(os.path.join(zpath, "type"), encoding="utf-8") as fh:
+                ztype = fh.read().strip().lower()
+            with open(os.path.join(zpath, "temp"), encoding="utf-8") as fh:
+                millideg = float(fh.read().strip())
+            temp_c = millideg / 1000.0
+            if temp_c <= -50 or temp_c > 150:
+                continue
+            if any(
+                k in ztype
+                for k in ("cpu", "x86_pkg", "soc", "pkg", "core", "k10temp", "zen")
+            ):
+                preferred.append(temp_c)
+            else:
+                others.append(temp_c)
+        except Exception:
+            continue
+    pool = preferred or others
+    if not pool:
+        return None
+    return round(sum(pool) / len(pool), 1)
+
+
+def _host_info() -> Dict[str, str]:
+    """Legacy string metrics for uptime/RAM/disk."""
+    snap = collect_host_snapshot(include_cpu=False)
+    return {
+        "uptime": snap.get("uptime") or "—",
+        "memory": snap.get("memory") or "—",
+        "disk": snap.get("disk") or "—",
+    }
+
+
+def collect_host_snapshot(*, include_cpu: bool = True) -> Dict[str, Any]:
+    """Current host metrics (strings + optional numeric CPU fields)."""
+    out: Dict[str, Any] = {
+        "uptime": "—",
+        "memory": "—",
+        "disk": "—",
+        "cpu_pct": None,
+        "cpu_temp_c": None,
+        "ts": time.time(),
+    }
+    if platform.system() == "Linux":
+        try:
+
+            def run(cmd: str) -> str:
+                return (
+                    subprocess.check_output(cmd, shell=True, timeout=3)
+                    .decode("utf-8", errors="replace")
+                    .strip()
+                )
+
+            out["uptime"] = run("uptime -p") or "—"
+            out["memory"] = (
+                f"{run('free -m | awk \'/Mem:/ {print $7}\'')} / "
+                f"{run('free -m | awk \'/Mem:/ {print $2}\'')} MB frei"
+            )
+            out["disk"] = (
+                f"{run('df -h / | awk \'NR==2 {print $4}\'')} frei von "
+                f"{run('df -h / | awk \'NR==2 {print $2}\'')}"
+            )
+        except Exception:
+            pass
+    if include_cpu:
+        out["cpu_pct"] = _sample_cpu_percent()
+        out["cpu_temp_c"] = _sample_cpu_temp_c()
+    return out
+
+
+def _append_host_history(snap: Dict[str, Any]) -> None:
+    with _host_hist_lock:
+        _host_history.append(
+            {
+                "ts": float(snap.get("ts") or time.time()),
+                "cpu_pct": snap.get("cpu_pct"),
+                "cpu_temp_c": snap.get("cpu_temp_c"),
+            }
+        )
+
+
+def ensure_host_metrics_sampler() -> None:
+    """Start background host CPU sampler (once per process)."""
+    global _host_sampler_started
+    with _host_hist_lock:
+        if _host_sampler_started:
+            return
+        _host_sampler_started = True
+
+    def _loop() -> None:
+        while True:
+            try:
+                snap = collect_host_snapshot(include_cpu=True)
+                _append_host_history(snap)
+            except Exception:
+                pass
+            time.sleep(_HOST_SAMPLE_SEC)
+
+    threading.Thread(target=_loop, name="host-metrics", daemon=True).start()
+
+
+def get_host_metrics_payload() -> Dict[str, Any]:
+    """Current metrics + history for admin overview / API."""
+    ensure_host_metrics_sampler()
+    snap = collect_host_snapshot(include_cpu=True)
+    now = float(snap.get("ts") or time.time())
+    with _host_hist_lock:
+        last_ts = _host_history[-1]["ts"] if _host_history else 0.0
+        if (now - last_ts) >= (_HOST_SAMPLE_SEC - 0.5):
+            _host_history.append(
+                {
+                    "ts": now,
+                    "cpu_pct": snap.get("cpu_pct"),
+                    "cpu_temp_c": snap.get("cpu_temp_c"),
+                }
+            )
+        hist = list(_host_history)
+    return {
+        "uptime": snap["uptime"],
+        "memory": snap["memory"],
+        "disk": snap["disk"],
+        "cpu_pct": snap["cpu_pct"],
+        "cpu_temp_c": snap["cpu_temp_c"],
+        "history": hist,
+        "sample_sec": _HOST_SAMPLE_SEC,
+    }
+
+
+def render_host_metrics_html() -> str:
+    """Host uptime/RAM/disk/CPU for admin UI (with sparkline hooks)."""
+    ensure_host_metrics_sampler()
+    data = get_host_metrics_payload()
+    cpu = data.get("cpu_pct")
+    temp = data.get("cpu_temp_c")
+    cpu_s = "—" if cpu is None else f"{cpu:.1f} %"
+    temp_s = "—" if temp is None else f"{temp:.1f} °C"
+    payload = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
+    return f"""
+<div id="host-metrics" data-api="/api/admin/host-metrics">
+  <script type="application/json" id="host-metrics-bootstrap">{payload}</script>
+  <div class="row g-2 mb-2">
+    <div class="col-md-4">
+      <div class="metric-card">
+        <div class="metric-label">Uptime</div>
+        <div class="metric-value small" data-host="uptime">{html_escape(str(data["uptime"]))}</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="metric-card">
+        <div class="metric-label">RAM</div>
+        <div class="metric-value small" data-host="memory">{html_escape(str(data["memory"]))}</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="metric-card">
+        <div class="metric-label">Disk</div>
+        <div class="metric-value small" data-host="disk">{html_escape(str(data["disk"]))}</div>
+      </div>
+    </div>
+  </div>
+  <div class="row g-2 mb-0">
+    <div class="col-md-6">
+      <div class="metric-card host-metric-spark">
+        <div class="d-flex justify-content-between align-items-baseline gap-2">
+          <div class="metric-label mb-0">CPU-Auslastung</div>
+          <div class="metric-value small mb-0" data-host="cpu_pct">{html_escape(cpu_s)}</div>
+        </div>
+        <canvas class="host-sparkline" data-spark="cpu_pct" width="320" height="48" aria-hidden="true"></canvas>
+        <div class="form-text mb-0">wie <code>!sysinfo</code> / sysEnv.sh · Verlauf ~{int(_HOST_HIST_MAX * _HOST_SAMPLE_SEC / 60)}&nbsp;min</div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="metric-card host-metric-spark">
+        <div class="d-flex justify-content-between align-items-baseline gap-2">
+          <div class="metric-label mb-0">CPU-Temperatur</div>
+          <div class="metric-value small mb-0" data-host="cpu_temp_c">{html_escape(temp_s)}</div>
+        </div>
+        <canvas class="host-sparkline" data-spark="cpu_temp_c" width="320" height="48" aria-hidden="true"></canvas>
+        <div class="form-text mb-0">thermal zone / vcgencmd · Verlauf ~{int(_HOST_HIST_MAX * _HOST_SAMPLE_SEC / 60)}&nbsp;min</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/static/portal/host-metrics.js?v=1"></script>
+"""
 
 
 def collect_runtime_stats() -> Dict[str, Any]:
@@ -1383,6 +1760,7 @@ def collect_dashboard(log_dir: str) -> Dict[str, Any]:
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "repo": repo_root(),
         "log_path": log_path,
+        "log_dir": os.path.dirname(os.path.realpath(log_path)),
         "log": parse_meshbot_log(log_path),
         "runtime": collect_runtime_stats(),
         "want_ack_on_dm": want_ack_dm,
@@ -1405,33 +1783,6 @@ def _list_items(items: List[str], empty: str = "Keine Einträge") -> str:
     if not items:
         return f'<li class="text-muted">{html_escape(empty)}</li>'
     return "".join(f"<li>{html_escape(str(x))}</li>" for x in items)
-
-
-def render_host_metrics_html() -> str:
-    """Host uptime/RAM/disk for admin UI."""
-    host = _host_info()
-    return f"""
-<div class="row g-2 mb-0">
-  <div class="col-md-4">
-    <div class="metric-card">
-      <div class="metric-label">Uptime</div>
-      <div class="metric-value small">{html_escape(host["uptime"])}</div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="metric-card">
-      <div class="metric-label">RAM</div>
-      <div class="metric-value small">{html_escape(host["memory"])}</div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="metric-card">
-      <div class="metric-label">Disk</div>
-      <div class="metric-value small">{html_escape(host["disk"])}</div>
-    </div>
-  </div>
-</div>
-"""
 
 
 def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
@@ -1470,12 +1821,13 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
                 f"<td>{r['shortName']}{local}</td>"
                 f"<td>{r['longName']}</td>"
                 f"<td>{r.get('location_html', '—')}</td>"
+                f"<td>{r.get('blitzwatch_html', '—')}</td>"
                 f'<td class="text-nowrap">{html_escape(str(r.get("lastHeard", "—")))}</td>'
                 "</tr>"
             )
         trs.append(
             '<tr class="nodedb-search-empty" hidden>'
-            '<td colspan="5" class="text-muted small">Keine Treffer für die Suche.</td></tr>'
+            '<td colspan="6" class="text-muted small">Keine Treffer für die Suche.</td></tr>'
         )
         parts.append(
             f"""
@@ -1491,6 +1843,7 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
         <th>Kurzname</th>
         <th>Name</th>
         <th>Standort</th>
+        <th>Blitzwatch</th>
         <th>Zuletzt gehört</th>
       </tr>
     </thead>
@@ -1511,7 +1864,8 @@ def _render_public_nodedb(node_tables: List[Dict[str, Any]]) -> str:
 def _message_list_items(entries: List[Dict[str, Any]], empty: str = "Keine Nachrichten") -> str:
     if not entries:
         return f'<li class="text-muted">{html_escape(empty)}</li>'
-    lines = [_format_message_line(e) for e in reversed(entries[-12:])]
+    ordered = sorted(entries, key=lambda e: e.get("time") or "")
+    lines = [_format_message_line(e) for e in reversed(ordered[-12:])]
     return "".join(f"<li>{html_escape(line)}</li>" for line in lines)
 
 
@@ -1588,7 +1942,7 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     )
     msg_ch = _dashboard_messages_channel()
     msg_ch_heading = _dashboard_messages_heading(msg_ch)
-    toplist_html = _render_toplist_html(log, channel=msg_ch)
+    toplist_html = _render_toplist_html(log, channel=msg_ch, log_dir=data.get("log_dir"))
     leaderboard_html = _render_mesh_leaderboard_html(lb, log=log)
     want_ack_dm = bool(data.get("want_ack_on_dm"))
     dm_stats = data.get("dm_delivery_24h")
@@ -1643,9 +1997,9 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
       </h1>
     </div>
     <div class="col-lg-4 text-lg-end">
-      <a href="/" class="btn btn-success">
+      <button type="button" id="dash-refresh-btn" class="btn btn-success">
         <i class="bi bi-arrow-clockwise me-2"></i>Aktualisieren
-      </a>
+      </button>
       <p class="small text-muted mt-2 mb-0">Stand {html_escape(stand_time)}</p>
     </div>
   </div>
@@ -1732,6 +2086,6 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
 <script type="application/json" id="dash-chart-data">{chart_data_json}</script>
 <script src="/static/portal/chart.umd.min.js"></script>
 <script src="/static/portal/dashboard-charts.js"></script>
-<script src="/static/portal/dashboard-views.js"></script>
+<script src="/static/portal/dashboard-views.js?v=2"></script>
 """
 

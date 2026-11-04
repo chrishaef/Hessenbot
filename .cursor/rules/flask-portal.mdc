@@ -1,0 +1,16 @@
+---
+description: Flask portal UI, auth, and static/portal conventions
+globs:
+  - modules/admin_web*.py
+  - modules/web_*.py
+  - modules/admin_config*.py
+  - static/portal/**
+---
+
+# Flask Portal Conventions
+
+- Extend the existing shell/theme (`admin_web_theme.py`, `style.css` CSS variables, light/dark) — do not introduce a parallel design system or SPA stack.
+- Public UI strings in German; admin UI stays German where it already is.
+- Do not weaken auth/session/`flask-login`/Limiter; secrets only via config or env.
+- Extend existing JS modules under `static/portal/`; no unnecessary new bundlers or frameworks.
+- Do not invent Impressum/Datenschutz/FAQ content — maintain the existing legal/help modules.

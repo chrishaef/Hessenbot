@@ -1,0 +1,50 @@
+name: Bug report
+description: Something does not work as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not paste passwords, API keys, or full `config.ini` secrets.**
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Expected vs. actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: `git rev-parse --short HEAD` or approximate date of deploy
+    validations:
+      required: false
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, radio (serial/TCP/MQTT), relevant enabled modules
+      placeholder: |
+        - OS:
+        - Python:
+        - Interface:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (redacted)
+      description: Relevant lines from meshbot.log — strip secrets and personal data
+    validations:
+      required: false

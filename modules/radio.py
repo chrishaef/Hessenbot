@@ -275,10 +275,7 @@ def checkVoxTrapWords(text):
                         for word in new_words:
                             if word in botMethods:
                                 logger.info(f"System: RadioMon: VOX action '{word}' with '{new_text}'")
-                                if word == "joke":
-                                    return botMethods[word](vox=True)
-                                else:
-                                    return botMethods[word](None, None, vox=True)
+                                return botMethods[word](None, None, vox=True)
                     logger.debug(f"System: RadioMon: VOX returning text after trap word '{trap_lower}': '{new_text}'")
                     return new_text
             if debugVoxTmsg:

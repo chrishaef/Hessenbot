@@ -3,9 +3,11 @@
 # Started in a background thread when [webAdmin] enabled in config.ini.
 
 import glob
+import json
 import os
 import secrets
 import threading
+import time
 from html import escape as html_escape
 from typing import List, Optional
 
@@ -20,9 +22,11 @@ from flask import (
     Flask,
     flash,
     get_flashed_messages,
+    jsonify,
     redirect,
     render_template_string,
     request,
+    session,
     url_for,
 )
 from flask_limiter import Limiter
@@ -244,6 +248,132 @@ def create_app(
             + portal_shell_end()
         )
 
+    @app.route("/impressum")
+    def impressum_page():
+        from modules.web_legal import render_impressum_page_body
+        import modules.settings as st
+
+        body = render_impressum_page_body(st)
+        return (
+            portal_shell_start(
+                title="Impressum – Hessenbot",
+                active_nav="impressum",
+                particles=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4">'
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
+        )
+
+    @app.route("/datenschutz")
+    def datenschutz_page():
+        from modules.web_legal import render_datenschutz_page_body
+        import modules.settings as st
+
+        body = render_datenschutz_page_body(st)
+        return (
+            portal_shell_start(
+                title="Datenschutz – Hessenbot",
+                active_nav="datenschutz",
+                particles=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4">'
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
+        )
+
+    BW_PORTAL_TTL_SEC = 3600
+
+    def _bw_portal_nid():
+        nid = session.get("bw_portal_nid")
+        exp = session.get("bw_portal_exp") or 0
+        try:
+            if nid and float(exp) > time.time():
+                return int(nid)
+        except (TypeError, ValueError):
+            pass
+        session.pop("bw_portal_nid", None)
+        session.pop("bw_portal_exp", None)
+        return None
+
+    def _bw_portal_set(nid: int) -> None:
+        session["bw_portal_nid"] = int(nid)
+        session["bw_portal_exp"] = time.time() + BW_PORTAL_TTL_SEC
+
+    def _bw_portal_clear() -> None:
+        session.pop("bw_portal_nid", None)
+        session.pop("bw_portal_exp", None)
+
+    def _render_public_blitzwatch(body: str):
+        return (
+            portal_shell_start(
+                title="Blitzwatch – Hessenbot",
+                active_nav="blitzwatch",
+                particles=True,
+                admin_href=url_for(
+                    "choose" if current_user.is_authenticated else "admin_login"
+                ),
+            )
+            + '<div class="portal-wrapper portal-wrapper--stats"><main class="portal-main">'
+            + '<div class="home-content container-fluid py-4">'
+            + _flash_markup()
+            + body
+            + "</div></main></div>"
+            + portal_shell_end()
+        )
+
+    @app.route("/mein-blitzwatch", methods=["GET", "POST"])
+    @limiter.limit("25 per minute", methods=["POST"])
+    def blitzwatch_public():
+        from modules import admin_web_ops as ops
+        from modules import blitzwatch as bw
+        import modules.settings as st
+
+        global_on = bool(getattr(st, "blitz_watch_enabled", True))
+        location_on = bool(getattr(st, "location_enabled", True))
+
+        if request.method == "POST":
+            action = (request.form.get("action") or "").strip()
+            if action == "logout":
+                _bw_portal_clear()
+                flash("Sitzung beendet.", "info")
+                return redirect(url_for("blitzwatch_public"))
+            if action == "unlock":
+                nid, err = bw.consume_web_setup_code(request.form.get("code") or "")
+                if err:
+                    flash(err, "error")
+                else:
+                    _bw_portal_set(int(nid))
+                    flash("Einstellungen geöffnet.", "success")
+                return redirect(url_for("blitzwatch_public"))
+            nid = _bw_portal_nid()
+            if not nid:
+                flash("Bitte zuerst den Code aus der Bot-DM eingeben.", "error")
+                return redirect(url_for("blitzwatch_public"))
+            form = request.form.to_dict()
+            form["node_id"] = str(nid)
+            ok, msg, _redir = ops.apply_blitzwatch_admin_form(form)
+            flash(msg, "success" if ok else "error")
+            _bw_portal_set(nid)
+            return redirect(url_for("blitzwatch_public"))
+
+        body = ops.build_blitzwatch_public_html(
+            node_id=_bw_portal_nid(),
+            global_on=global_on,
+            location_on=location_on,
+        )
+        return _render_public_blitzwatch(body)
+
     @app.route("/")
     def index_dashboard():
         from modules.web_dashboard import collect_dashboard, render_dashboard_page
@@ -366,7 +496,7 @@ def create_app(
             host_block
             + """
 <p class="text-muted small mb-0">
-  DM, News, Messages, NodeDB, MOTD, Scheduler, BBS, Einstellungen, Banliste und Logs erreichst du über die Tabs oben.
+  DM, Kanal, News, NodeDB, MOTD, Scheduler, BBS, Einstellungen, Banliste und Logs erreichst du über die Tabs oben.
 </p>
 <p class="text-center mt-4 mb-0">
   <a href="{{ url_for('index_dashboard') }}" class="btn btn-sm btn-link text-muted">
@@ -435,15 +565,20 @@ def create_app(
             inhalt=inhalt,
         )
 
-    @app.route("/dm", methods=["GET", "POST"])
+    @app.route("/alert-text", methods=["GET", "POST"])
     @login_required
-    def edit_dm():
+    def edit_alert_text():
         return _render_text_file_editor(
             "direktnachricht",
-            active_tab="dm",
-            page_title="DM",
-            file_hint="Direktnachricht des Bots (Alert-Text).",
+            active_tab="settings",
+            page_title="Alert-Text",
+            file_hint="Text für File-Monitor (data/alert.txt) — nicht für Mesh-DMs.",
         )
+
+    @app.route("/dm")
+    @login_required
+    def edit_dm():
+        return _render_mesh_chat_page(kind="dm", active_tab="dm", title="Mesh-DM")
 
     @app.route("/news", methods=["GET", "POST"])
     @login_required
@@ -532,7 +667,7 @@ def create_app(
     @login_required
     def edit(dateiname):
         if dateiname == "direktnachricht":
-            return redirect(url_for("edit_dm"))
+            return redirect(url_for("edit_alert_text"))
         if dateiname == "news":
             return redirect(url_for("edit_news"))
         return "Ungültiger Dateiname.", 404
@@ -592,53 +727,675 @@ def create_app(
             active_tab="logs",
         )
 
+    def _render_mesh_chat_page(*, kind: str, active_tab: str, title: str):
+        from modules import admin_mesh_chat as chat
+        import modules.settings as st
+
+        channel = chat.default_mesh_channel()
+        iface = chat.default_mesh_interface()
+        ifaces = []
+        radio_channels: list = []
+        try:
+            from modules import admin_web_ops as ops
+
+            ifaces = ops.iter_radio_interfaces()
+            # Fresh read from meshtasticd / radio channel table
+            radio_channels = ops.list_radio_channels(refresh=True)
+        except Exception:
+            pass
+        if not ifaces:
+            ifaces = [iface]
+        if not radio_channels:
+            try:
+                from modules import admin_web_ops as ops
+
+                radio_channels = ops.list_radio_channels(refresh=False)
+            except Exception:
+                radio_channels = [
+                    {"number": 0, "label": "ShortSlow"},
+                    {"number": channel, "label": "MeshHessen"},
+                ]
+
+        try:
+            from modules.system import format_channel_label
+
+            ch_label = format_channel_label(channel, iface)
+        except Exception:
+            # Prefer label from radio list
+            ch_label = next(
+                (c["label"] for c in radio_channels if int(c["number"]) == int(channel)),
+                f"Kanal {channel}",
+            )
+
+        iface_opts = "".join(
+            f'<option value="{i}"{" selected" if i == iface else ""}>Interface {i}</option>'
+            for i in ifaces
+        )
+
+        channel_opts = "".join(
+            f'<option value="{int(c["number"])}"'
+            f'{" selected" if int(c["number"]) == int(channel) else ""}>'
+            f'{html_escape(str(c["label"]))} (#{int(c["number"])})</option>'
+            for c in radio_channels
+        )
+        # Ensure current default is in the list even if cache missed it
+        if not any(int(c["number"]) == int(channel) for c in radio_channels):
+            channel_opts = (
+                f'<option value="{int(channel)}" selected>'
+                f'{html_escape(ch_label)} (#{int(channel)})</option>'
+                + channel_opts
+            )
+
+        if kind == "channel":
+            subtitle = f"Kanäle vom Radio · aktuell #{channel} · {ch_label}"
+        else:
+            subtitle = "Direktnachrichten · empfangen & senden"
+
+        channel_field = ""
+        if kind == "channel":
+            channel_field = f"""
+      <div class="mesh-chat-field mesh-chat-field--channel">
+        <label class="mesh-chat-label" for="mesh-chat-channel">Kanal</label>
+        <select id="mesh-chat-channel" class="form-select form-select-sm" title="Kanäle aus der Meshtastic-Instanz">
+          {channel_opts}
+        </select>
+      </div>"""
+
+        compose_bar = f"""
+    <div class="mesh-chat-compose-bar">
+      <div class="mesh-chat-field mesh-chat-field--iface">
+        <label class="mesh-chat-label" for="mesh-chat-iface">Radio</label>
+        <select id="mesh-chat-iface" class="form-select form-select-sm">{iface_opts}</select>
+      </div>
+      {channel_field}
+      <div class="mesh-chat-field mesh-chat-field--grow">
+        <label class="mesh-chat-label" for="mesh-chat-input">Nachricht</label>
+        <textarea id="mesh-chat-input" class="form-control mesh-chat-input" rows="2" maxlength="500"
+          placeholder="Text eingeben …" required></textarea>
+      </div>
+      <div class="mesh-chat-field mesh-chat-field--send">
+        <span class="mesh-chat-label mesh-chat-label--hidden" aria-hidden="true">&nbsp;</span>
+        <button type="submit" id="mesh-chat-send" class="btn btn-success mesh-chat-send-btn">
+          <i class="bi bi-send-fill"></i><span class="mesh-chat-send-label">Senden</span>
+        </button>
+      </div>
+    </div>"""
+
+        feed_block = """
+  <div class="mesh-chat-feed-head">
+    <span class="mesh-chat-feed-title"><i class="bi bi-chat-left-text me-1"></i>Verlauf</span>
+    <label class="mesh-chat-filter form-check form-check-inline mb-0">
+      <input type="checkbox" class="form-check-input" id="mesh-chat-hide-bot">
+      <span class="form-check-label">Bot-Antworten ausblenden</span>
+    </label>
+    <span id="mesh-chat-count" class="mesh-chat-count">0 Nachrichten</span>
+  </div>
+  <div id="mesh-chat-feed" class="mesh-chat-feed" aria-live="polite"></div>
+  <div id="mesh-chat-empty" class="mesh-chat-empty" hidden>
+    <i class="bi bi-inbox"></i>
+    <p>Noch keine Nachrichten — Feed aktualisiert sich alle 3&nbsp;s.</p>
+  </div>"""
+
+        alert_link = (
+            f'<p class="mesh-chat-footnote mb-0">'
+            f'Alert-Text (File-Monitor): <a href="{url_for("edit_alert_text")}">bearbeiten</a></p>'
+            if kind == "dm"
+            else ""
+        )
+
+        log_hint = ""
+        if not st.syslog_to_file:
+            log_hint = (
+                '<div class="alert alert-warning py-2 small mb-0">'
+                "Live-Feed benötigt <code>SyslogToFile = True</code> in config.ini."
+                "</div>"
+            )
+        elif not st.log_messages_to_file:
+            log_hint = (
+                '<details class="mesh-chat-hint">'
+                '<summary class="small text-muted">Optional: vollständigere Texte</summary>'
+                '<p class="small text-muted mb-0">'
+                "<code>LogMessagesToFile = True</code> unter [general] ergänzt."
+                "</p></details>"
+            )
+
+        cfg_json = {
+            "kind": kind,
+            "filterChannel": channel if kind == "channel" else None,
+            "sendChannel": channel,
+            "interface": iface,
+            "channelLabel": ch_label,
+            "channels": radio_channels if kind == "channel" else [],
+            "botName": "Hessenbot",
+            "apiMessages": url_for("api_mesh_messages"),
+            "apiSend": url_for("api_mesh_send"),
+            "apiNodes": url_for("api_mesh_nodes"),
+            "apiChannels": url_for("api_mesh_channels"),
+            "pollMs": 3000,
+        }
+        import json
+
+        if kind == "dm":
+            inner = f"""
+<div class="mesh-chat-shell mesh-chat-shell--dm">
+  <p class="mesh-chat-subtitle" id="mesh-chat-subtitle">{html_escape(subtitle)}</p>
+  {log_hint}
+  <div class="mesh-dm-layout">
+    <aside class="mesh-dm-sidebar">
+      <div class="mesh-dm-sidebar-head">
+        <label class="mesh-chat-label" for="mesh-dm-user-search">Chats &amp; NodeDB</label>
+        <input type="search" id="mesh-dm-user-search" class="form-control form-control-sm"
+          placeholder="Name, ID oder Node suchen …" autocomplete="off" spellcheck="false">
+        <p class="mesh-dm-search-hint small text-muted mb-0">
+          Ohne Suche: bisherige DMs. Tippen: auch Nodes aus der NodeDB.
+        </p>
+      </div>
+      <ul id="mesh-dm-user-list" class="mesh-dm-user-list" role="listbox" aria-label="DM-Chats und NodeDB"></ul>
+    </aside>
+    <div class="mesh-dm-panel">
+      <div class="mesh-dm-panel-head">
+        <span id="mesh-dm-active-label" class="mesh-dm-active-label">Bitte Nutzer links wählen</span>
+      </div>
+      <form id="mesh-chat-form" class="mesh-chat-compose">
+        {compose_bar}
+        <div class="mesh-chat-compose-meta">
+          <span id="mesh-chat-status" class="mesh-chat-status">Lade …</span>
+          {alert_link}
+        </div>
+      </form>
+      {feed_block}
+    </div>
+  </div>
+</div>
+<script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
+<script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
+<script src="/static/portal/mesh-chat.js?v=15"></script>
+"""
+        else:
+            inner = f"""
+<div class="mesh-chat-shell">
+  <p class="mesh-chat-subtitle" id="mesh-chat-subtitle">{html_escape(subtitle)}</p>
+  <p class="small text-muted mb-2">
+    Kanalliste kommt von der verbundenen Meshtastic-Instanz
+    (<code>get_channels_with_hash</code> beim Bot-Start / hier aktualisiert).
+    Standard-Feed: <code>messagesChannel</code> (= #{int(channel)}).
+  </p>
+  {log_hint}
+  <form id="mesh-chat-form" class="mesh-chat-compose">
+    {compose_bar}
+    <div class="mesh-chat-compose-meta">
+      <span id="mesh-chat-status" class="mesh-chat-status">Lade …</span>
+    </div>
+  </form>
+  {feed_block}
+</div>
+<script type="application/json" id="mesh-chat-config">{json.dumps(cfg_json)}</script>
+<script>window.__MESH_CHAT__ = JSON.parse(document.getElementById('mesh-chat-config').textContent);</script>
+<script src="/static/portal/mesh-chat.js?v=15"></script>
+"""
+        return _render_admin_template(
+            inner,
+            title=title,
+            active_tab=active_tab,
+        )
+
+    @app.route("/api/admin/host-metrics")
+    @login_required
+    def api_admin_host_metrics():
+        from modules.web_dashboard import get_host_metrics_payload
+
+        return jsonify(get_host_metrics_payload())
+
+    @app.route("/api/admin/mesh/messages")
+    @login_required
+    def api_mesh_messages():
+        from modules import admin_mesh_chat as chat
+
+        kind = request.args.get("kind") or None
+        channel = request.args.get("channel", type=int)
+        limit = min(
+            request.args.get("limit", chat.FEED_LIMIT_DEFAULT, type=int),
+            chat.FEED_LIMIT_MAX,
+        )
+        after = request.args.get("after") or None
+
+        messages, err = chat.collect_messages(
+            log_dir,
+            kind=kind,
+            channel=channel,
+            limit=limit,
+            after_iso=after,
+        )
+        out = []
+        for m in messages:
+            row = {
+                "mid": m.get("mid"),
+                "time": m.get("time"),
+                "time_short": m.get("time_short"),
+                "dir": m.get("dir"),
+                "kind": m.get("kind"),
+                "channel": m.get("channel"),
+                "channel_label": m.get("channel_label"),
+                "text": m.get("text", ""),
+                "source": m.get("source", "bot"),
+                "peer": chat.peer_label(m),
+            }
+            if m.get("kind") == "dm":
+                row["peer_id"] = chat.dm_peer_id(m)
+                row["peer_short"] = m.get("short") or ""
+                row["peer_long"] = m.get("long") or ""
+                numeric = m.get("id")
+                if numeric not in (None, ""):
+                    row["peer_num"] = str(numeric)
+            out.append(row)
+        return jsonify({"messages": out, "error": err})
+
+    @app.route("/api/admin/mesh/send", methods=["POST"])
+    @login_required
+    @limiter.limit("15 per minute")
+    def api_mesh_send():
+        from modules import admin_mesh_chat as chat
+
+        text = request.form.get("text", "")
+        channel = request.form.get("channel", chat.default_mesh_channel(), type=int)
+        interface = request.form.get("interface", chat.default_mesh_interface(), type=int)
+        kind = (request.form.get("kind") or "").strip().lower()
+        dest_raw = (request.form.get("dest_node") or "").strip()
+
+        if kind == "dm" or dest_raw:
+            dest_node, resolve_err = chat.resolve_dest_node(dest_raw, interface)
+            if resolve_err or not dest_node:
+                return jsonify({
+                    "ok": False,
+                    "message": resolve_err or "Bitte Empfänger wählen.",
+                }), 400
+        else:
+            dest_node = 0
+
+        ok, msg = chat.send_mesh_message(
+            text,
+            channel=channel,
+            interface=interface,
+            dest_node=dest_node,
+        )
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+    @app.route("/api/admin/mesh/channels")
+    @login_required
+    def api_mesh_channels():
+        from modules import admin_mesh_chat as chat
+        from modules import admin_web_ops as ops
+
+        iface = request.args.get("iface", chat.default_mesh_interface(), type=int)
+        refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+        try:
+            channels = ops.list_radio_channels(iface, refresh=refresh)
+        except Exception as e:
+            return jsonify({"channels": [], "error": str(e)})
+        return jsonify({"channels": channels, "error": None})
+
+    @app.route("/api/admin/mesh/nodes")
+    @login_required
+    def api_mesh_nodes():
+        from modules import admin_mesh_chat as chat
+
+        iface = request.args.get("iface", chat.default_mesh_interface(), type=int)
+        err, nodes = chat.list_send_targets(iface)
+        return jsonify({"nodes": nodes, "error": err})
+
+    # ── Service-API (Token statt Browser-Login): DM-Versand für externe Dienste ──
+    # Verwaltung: Admin-Tab „API“. Auth über modules.service_api (Hash / Env).
+    def _service_api_client_ip() -> str:
+        return (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+
+    def _service_api_authorize():
+        """Returns (service_api_module, None) or (None, (response, status, error_code))."""
+        from modules import service_api as sapi
+
+        if not sapi.is_active():
+            body, code = sapi.auth_error_payload()
+            return None, (jsonify(body), code, body.get("error", "api_disabled"))
+        supplied = sapi.extract_bearer_or_header(
+            request.headers.get("Authorization", ""),
+            request.headers.get("X-Api-Token") or "",
+        )
+        if not sapi.verify_token(supplied):
+            body, code = sapi.auth_error_payload()
+            return None, (jsonify(body), code, body.get("error", "unauthorized"))
+        return sapi, None
+
+    @app.route("/api/v1/dm", methods=["POST"])
+    @limiter.limit("30 per minute")
+    def api_v1_dm():
+        from modules import service_api as sapi
+
+        sapi_mod, err = _service_api_authorize()
+        client_ip = _service_api_client_ip()
+        if err is not None:
+            resp, code, err_code = err
+            sapi.log_request(
+                endpoint="/api/v1/dm",
+                method="POST",
+                status=code,
+                client_ip=client_ip,
+                error=err_code,
+            )
+            return resp, code
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="json_body_required",
+            )
+            return jsonify({"ok": False, "error": "json_body_required"}), 400
+        dest_raw = str(data.get("node_id") or "").strip()
+        text = str(data.get("text") or "").strip()
+        if not dest_raw:
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="node_id_required",
+            )
+            return jsonify({"ok": False, "error": "node_id_required"}), 400
+        if not text:
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="text_required",
+            )
+            return jsonify({"ok": False, "error": "text_required"}), 400
+        if len(text) > sapi_mod.max_text_len():
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="text_too_long",
+            )
+            return jsonify({
+                "ok": False,
+                "error": "text_too_long",
+                "message": f"Maximal {sapi_mod.max_text_len()} Zeichen.",
+            }), 400
+        try:
+            interface = int(data["interface"]) if data.get("interface") is not None else None
+            channel = int(data["channel"]) if data.get("channel") is not None else None
+        except (TypeError, ValueError):
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="invalid_channel_or_interface",
+            )
+            return jsonify({"ok": False, "error": "invalid_channel_or_interface"}), 400
+
+        # Mesh-Stack erst nach kompletter Validierung laden (schwerer Import)
+        from modules import admin_mesh_chat as chat
+
+        if interface is None:
+            interface = chat.default_mesh_interface()
+        if channel is None:
+            channel = chat.default_mesh_channel()
+
+        dest_node, resolve_err = chat.resolve_dest_node(dest_raw, interface)
+        if resolve_err or not dest_node:
+            sapi_mod.log_request(
+                endpoint="/api/v1/dm", method="POST", status=400,
+                client_ip=client_ip, error="dest_not_resolved", detail=dest_raw[:40],
+            )
+            return (
+                jsonify({
+                    "ok": False,
+                    "error": "dest_not_resolved",
+                    "message": resolve_err or "Empfänger unbekannt.",
+                }),
+                400,
+            )
+
+        ok, msg = chat.send_mesh_message(
+            text,
+            channel=channel,
+            interface=interface,
+            dest_node=dest_node,
+        )
+        dest_id = f"!{dest_node:08x}"
+        status = 200 if ok else 502
+        sapi_mod.log_request(
+            endpoint="/api/v1/dm",
+            method="POST",
+            status=status,
+            client_ip=client_ip,
+            error="" if ok else "send_failed",
+            dest_node_id=dest_id,
+            detail=(msg or "")[:80],
+        )
+        return (
+            jsonify({
+                "ok": ok,
+                "message": msg,
+                "dest_node": dest_node,
+                "dest_node_id": dest_id,
+            }),
+            status,
+        )
+
+    @app.route("/api/v1/whoami")
+    @limiter.limit("30 per minute")
+    def api_v1_whoami():
+        from modules import service_api as sapi
+
+        sapi_mod, err = _service_api_authorize()
+        client_ip = _service_api_client_ip()
+        if err is not None:
+            resp, code, err_code = err
+            sapi.log_request(
+                endpoint="/api/v1/whoami",
+                method="GET",
+                status=code,
+                client_ip=client_ip,
+                error=err_code,
+            )
+            return resp, code
+
+        import modules.system as sm
+        from modules import admin_web_ops as ops
+
+        radios = []
+        for i in ops.iter_radio_interfaces():
+            num = getattr(sm, f"myNodeNum{i}", None)
+            # 777 = Platzhalter aus system.py für nicht initialisierte Interfaces
+            if not isinstance(num, int) or num in (0, 777):
+                continue
+            radios.append({"interface": i, "node_num": num, "node_id": f"!{num:08x}"})
+        sapi_mod.log_request(
+            endpoint="/api/v1/whoami",
+            method="GET",
+            status=200,
+            client_ip=client_ip,
+            detail=f"{len(radios)} radios",
+        )
+        return jsonify({"ok": True, "radios": radios})
+
+    @app.route("/admin/api", methods=["GET", "POST"])
+    @login_required
+    def service_api_admin():
+        from modules import service_api as sapi
+
+        once_token = session.pop("api_token_once", None)
+
+        if request.method == "POST":
+            action = (request.form.get("action") or "").strip()
+            if action == "enable":
+                sapi.set_enabled(True)
+                flash("Service-API eingeschaltet.", "success")
+            elif action == "disable":
+                sapi.set_enabled(False)
+                flash("Service-API ausgeschaltet.", "success")
+            elif action == "generate":
+                plain = sapi.generate_token()
+                session["api_token_once"] = plain
+                if not sapi.is_enabled():
+                    sapi.set_enabled(True)
+                flash(
+                    "Neuer API-Key erzeugt. Kopiere ihn jetzt — er wird nicht erneut angezeigt.",
+                    "success",
+                )
+                return redirect(url_for("service_api_admin"))
+            elif action == "revoke":
+                sapi.revoke_token()
+                flash("API-Key widerrufen. Die API ist ohne Key nicht nutzbar.", "success")
+            elif action == "clear_logs":
+                n = sapi.clear_memory_logs()
+                flash(f"Anzeige-Log geleert ({n} Einträge). Datei logs/service_api.log bleibt erhalten.", "success")
+            else:
+                flash("Unbekannte Aktion.", "error")
+            return redirect(url_for("service_api_admin"))
+
+        st = sapi.status_snapshot()
+        logs = sapi.recent_logs(80)
+
+        status_cls = "alert-success" if st["active"] else "alert-warning"
+        if st["active"]:
+            status_txt = "aktiv — Anfragen mit gültigem Token werden angenommen"
+        elif st["enabled"] and not st["has_token"]:
+            status_txt = "eingeschaltet, aber kein Token — bitte Key erzeugen oder Env setzen"
+        elif not st["enabled"] and st["has_token"]:
+            status_txt = "Token vorhanden, API ausgeschaltet"
+        else:
+            status_txt = "deaktiviert"
+
+        once_block = ""
+        if once_token:
+            esc = html_escape(once_token)
+            once_block = f"""
+<div class="alert alert-danger" role="alert">
+  <strong>Neuer API-Key (nur jetzt sichtbar):</strong>
+  <div class="input-group mt-2">
+    <input type="text" class="form-control font-monospace" id="api-token-once" readonly value="{esc}">
+    <button type="button" class="btn btn-outline-light" id="api-token-copy">Kopieren</button>
+  </div>
+  <p class="small mb-0 mt-2">Speichere den Key im MQTT-Webadmin / Client. Nach dem Verlassen dieser Seite ist er nicht mehr abrufbar.</p>
+</div>
+<script>
+(function () {{
+  var btn = document.getElementById("api-token-copy");
+  var inp = document.getElementById("api-token-once");
+  if (btn && inp) btn.addEventListener("click", function () {{
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(inp.value);
+    }} else {{ inp.select(); document.execCommand("copy"); }}
+    btn.textContent = "Kopiert";
+  }});
+}})();
+</script>
+"""
+
+        src = html_escape(st["token_source"])
+        fp = html_escape(st["token_fingerprint"] or "—")
+        env_note = (
+            '<p class="small text-warning mb-2"><strong>Env-Override aktiv:</strong> '
+            "<code>HESSENBOT_API_TOKEN</code> hat Vorrang vor dem Config-Hash. "
+            "„Key erzeugen“ schreibt weiterhin den Hash, Auth nutzt aber das Env.</p>"
+            if st["env_override"]
+            else ""
+        )
+
+        log_rows = []
+        for e in logs:
+            log_rows.append(
+                "<tr>"
+                f"<td class=\"small text-nowrap\">{html_escape(str(e.get('ts', '')))}</td>"
+                f"<td><code>{html_escape(str(e.get('method', '')))}</code> "
+                f"{html_escape(str(e.get('endpoint', '')))}</td>"
+                f"<td>{html_escape(str(e.get('status', '')))}</td>"
+                f"<td class=\"small\">{html_escape(str(e.get('ip', '')))}</td>"
+                f"<td class=\"small\"><code>{html_escape(str(e.get('dest', '') or '—'))}</code></td>"
+                f"<td class=\"small\">{html_escape(str(e.get('error') or e.get('detail') or '—'))}</td>"
+                "</tr>"
+            )
+        if not log_rows:
+            log_rows.append(
+                '<tr><td colspan="6" class="text-muted small">Noch keine API-Anfragen in dieser Laufzeit.</td></tr>'
+            )
+
+        enable_btn = (
+            '<button type="submit" name="action" value="disable" class="btn btn-outline-warning">'
+            "API ausschalten</button>"
+            if st["enabled"]
+            else '<button type="submit" name="action" value="enable" class="btn btn-success">'
+            "API einschalten</button>"
+        )
+
+        body = f"""
+{once_block}
+<p class="alert {status_cls}">Status: <strong>{html_escape(status_txt)}</strong>
+  · Token-Quelle: <code>{src}</code>
+  · Hash-Präfix: <code>{fp}</code></p>
+{env_note}
+
+<h2 class="h5 section-title">Steuerung</h2>
+<form method="post" class="d-flex flex-wrap gap-2 mb-3">
+  {enable_btn}
+  <button type="submit" name="action" value="generate" class="btn btn-primary"
+          onclick="return confirm('Neuen API-Key erzeugen? Der bisherige Config-Key wird ungültig.');">
+    Neuen API-Key erzeugen</button>
+  <button type="submit" name="action" value="revoke" class="btn btn-outline-danger"
+          onclick="return confirm('API-Key wirklich widerrufen?');">
+    Key widerrufen</button>
+</form>
+<p class="small text-muted">Der Klartext-Key wird nur einmal nach dem Erzeugen angezeigt.
+  In der Config liegt ausschließlich der SHA-256-Hash. Rate-Limit: {html_escape(st["rate_limit"])},
+  max. Textlänge: {st["max_text_len"]} Zeichen.</p>
+
+<h2 class="h5 section-title mt-4">Dokumentation</h2>
+<p class="small">Auth: Header <code>Authorization: Bearer &lt;token&gt;</code> oder
+  <code>X-Api-Token: &lt;token&gt;</code>. Ohne aktiven Token bzw. bei ausgeschalteter API:
+  <code>503 api_disabled</code>; falscher Token: <code>401 unauthorized</code>.</p>
+
+<h3 class="h6 mt-3">POST /api/v1/dm</h3>
+<pre class="small bg-dark text-light p-3 rounded">curl -sS -X POST "http://&lt;host&gt;:&lt;port&gt;/api/v1/dm" \\
+  -H "Authorization: Bearer YOUR_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"node_id":"!aabbccdd","text":"Hallo","channel":2,"interface":1}}'</pre>
+<p class="small"><code>node_id</code>: <code>!hex</code>, Dezimalnummer oder NodeDB-Name.
+  <code>channel</code>/<code>interface</code> optional (Defaults wie Admin-Chat).
+  Antwort <code>200</code>: <code>{{ok,message,dest_node,dest_node_id}}</code>;
+  Fehler u. a. <code>400</code> Validierung / <code>dest_not_resolved</code> / <code>text_too_long</code>,
+  <code>502</code> Sendefehler.</p>
+
+<h3 class="h6 mt-3">GET /api/v1/whoami</h3>
+<pre class="small bg-dark text-light p-3 rounded">curl -sS "http://&lt;host&gt;:&lt;port&gt;/api/v1/whoami" \\
+  -H "Authorization: Bearer YOUR_TOKEN"</pre>
+<p class="small">Liefert <code>{{ok,radios:[{{interface,node_num,node_id}}]}}</code>
+  (nicht initialisierte Interfaces / Platzhalter 777 werden gefiltert).</p>
+
+<p class="small text-muted">Sicherheit: Token geheim halten, Web-UI nur im LAN/VPN oder hinter Reverse-Proxy,
+  starken Admin-Login nutzen. Kein Delivery-Status-Endpunkt in v1 (ACK-Statistik bleibt bot-seitig).</p>
+
+<h2 class="h5 section-title mt-4">Request-Log</h2>
+<p class="small text-muted">Laufzeit-Puffer (max. 200) und Anhang in <code>logs/service_api.log</code>.
+  Tokens werden nicht geloggt.</p>
+<form method="post" class="mb-2">
+  <button type="submit" name="action" value="clear_logs" class="btn btn-sm btn-outline-secondary">
+    Anzeige leeren</button>
+</form>
+<div class="table-scroll">
+<table class="nodes-table table-dark table-bordered">
+<thead><tr><th>Zeit</th><th>Request</th><th>Status</th><th>IP</th><th>Ziel</th><th>Info</th></tr></thead>
+<tbody>{"".join(log_rows)}</tbody>
+</table>
+</div>
+"""
+        return _render_admin_template(
+            """
+  {{ body|safe }}
+""",
+            title="Service-API",
+            active_tab="api",
+            body=Markup(body),
+        )
+
     @app.route("/live/messages")
     @login_required
     def live_messages():
-        import modules.settings as st
-
-        log_path = _messages_log_path(log_dir)
-        hint = (
-            f'<p class="small text-muted">Repo: <code>{html_escape(repo_root())}</code> · '
-            f'Log: <code>{html_escape(log_path)}</code></p>'
-        )
-        if not st.log_messages_to_file:
-            inhalt = (
-                "Nachrichten-Log ist deaktiviert.\n\n"
-                "In config.ini unter [general] setzen:\n"
-                "  LogMessagesToFile = True\n\n"
-                "Bot neu starten. Die Datei liegt dann unter logs/messages.log."
-            )
-        elif not os.path.isfile(log_path):
-            inhalt = (
-                f"Datei nicht gefunden:\n{log_path}\n\n"
-                "Nach dem Aktivieren von LogMessagesToFile ein paar Mesh-Nachrichten senden, "
-                "damit die Datei angelegt wird."
-            )
-        else:
-            try:
-                inhalt = _read_messages_log_tail(log_path)
-                if not inhalt.strip():
-                    inhalt = "(Datei ist leer — noch keine Nachrichten protokolliert.)"
-            except PermissionError:
-                inhalt = (
-                    f"Keine Leserechte für:\n{log_path}\n\n"
-                    f"Rechte setzen, z. B.:\n"
-                    f"  sudo ./etc/set-permissions.sh <service-user> {repo_root()}"
-                )
-            except OSError as e:
-                inhalt = f"Fehler beim Öffnen:\n{log_path}\n\n{e}"
-
-        return _render_admin_template(
-            f"""
-<div class="admin-log-view">
-<meta http-equiv="refresh" content="5">
-  {hint}
-  <pre class="admin-pre">{html_escape(inhalt)}</pre>
-</div>
-""",
-            title="Messages",
+        return _render_mesh_chat_page(
+            kind="channel",
             active_tab="messages",
+            title="Kanal-Nachrichten",
         )
 
     @app.route("/nodes")
@@ -699,6 +1456,7 @@ def create_app(
                         f"<td>{r['shortName']}</td>"
                         f"<td>{r['longName']}</td>"
                         f"<td>{r['location_html']}</td>"
+                        f"<td>{r.get('blitzwatch_html', '—')}</td>"
                         f"<td>{r['lastHeard']}</td>"
                         f"<td>{html_escape(str(r['snr']))}</td>"
                         f"<td>{del_btn}</td>"
@@ -710,9 +1468,9 @@ def create_app(
 <div class="nodedb-search-block">
 {ops.nodedb_search_toolbar_html()}
 <div class="table-scroll"><table class="nodes-table table-dark table-bordered">
-<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Standort</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
+<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Standort</th><th>Blitzwatch</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
 <tbody>{"".join(rows_html)}
-<tr class="nodedb-search-empty" hidden><td colspan="8" class="text-muted small">Keine Treffer für die Suche.</td></tr>
+<tr class="nodedb-search-empty" hidden><td colspan="9" class="text-muted small">Keine Treffer für die Suche.</td></tr>
 </tbody></table></div>
 </div>
 <script src="/static/portal/nodedb-search.js"></script>"""
@@ -790,19 +1548,41 @@ def create_app(
                 if post_iface in ifaces:
                     iface_id = post_iface
                     redirect_kw["iface"] = iface_id
-                ok, msg = ops.apply_local_node_settings(iface_id, request.form)
+                action = (request.form.get("action") or "").strip()
+                try:
+                    if action == "save_channel":
+                        ok, msg = ops.apply_local_channel_settings(iface_id, request.form)
+                    else:
+                        ok, msg = ops.apply_local_node_settings(iface_id, request.form)
+                except Exception as e:
+                    from modules.log import logger
+
+                    logger.exception("Admin: Node Settings speichern fehlgeschlagen")
+                    ok, msg = False, f"Speichern fehlgeschlagen: {e!s}"
                 flash(msg, "success" if ok else "error")
                 return redirect(url_for("node_settings_index", **redirect_kw))
 
-            err, settings = ops.fetch_local_node_settings(iface_id)
-            if err or not settings:
-                body = f'<p class="alert alert-danger">{html_escape(err or "Unbekannter Fehler")}</p>'
-            else:
-                body = ops.build_node_settings_html(
-                    settings,
-                    iface_id=iface_id,
-                    ifaces=ifaces,
-                    form_action=url_for("node_settings_index"),
+            try:
+                err, settings = ops.fetch_local_node_settings(iface_id)
+                if err or not settings:
+                    body = f'<p class="alert alert-danger">{html_escape(err or "Unbekannter Fehler")}</p>'
+                else:
+                    ch_err, channels = ops.fetch_local_channels(iface_id)
+                    body = ops.build_node_settings_page_html(
+                        settings,
+                        channels,
+                        ch_err,
+                        iface_id=iface_id,
+                        ifaces=ifaces,
+                        form_action=url_for("node_settings_index"),
+                    )
+            except Exception as e:
+                from modules.log import logger
+
+                logger.exception("Admin: Node Settings laden fehlgeschlagen")
+                body = (
+                    '<p class="alert alert-danger">Seite konnte nicht geladen werden: '
+                    f"{html_escape(str(e))}</p>"
                 )
 
         return _render_admin_template(
@@ -1117,50 +1897,24 @@ def create_app(
         prev = "True" if st.scheduler_enabled else "False"
         chk_en = " checked" if st.scheduler_enabled else ""
         chk_sm = " checked" if st.schedulerMotd else ""
-
-        presets = [
-            ("day", "Täglich / alle N Tage (day)"),
-            ("hour", "Alle N Stunden (hour)"),
-            ("min", "Alle N Minuten (min)"),
-            ("mon", "Montags zur Uhrzeit (mon)"),
-            ("tue", "Dienstags zur Uhrzeit (tue)"),
-            ("wed", "Mittwochs zur Uhrzeit (wed)"),
-            ("thu", "Donnerstags zur Uhrzeit (thu)"),
-            ("fri", "Freitags zur Uhrzeit (fri)"),
-            ("sat", "Samstags zur Uhrzeit (sat)"),
-            ("sun", "Sonntags zur Uhrzeit (sun)"),
-            ("joke", "Witz — Intervall = Minuten (joke)"),
-            ("link", "bbslink — Intervall = Stunden (link)"),
-            ("weather", "Wetter — täglich zur Uhrzeit (weather)"),
-            ("news", "News — Intervall = Stunden (news)"),
-            ("readrss", "RSS — Intervall = Stunden (readrss)"),
-            ("mwx", "Marinewetter — täglich zur Uhrzeit (mwx)"),
-            ("sysinfo", "Sysinfo — Intervall = Stunden (sysinfo)"),
-            ("tide", "Gezeiten — täglich zur Uhrzeit (tide)"),
-            ("solar", "Sonne — täglich zur Uhrzeit (solar)"),
-            ("custom", "Eigene Logik (custom, modules/custom_scheduler.py)"),
-        ]
-        cur_raw = (st.schedulerValue or "").strip()
-        cur = cur_raw.lower()
-        opt_parts = [
-            '<select name="value" class="form-control mb-2" required>',
-            '<option value="">— Zeitplantyp wählen —</option>',
-        ]
-        matched = False
-        for v, lab in presets:
-            sel = " selected" if cur == v else ""
-            if sel:
-                matched = True
-            opt_parts.append(
-                f'<option value="{html_escape(v, quote=True)}"{sel}>{html_escape(lab)}</option>'
+        schedule_fields = Markup(
+            ops.scheduler_schedule_fields_html(
+                value=st.schedulerValue or "",
+                interval=st.schedulerInterval or "1",
+                sched_time=st.schedulerTime or "",
             )
-        if cur_raw and not matched:
-            opt_parts.append(
-                f'<option value="{html_escape(cur_raw.strip(), quote=True)}" selected>'
-                f"Freitext: {html_escape(cur_raw.strip())}</option>"
+        )
+        iface_sel = Markup(
+            ops.iface_select_html("interface", st.schedulerInterface, element_id="sched-iface")
+        )
+        channel_sel = Markup(
+            ops.channel_select_html(
+                "channel",
+                st.schedulerChannel,
+                iface_id=st.schedulerInterface,
+                element_id="sched-channel",
             )
-        opt_parts.append("</select>")
-        schedule_select_html = Markup("".join(opt_parts))
+        )
 
         return _render_admin_template("""
   <form method="post">
@@ -1169,51 +1923,24 @@ def create_app(
       <input class="form-check-input" type="checkbox" name="enabled" id="sen"{{ chk_en|safe }}>
       <label class="form-check-label" for="sen">Scheduler aktiv</label>
     </div>
-    <div class="row mb-2">
-      <div class="col"><label>Interface (Radio)</label>
-        <input type="number" name="interface" class="form-control" min="1" max="9" value="{{ iface }}"></div>
-      <div class="col"><label>Kanal</label>
-        <input type="number" name="channel" class="form-control" value="{{ chan }}"></div>
+    <div class="row mb-3">
+      <div class="col-md-6"><label class="form-label" for="sched-iface">Interface (Radio)</label>
+        {{ iface_sel }}</div>
+      <div class="col-md-6"><label class="form-label" for="sched-channel">Kanal</label>
+        {{ channel_sel }}</div>
     </div>
     <div class="form-check mb-2">
       <input class="form-check-input" type="checkbox" name="schedulerMotd" id="sm"{{ chk_sm|safe }}>
       <label class="form-check-label" for="sm">MOTD als geplante Nachricht verwenden (statt Textfeld)</label>
     </div>
-    <label>Nachricht (nur wenn MOTD-Haken aus)</label>
+    <label class="form-label">Nachricht (nur wenn MOTD-Haken aus)</label>
     <textarea name="message" rows="3" class="form-control mb-3">{{ msg }}</textarea>
 
-    <label class="form-label fw-semibold">Zeitplantyp <span class="text-muted fw-normal">(config: value)</span></label>
-    {{ schedule_select|safe }}
+    {{ schedule_fields }}
 
-    <label class="form-label fw-semibold">Intervall <span class="text-muted fw-normal">(Zahl, config: interval)</span></label>
-    <input type="number" name="interval" class="form-control mb-2" min="1" step="1"
-           placeholder="z.B. 5" value="{{ ivl }}">
-    <p class="small text-muted mb-2">
-      <strong>day:</strong> ohne Uhrzeit = alle N Tage; mit Uhrzeit = alle N Tage zur gleichen Uhrzeit.
-      <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
-      <strong>mon … sun:</strong> Uhrzeit unten setzen (HH:MM).
-      <strong>joke:</strong> Minuten; <strong>link, news, readrss, sysinfo:</strong> Stunden.
-      <strong>weather, mwx, tide, solar:</strong> Uhrzeit Pflicht, Intervall oft egal (siehe Code).
+    <p class="small text-muted mb-3">
+      Unabhängig von MOTD-/News-Versand. Die graue Zusammenfassung zeigt, wie der Zeitplan gelesen wird.
     </p>
-
-    <label class="form-label fw-semibold">Uhrzeit <span class="text-muted fw-normal">(HH:MM, config: time)</span></label>
-    <input type="text" name="time" class="form-control mb-3" placeholder="z.B. 08:30" value="{{ tim }}"
-           pattern="[0-2][0-9]:[0-5][0-9]" title="Format 00:00 bis 23:59">
-
-    <details class="mb-3 p-3 rounded" style="background:#2a2a2a;border:1px solid #444;">
-      <summary class="fw-semibold">Kurzübersicht (technisch: modules/scheduler.py)</summary>
-      <table class="table table-sm table-dark mt-2 mb-0 small">
-        <thead><tr><th>value</th><th>Intervall</th><th>Uhrzeit</th></tr></thead>
-        <tbody>
-          <tr><td>day</td><td>Tage (1=täglich)</td><td>optional, sonst nur Tagesabstand</td></tr>
-          <tr><td>hour / min</td><td>Stunden bzw. Minuten</td><td>—</td></tr>
-          <tr><td>mon … sun</td><td>—</td><td>erforderlich</td></tr>
-          <tr><td>joke</td><td>Minuten</td><td>—</td></tr>
-          <tr><td>link, news, readrss, sysinfo</td><td>Stunden</td><td>—</td></tr>
-          <tr><td>weather, mwx, tide, solar</td><td>(siehe Log)</td><td>erforderlich</td></tr>
-        </tbody>
-      </table>
-    </details>
 
     <input type="submit" value="Speichern" class="btn btn-success w-100">
   </form>
@@ -1224,12 +1951,10 @@ def create_app(
             prev=prev,
             chk_en=chk_en,
             chk_sm=chk_sm,
-            iface=st.schedulerInterface,
-            chan=st.schedulerChannel,
+            iface_sel=iface_sel,
+            channel_sel=channel_sel,
             msg=st.schedulerMessage,
-            ivl=st.schedulerInterval,
-            tim=st.schedulerTime,
-            schedule_select=schedule_select_html,
+            schedule_fields=schedule_fields,
         )
 
     @app.route("/banlist", methods=["GET", "POST"])
@@ -1387,6 +2112,203 @@ def create_app(
             body=Markup(body),
         )
 
+    @app.route("/limits", methods=["GET", "POST"])
+    @login_required
+    def limits_index():
+        from modules import admin_web_ops as ops
+        import modules.settings as st
+
+        if request.method == "POST" and (request.form.get("action") or "") == "save_limits":
+            try:
+                enabled = request.form.get("cmdRateLimitEnabled") in ("1", "on", "true", "True")
+                notify = request.form.get("cmdRateLimitNotifyOnce") in ("1", "on", "true", "True")
+                max_c = int(request.form.get("cmdRateLimitMax") or 3)
+                window = int(request.form.get("cmdRateLimitWindow") or 60)
+                cool = int(request.form.get("cmdExpensiveCooldownSec") or 45)
+                cmds = ops.normalize_expensive_commands(
+                    request.form.get("cmdExpensiveCommands") or ""
+                )
+                full = ops.save_rate_limit_settings_to_config(
+                    enabled=enabled,
+                    max_cmds=max_c,
+                    window_sec=window,
+                    notify_once=notify,
+                    expensive_cooldown=cool,
+                    expensive_commands=cmds,
+                )
+                msg = "Limits gespeichert und übernommen."
+                if not full:
+                    msg += " Einige andere Config-Werte ggf. erst nach Bot-Neustart aktiv."
+                flash(msg, "success")
+            except OSError as e:
+                if getattr(e, "errno", None) == 13:
+                    flash(ops.runtime_file_permission_hint(st.config_file), "error")
+                else:
+                    flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+            except (TypeError, ValueError) as e:
+                flash(f"Ungültige Eingabe: {e!s}", "error")
+            except Exception as e:
+                flash(f"Speichern fehlgeschlagen: {e!s}", "error")
+            return redirect(url_for("limits_index"))
+
+        enabled = getattr(st, "cmdRateLimitEnabled", True)
+        max_c = getattr(st, "cmdRateLimitMax", 3)
+        window = getattr(st, "cmdRateLimitWindow", 60)
+        notify = getattr(st, "cmdRateLimitNotifyOnce", True)
+        cool = getattr(st, "cmdExpensiveCooldownSec", 45)
+        cmds = getattr(st, "cmdExpensiveCommands", [])
+        if isinstance(cmds, str):
+            cmds = ops.normalize_expensive_commands(cmds)
+
+        settings_html = ops.build_limits_settings_html(
+            enabled=bool(enabled),
+            max_cmds=int(max_c or 3),
+            window_sec=int(window or 60),
+            notify_once=bool(notify),
+            expensive_cooldown=int(cool or 0),
+            expensive_commands=list(cmds) if isinstance(cmds, (list, tuple)) else [],
+            form_action=url_for("limits_index"),
+        )
+
+        body = f"""
+{settings_html}
+<div class="section-card">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+    <div>
+      <h2 class="h5 mb-1">Live-Nutzung</h2>
+      <p class="small text-muted mb-0">Aktuelle Zähler pro Node im laufenden Fenster (Auto-Refresh 5 s).</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="button" id="limits-refresh" class="btn btn-sm btn-outline-secondary">Aktualisieren</button>
+      <button type="button" id="limits-reset-all" class="btn btn-sm btn-outline-danger">Alle Zähler zurücksetzen</button>
+    </div>
+  </div>
+  <span id="limits-status" class="small text-muted d-block mb-2"></span>
+  <div class="table-scroll">
+    <table class="nodes-table table-dark table-bordered" id="limits-table">
+      <thead>
+        <tr>
+          <th>Node</th><th>Hex</th><th>Befehle</th><th>Status</th><th>Teure Cooldowns</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="limits-tbody">
+        <tr><td colspan="6" class="text-muted">Lade …</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+(function () {{
+  const tbody = document.getElementById("limits-tbody");
+  const statusEl = document.getElementById("limits-status");
+  const apiGet = {json.dumps(url_for("api_admin_rate_limits"))};
+  const apiReset = {json.dumps(url_for("api_admin_rate_limits_reset"))};
+
+  function esc(s) {{
+    const d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  }}
+
+  function render(rows) {{
+    if (!rows || !rows.length) {{
+      tbody.innerHTML = '<tr><td colspan="6" class="text-muted">Keine Aktivität im aktuellen Fenster.</td></tr>';
+      return;
+    }}
+    tbody.innerHTML = rows.map(function (r) {{
+      const label = (r.short || r.long)
+        ? esc(r.short || "") + (r.long && r.short !== r.long ? " · " + esc(r.long) : "")
+        : esc(r.node_id);
+      const exp = (r.expensive || []).map(function (e) {{
+        return "!" + esc(e.cmd) + " (" + esc(e.remaining_sec) + "s)";
+      }}).join(", ") || "—";
+      return "<tr>"
+        + "<td>" + label + "<br><code class=\\"small\\">" + esc(r.node_id) + "</code></td>"
+        + "<td><code>" + esc(r.hex) + "</code></td>"
+        + "<td>" + esc(r.cmds_in_window) + " / " + esc(r.limit_max) + "</td>"
+        + "<td>" + esc(r.status) + "</td>"
+        + "<td class=\\"small\\">" + exp + "</td>"
+        + '<td><button type="button" class="btn btn-sm btn-outline-warning limits-reset-one" data-node="'
+        + esc(r.node_id) + '">Reset</button></td>'
+        + "</tr>";
+    }}).join("");
+  }}
+
+  function load() {{
+    fetch(apiGet, {{ credentials: "same-origin", headers: {{ Accept: "application/json" }} }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (data) {{
+        render(data.rows || []);
+        if (statusEl) statusEl.textContent = "Aktualisiert " + new Date().toLocaleTimeString("de-DE");
+      }})
+      .catch(function (e) {{
+        if (statusEl) statusEl.textContent = "Fehler: " + e.message;
+      }});
+  }}
+
+  function resetNode(nodeId) {{
+    const body = new URLSearchParams();
+    body.set("node_id", nodeId || "*");
+    fetch(apiReset, {{
+      method: "POST",
+      credentials: "same-origin",
+      headers: {{ "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }},
+      body: body.toString(),
+    }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (data) {{
+        if (statusEl) statusEl.textContent = data.message || "Zurückgesetzt";
+        load();
+      }})
+      .catch(function (e) {{
+        if (statusEl) statusEl.textContent = "Reset fehlgeschlagen: " + e.message;
+      }});
+  }}
+
+  document.getElementById("limits-refresh").addEventListener("click", load);
+  document.getElementById("limits-reset-all").addEventListener("click", function () {{
+    if (confirm("Alle Rate-Limit-Zähler zurücksetzen?")) resetNode("*");
+  }});
+  tbody.addEventListener("click", function (ev) {{
+    const btn = ev.target.closest(".limits-reset-one");
+    if (!btn) return;
+    resetNode(btn.getAttribute("data-node"));
+  }});
+  load();
+  setInterval(load, 5000);
+}})();
+</script>
+"""
+        return _render_admin_template(
+            """
+  {{ body|safe }}
+""",
+            title="Limits",
+            active_tab="limits",
+            body=Markup(body),
+        )
+
+
+    @app.route("/api/admin/rate-limits")
+    @login_required
+    def api_admin_rate_limits():
+        from modules.system import get_rate_limit_snapshot
+
+        return jsonify({"rows": get_rate_limit_snapshot()})
+
+    @app.route("/api/admin/rate-limits/reset", methods=["POST"])
+    @login_required
+    def api_admin_rate_limits_reset():
+        from modules.system import reset_rate_limit
+
+        node_id = (request.form.get("node_id") or request.json and request.json.get("node_id") or "*").strip()
+        n = reset_rate_limit(None if node_id in ("*", "") else node_id)
+        if node_id in ("*", ""):
+            msg = f"Alle Zähler zurückgesetzt ({n} Nodes)."
+        else:
+            msg = f"Zähler für {node_id} zurückgesetzt." if n else f"Keine Daten für {node_id}."
+        return jsonify({"ok": True, "cleared": n, "message": msg})
+
     @app.route("/bbs")
     @login_required
     def bbs_index():
@@ -1531,43 +2453,86 @@ def create_app(
                 '<p class="alert alert-info">BBS ist unter <code>[bbs] enabled = False</code> '
                 "deaktiviert. Die DM-Liste im laufenden Bot kannst du hier trotzdem bearbeiten.</p>"
             )
+        ack_on = bool(getattr(st, "bbs_dm_user_ack_enabled", False))
         hint += (
-            "<p class=\"small text-muted\">Format pro Zeile: <code>[Ziel-Node, Text, Absender-Node]</code>. "
-            "Zeile <strong>0</strong> ist ein interner Platzhalter (wird in <code>bbsinfo</code> nicht mitgezählt) "
-            "und kann nicht gelöscht werden. Datei: <code>data/bbsdm.pkl</code>.</p>"
+            "<p class=\"small text-muted\">BBS-DM-Warteschlange (<code>data/bbsdm.pkl</code>). "
+            "Zeile <strong>0</strong> ist Platzhalter und zählt nicht in <code>bbsinfo</code>. "
+            f"Nutzer-Lesebestätigung: <strong>{'an' if ack_on else 'aus'}</strong> "
+            "(<code>bbsDmUserAckEnabled</code>).</p>"
         )
 
         rows_html = []
         for idx, row in enumerate(bbs.bbs_dm):
-            to_n = row[0] if len(row) > 0 else 0
-            text = row[1] if len(row) > 1 else ""
-            from_n = row[2] if len(row) > 2 else 0
+            to_n = bbs.dm_to(row)
+            text = bbs.dm_body(row)
+            from_n = bbs.dm_from(row)
             to_h = html_escape(bbs.bbs_party_display_label(to_n))
             from_h = html_escape(bbs.bbs_party_display_label(from_n))
-            preview = html_escape(text[:100] + ("…" if len(text) > 100 else ""))
-            if idx == 0:
+            preview = html_escape(text[:80] + ("…" if len(text) > 80 else ""))
+            status = html_escape(bbs.bbs_dm_status_label(row))
+            want_ack = "ja" if bbs.dm_require_user_ack(row) else "nein"
+            mid = html_escape(bbs.dm_msg_id(row) or "—")
+            attempts = "0"
+            mesh_ack = "—"
+            user_ack = "—"
+            last_at = "—"
+            if isinstance(row, dict):
+                attempts = str(int(row.get("attempt_count") or 0))
+                ma = row.get("mesh_acked")
+                if ma is True:
+                    mesh_ack = "ja"
+                elif ma is False:
+                    mesh_ack = "nein"
+                user_ack = "ja" if row.get("user_acked") else "nein"
+                la = row.get("last_attempt_at")
+                if la:
+                    try:
+                        last_at = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(la)))
+                    except (TypeError, ValueError, OSError):
+                        last_at = "—"
+            if idx == 0 or bbs.is_placeholder_dm(row, idx):
                 actions = '<span class="text-muted">(Platzhalter)</span>'
+                status, want_ack, mid, attempts, mesh_ack, user_ack, last_at = (
+                    "—", "—", "—", "—", "—", "—", "—"
+                )
             else:
                 actions = (
                     f'<a class="btn btn-sm btn-outline-info" href="{url_for("bbs_dm_read", idx=idx)}">Text</a> '
+                    f'<form method="post" action="{url_for("bbs_dm_redeliver", idx=idx)}" style="display:inline">'
+                    '<button type="submit" class="btn btn-sm btn-outline-warning">Erneut</button></form> '
+                    f'<form method="post" action="{url_for("bbs_dm_done", idx=idx)}" style="display:inline" '
+                    f'onsubmit="return confirm(\'DM #{idx} als erledigt markieren?\');">'
+                    '<button type="submit" class="btn btn-sm btn-outline-success">Erledigt</button></form> '
                     f'<form method="post" action="{url_for("bbs_dm_delete", idx=idx)}" style="display:inline" '
                     f'onsubmit="return confirm(\'DM-Zeile {idx} wirklich löschen?\');">'
                     '<button type="submit" class="btn btn-sm btn-danger">Löschen</button></form>'
                 )
             rows_html.append(
                 "<tr>"
-                f"<td><code>{idx}</code></td><td><code>{to_h}</code></td><td><code>{from_h}</code></td>"
-                f'<td class="cell-dm-text">{preview}</td><td>{actions}</td>'
+                f"<td><code>{idx}</code></td>"
+                f"<td><code>{to_h}</code></td>"
+                f"<td><code>{from_h}</code></td>"
+                f"<td>{status}</td>"
+                f"<td>{want_ack}</td>"
+                f"<td><code>{mid}</code></td>"
+                f"<td>{attempts}</td>"
+                f"<td>{mesh_ack}</td>"
+                f"<td>{user_ack}</td>"
+                f"<td>{html_escape(last_at)}</td>"
+                f'<td class="cell-dm-text">{preview}</td>'
+                f"<td>{actions}</td>"
                 "</tr>"
             )
-        table = "".join(rows_html) if rows_html else '<tr><td colspan="5">Keine Einträge.</td></tr>'
+        table = "".join(rows_html) if rows_html else '<tr><td colspan="12">Keine Einträge.</td></tr>'
 
         body = (
             hint
             + f'<p><a class="btn btn-success mb-3" href="{url_for("bbs_dm_new")}">Neue DM</a> '
             + f'<a class="btn btn-outline-secondary mb-3" href="{url_for("bbs_index")}">Öffentliches BBS</a></p>'
             + '<div class="table-scroll"><table class="nodes-table table-dark table-bordered table-bbs-dm">'
-            + "<thead><tr><th>#</th><th>An (Node)</th><th>Von (Node)</th><th>Text</th><th></th></tr></thead>"
+            + "<thead><tr><th>#</th><th>An</th><th>Von</th><th>Status</th><th>ACK?</th>"
+            + "<th>ID</th><th>Versuche</th><th>Node-ACK</th><th>Nutzer-ACK</th>"
+            + "<th>Letzte Aktion</th><th>Text</th><th></th></tr></thead>"
             + f"<tbody>{table}</tbody></table></div>"
         )
 
@@ -1589,31 +2554,47 @@ def create_app(
             flash("Eintrag nicht gefunden.", "error")
             return redirect(url_for("bbs_dm_index"))
         row = bbs.bbs_dm[idx]
-        to_n, text, from_n = row[0], row[1] if len(row) > 1 else "", row[2] if len(row) > 2 else 0
+        to_n = bbs.dm_to(row)
+        text = bbs.dm_body(row)
+        from_n = bbs.dm_from(row)
         to_h = html_escape(bbs.bbs_party_display_label(to_n))
         from_h = html_escape(bbs.bbs_party_display_label(from_n))
-        body_esc = html_escape(text)
+        meta = ""
+        if isinstance(row, dict) and not bbs.is_placeholder_dm(row, idx):
+            meta = (
+                f"<p class=\"small text-muted\">Status: {html_escape(bbs.bbs_dm_status_label(row))} · "
+                f"ACK: {'ja' if bbs.dm_require_user_ack(row) else 'nein'} · "
+                f"ID: <code>{html_escape(bbs.dm_msg_id(row) or '—')}</code> · "
+                f"Versuche: {int(row.get('attempt_count') or 0)} · "
+                f"Node-ACK: {row.get('mesh_acked')} · Nutzer-ACK: {bool(row.get('user_acked'))}</p>"
+            )
+        # Body as Jinja var (not f-string interpolate) — avoids SSTI/RCE via mesh DM text.
+        # url_for braces doubled so the f-string leaves {{ url_for(...) }} for Jinja.
         return _render_admin_template(
             f"""
   <p><strong>An:</strong> {to_h} &nbsp; <strong>Von:</strong> {from_h}</p>
-  <pre class="admin-pre">{body_esc}</pre>
+  {meta}
+  <pre class="admin-pre">{{{{ dm_body }}}}</pre>
   <div class="text-center mt-3">
-    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Zurück</a>
+    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-secondary btn-sm">Zurück</a>
   </div>
 """,
             title=f"BBS-DM #{idx}",
             active_tab="bbs",
+            dm_body=text,
         )
 
     @app.route("/bbs/dm/new", methods=["GET", "POST"])
     @login_required
     def bbs_dm_new():
         import modules.bbstools as bbs
+        import modules.settings as st
 
         if request.method == "POST":
             raw_to = (request.form.get("to_node") or "").strip()
             body_txt = request.form.get("body") or ""
             raw_from = (request.form.get("from_node") or "").strip() or "0"
+            require_ack = request.form.get("require_user_ack") == "1"
 
             to_node = 0
             if raw_to.startswith("!") and len(raw_to) >= 2:
@@ -1638,13 +2619,37 @@ def create_app(
                 flash("Nachricht darf nicht leer sein.", "error")
             else:
                 try:
-                    flash(bbs.bbs_post_dm(to_node, body_txt.strip(), from_node), "success")
+                    flash(
+                        bbs.bbs_post_dm(
+                            to_node,
+                            body_txt.strip(),
+                            from_node,
+                            require_user_ack=require_ack,
+                        ),
+                        "success",
+                    )
                 except Exception as e:
                     flash(f"Speichern fehlgeschlagen: {e!s}", "error")
             return redirect(url_for("bbs_dm_index"))
 
+        ack_enabled = bool(getattr(st, "bbs_dm_user_ack_enabled", False))
+        ack_box = ""
+        if ack_enabled:
+            ack_box = (
+                '<div class="form-check mb-3">'
+                '<input class="form-check-input" type="checkbox" name="require_user_ack" value="1" id="require_user_ack">'
+                '<label class="form-check-label" for="require_user_ack">'
+                "Lesebestätigung verlangen (wie <code>bbspost ack @… #…</code>)"
+                "</label></div>"
+            )
+        else:
+            ack_box = (
+                '<p class="small text-muted mb-3">Lesebestätigung ist global aus '
+                "(<code>bbsDmUserAckEnabled = False</code>).</p>"
+            )
+
         return _render_admin_template(
-            """
+            f"""
   <p class="small text-muted">Wie <code>bbspost @Ziel #Text</code>: Ziel als Dezimal-Node-ID oder Meshtastic-<code>!hex</code>.</p>
   <form method="post">
     <label>Ziel-Node</label>
@@ -1653,10 +2658,11 @@ def create_app(
     <input type="text" name="from_node" class="form-control mb-3" value="0" placeholder="0">
     <label>Nachricht</label>
     <textarea name="body" rows="10" class="form-control mb-3" required></textarea>
+    {ack_box}
     <input type="submit" value="Absenden" class="btn btn-success w-100">
   </form>
   <div class="text-center mt-3">
-    <a href="{{ url_for('bbs_dm_index') }}" class="btn btn-outline-secondary btn-sm">Abbrechen</a>
+    <a href="{{{{ url_for('bbs_dm_index') }}}}" class="btn btn-outline-secondary btn-sm">Abbrechen</a>
   </div>
 """,
             title="Neue BBS-DM",
@@ -1670,6 +2676,26 @@ def create_app(
         from modules import bbstools as bbs
 
         ok, txt = bbs.bbs_delete_dm_at_index(idx)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("bbs_dm_index"))
+
+    @app.route("/bbs/dm/redeliver/<int:idx>", methods=["POST"])
+    @login_required
+    @limiter.limit("60 per minute")
+    def bbs_dm_redeliver(idx):
+        from modules import bbstools as bbs
+
+        ok, txt = bbs.bbs_admin_redeliver(idx)
+        flash(txt, "success" if ok else "error")
+        return redirect(url_for("bbs_dm_index"))
+
+    @app.route("/bbs/dm/done/<int:idx>", methods=["POST"])
+    @login_required
+    @limiter.limit("60 per minute")
+    def bbs_dm_done(idx):
+        from modules import bbstools as bbs
+
+        ok, txt = bbs.bbs_admin_mark_done(idx)
         flash(txt, "success" if ok else "error")
         return redirect(url_for("bbs_dm_index"))
 
@@ -1698,6 +2724,29 @@ def create_app(
             return redirect(url_for("settings_index"))
 
         st.config.read(st.config_file, encoding="utf-8")
+        if "webAdmin" in st.config:
+            _ensure_keys = {
+                "publicUrl": "",
+                "impressumOperator": "",
+                "impressumAddress": "",
+                "impressumEmail": "",
+                "impressumPhone": "",
+                "impressumExtra": "",
+                "datenschutzExtra": "",
+            }
+            wrote = False
+            for key, default in _ensure_keys.items():
+                if key not in st.config["webAdmin"]:
+                    st.config["webAdmin"][key] = default
+                    wrote = True
+            if wrote:
+                try:
+                    with open(st.config_file, "w", encoding="utf-8") as fh:
+                        st.config.write(fh)
+                except OSError:
+                    pass
+            if not hasattr(st, "web_admin_public_url"):
+                st.web_admin_public_url = st.config["webAdmin"].get("publicUrl", "")
         return _render_admin_template(
             build_settings_form_html(st.config),
             title="Einstellungen",
@@ -1715,14 +2764,27 @@ def create_app(
             channels = list(request.form.getlist("channels"))
             manual = (request.form.get("channels_manual") or "").replace(";", ",")
             channels.extend(part for part in manual.split(",") if part.strip())
-            # dedupe, keep only digit channel numbers
             seen = []
             for c in channels:
                 c = c.strip()
                 if c.isdigit() and c not in seen:
                     seen.append(c)
+            modes = {}
+            default_em = getattr(st, "CHANNEL_TEST_DEFAULT_EMOJI", "👍")
+            choices = set(getattr(st, "CHANNEL_TEST_EMOJI_CHOICES", (default_em,)))
+            for ch in seen:
+                mode = (request.form.get(f"mode_{ch}") or "long").strip().lower()
+                if mode == "react":
+                    emoji = (request.form.get(f"emoji_{ch}") or default_em).strip()
+                    if emoji not in choices:
+                        emoji = default_em
+                    hops = request.form.get(f"hops_{ch}") in ("1", "on", "true", "True")
+                    modes[ch] = ("react", emoji, hops)
+                else:
+                    modes[ch] = ("long", "", False)
+            # Modes for newly typed manual channels not yet in form selects → long
             try:
-                ops.save_channel_test_to_config(enabled, seen)
+                ops.save_channel_test_to_config(enabled, seen, modes)
             except OSError as e:
                 if getattr(e, "errno", None) == 13:
                     flash(ops.runtime_file_permission_hint(st.config_file), "error")
@@ -1740,10 +2802,49 @@ def create_app(
 
         return _render_admin_template(
             ops.build_channel_test_html(
-                st.channel_test_enabled, st.channel_test_channels
+                st.channel_test_enabled,
+                st.channel_test_channels,
+                getattr(st, "channel_test_modes", ""),
             ),
             title="Channel-Test",
             active_tab="channeltest",
+        )
+
+    @app.route("/blitzwatch", methods=["GET", "POST"])
+    @login_required
+    @limiter.limit("40 per minute", methods=["POST"])
+    def blitzwatch_admin_index():
+        from modules import admin_web_ops as ops
+        import modules.settings as st
+
+        edit_nid = None
+        try:
+            q = request.args.get("node", type=int)
+            if q and q > 0:
+                edit_nid = q
+        except Exception:
+            edit_nid = None
+
+        if request.method == "POST":
+            ok, msg, redir = ops.apply_blitzwatch_admin_form(request.form)
+            flash(msg, "success" if ok else "error")
+            if redir:
+                return redirect(url_for("blitzwatch_admin_index", node=redir) + "#bw-edit")
+            return redirect(url_for("blitzwatch_admin_index"))
+
+        body = ops.build_blitzwatch_admin_html(
+            edit_nid=edit_nid,
+            form_action=url_for("blitzwatch_admin_index"),
+            global_on=bool(getattr(st, "blitz_watch_enabled", True)),
+            location_on=bool(getattr(st, "location_enabled", True)),
+        )
+        return _render_admin_template(
+            """
+  {{ body }}
+""",
+            title="Blitzwatch",
+            active_tab="blitzwatch",
+            body=Markup(body),
         )
 
     @app.route("/umfragen")
@@ -2211,6 +3312,16 @@ def start_admin_web_background():
         else _abs_path("logs")
     )
 
+    from modules import service_api as sapi
+
+    env_api = os.environ.get("HESSENBOT_API_TOKEN", "").strip()
+    sapi.configure(
+        enabled=bool(getattr(my_settings, "web_admin_api_enabled", False)),
+        token_hash=getattr(my_settings, "web_admin_api_token_hash", "") or "",
+        env_token=env_api,
+        log_dir=log_d,
+    )
+
     app = create_app(
         alert_path=alert_p,
         news_path=news_p,
@@ -2236,3 +3347,12 @@ def start_admin_web_background():
     logger.info(
         f"Web UI listening on http://{host}:{port}/ (stats) and http://{host}:{port}/admin (login)"
     )
+    if sapi.is_active():
+        logger.info(
+            "Web admin: Service-API aktiv (POST /api/v1/dm, GET /api/v1/whoami) — Quelle=%s",
+            sapi.token_source(),
+        )
+    elif sapi.is_enabled():
+        logger.warning(
+            "Web admin: Service-API eingeschaltet, aber kein Token (Admin → API oder HESSENBOT_API_TOKEN)."
+        )

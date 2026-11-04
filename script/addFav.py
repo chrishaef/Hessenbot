@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Add a favorite node to all interfaces from config.ini data
-# meshing-around - helper script
+# Hessenbot - helper script
 import sys
 import os
 import pickle
@@ -27,7 +27,7 @@ if __name__ == "__main__":
         exit(0)
 
 # welcome header
-print("meshing-around: addFav - Auto-Add favorite nodes to all interfaces from config.ini data")
+print("Hessenbot: addFav - Auto-Add favorite nodes to all interfaces from config.ini data")
 print("This script may need API improvments still in progress")
 print("---------------------------------------------------------------")
 
@@ -40,7 +40,7 @@ try:
     from modules.system import compileFavoriteList
 except Exception as e:
     print(f"Error importing modules run this program from the main repo directory 'python3 script/addFav.py'")
-    print(f"if you forgot the rest of it.. git clone https://github.com/spudgunman/meshing-around")
+    print(f"if you forgot the rest of it.. git clone https://github.com/chrishaef/Hessenbot")
     print(f"Import Error: {e}")
     exit(1)
 

@@ -8,8 +8,11 @@ Cleanup policy: only drop entries older than NODE_DB_MAX_AGE_DAYS when the
 total number of entries exceeds NODE_DB_MIN_SIZE (1000).
 """
 
+from typing import Optional
+
 import base64
 import json
+import re
 import time
 
 from modules.log import logger
@@ -84,7 +87,8 @@ def save_nodedb() -> bool:
 def update_node(node_id: int, *,
                 long_name: str = None,
                 short_name: str = None,
-                public_key=None) -> None:
+                public_key=None,
+                hops_away: int = None) -> None:
     """Create or refresh a node entry.  Only supplied kwargs are written."""
     global _dirty
     key = str(int(node_id))
@@ -101,6 +105,16 @@ def update_node(node_id: int, *,
         if pk_str and entry.get("publicKey") != pk_str:
             entry["publicKey"] = pk_str
             logger.debug(f"NodeDB: PKI key stored/updated for node {key}")
+    # Never store 0 from MQTT zero-diff copies — only positive learned hops.
+    if hops_away is not None:
+        try:
+            hops_i = int(hops_away)
+        except (TypeError, ValueError):
+            hops_i = 0
+        if hops_i > 0 and entry.get("hopsAway") != hops_i:
+            entry["hopsAway"] = hops_i
+            _dirty = True
+            return
     _dirty = True
 
 
@@ -112,6 +126,14 @@ def get_node_short_name(node_id: int) -> str:
     return _nodedb.get(str(int(node_id)), {}).get("shortName", "")
 
 
+def get_node_hops_away(node_id: int) -> int:
+    """Last known positive hop count (from packet metadata or traceroute)."""
+    try:
+        return int(_nodedb.get(str(int(node_id)), {}).get("hopsAway") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def get_node_pubkey(node_id: int) -> str:
     """Return cached public key string, or '' if unknown."""
     return _nodedb.get(str(int(node_id)), {}).get("publicKey", "")
@@ -119,6 +141,67 @@ def get_node_pubkey(node_id: int) -> str:
 
 def get_node(node_id: int) -> dict:
     return dict(_nodedb.get(str(int(node_id)), {}))
+
+
+def list_nodes() -> list[tuple[int, dict]]:
+    """All persistent NodeDB entries, newest lastSeen first."""
+    _ensure_nodedb_loaded()
+    items: list[tuple[int, dict]] = []
+    for key, entry in _nodedb.items():
+        try:
+            items.append((int(key), dict(entry)))
+        except (TypeError, ValueError):
+            continue
+    items.sort(key=lambda x: (-float(x[1].get("lastSeen") or 0), x[0]))
+    return items
+
+
+def _ensure_nodedb_loaded() -> None:
+    if _nodedb:
+        return
+    try:
+        load_nodedb()
+    except Exception:
+        pass
+
+
+def _normalize_long_name_key(name: str) -> str:
+    name = (name or "").strip()
+    name = re.sub(r"\s*\|\s*\*?meshhessen\.de\*?\s*$", "", name, flags=re.IGNORECASE).strip()
+    return name.casefold()
+
+
+def find_node_id_by_long_name(long_name: str) -> Optional[int]:
+    """Resolve a Meshtastic node id from a longName seen in logs."""
+    long_name = (long_name or "").strip()
+    if not long_name:
+        return None
+    _ensure_nodedb_loaded()
+    want = _normalize_long_name_key(long_name)
+    if not want:
+        return None
+    for key, entry in _nodedb.items():
+        db_long = (entry.get("longName") or "").strip()
+        if not db_long:
+            continue
+        if db_long == long_name:
+            return int(key)
+        if _normalize_long_name_key(db_long) == want:
+            return int(key)
+    return None
+
+
+def find_node_id_by_short_name(short_name: str) -> Optional[int]:
+    """Resolve a Meshtastic node id from a shortName."""
+    short_name = (short_name or "").strip()
+    if not short_name:
+        return None
+    _ensure_nodedb_loaded()
+    for key, entry in _nodedb.items():
+        db_short = (entry.get("shortName") or "").strip()
+        if db_short and db_short == short_name:
+            return int(key)
+    return None
 
 
 # ---------------------------------------------------------------------------

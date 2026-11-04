@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -137,7 +139,115 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
             }
         )
     rows.sort(key=lambda r: r.get("lastHeard_raw", 0), reverse=True)
+    _enrich_blitzwatch_rows(rows)
     return None, rows
+
+
+def _enrich_blitzwatch_rows(rows: List[Dict[str, Any]]) -> None:
+    """Attach blitzwatch_html / blitzwatch_active for NodeDB tables."""
+    import modules.settings as st
+
+    global_on = bool(getattr(st, "blitz_watch_enabled", True)) and bool(
+        getattr(st, "location_enabled", True)
+    )
+    prefs_map: Dict[int, Dict[str, Any]] = {}
+    if global_on:
+        try:
+            from modules.blitzwatch import get_all_prefs_map, get_node_prefs
+
+            prefs_map = get_all_prefs_map()
+        except Exception:
+            prefs_map = {}
+
+    for r in rows:
+        if r.get("is_self"):
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                '<span class="badge bg-secondary" title="Bot-Node ausgeschlossen">'
+                "—</span>"
+            )
+            continue
+        if not global_on:
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                '<span class="badge bg-secondary" title="Blitzwatch global aus">aus</span>'
+            )
+            continue
+        try:
+            nid = int(r["num"])
+        except (TypeError, ValueError, KeyError):
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = "—"
+            continue
+        prefs = prefs_map.get(nid)
+        if prefs is None:
+            try:
+                from modules.blitzwatch import get_node_prefs
+
+                prefs = get_node_prefs(nid)
+            except Exception:
+                prefs = {
+                    "enabled": True,
+                    "radius_km": 8,
+                    "home_mode": "gps",
+                    "extra_count": 0,
+                }
+        enabled = bool(prefs.get("enabled", True))
+        radius = prefs.get("radius_km", 8)
+        home_mode = (prefs.get("home_mode") or "gps").lower()
+        home_fixed = home_mode == "fixed" and prefs.get("home_lat") is not None
+        extra_count = int(prefs.get("extra_count") or 0)
+        if "extra_count" not in prefs:
+            try:
+                from modules.blitzwatch import count_locations
+
+                extra_count = count_locations(nid)
+            except Exception:
+                extra_count = 0
+        has_fresh = False
+        try:
+            from modules.system import _nodedb_fresh_position
+
+            has_fresh = bool(_nodedb_fresh_position(nid, 1, 2))
+        except Exception:
+            has_fresh = r.get("location_source") == "gps" and bool(r.get("has_gps"))
+        home_active = home_fixed or has_fresh
+        any_active = enabled and (home_active or extra_count > 0)
+        # "bereit": enabled but only GPS-home and no GPS, and no extras
+        only_waiting_gps = (
+            enabled
+            and not home_fixed
+            and not has_fresh
+            and extra_count == 0
+        )
+        tip_extra = f", {extra_count} Zusatzort(e)" if extra_count else ""
+        if not enabled:
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-secondary" title="Opt-out (!blitzwatch off)">'
+                f"aus</span>"
+            )
+        elif any_active:
+            r["blitzwatch_active"] = True
+            home_tip = "Fix" if home_fixed else f"GPS {radius}km"
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-success" '
+                f'title="Blitzwatch aktiv — Home {home_tip}{tip_extra}">'
+                f"an {radius}km"
+                f'{f"+{extra_count}" if extra_count else ""}</span>'
+            )
+        elif only_waiting_gps:
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-warning text-dark" '
+                f'title="Kein frisches GPS ≤24h — Radius {radius} km">'
+                f"bereit {radius}km</span>"
+            )
+        else:
+            r["blitzwatch_active"] = False
+            r["blitzwatch_html"] = (
+                f'<span class="badge bg-secondary" title="Blitzwatch inaktiv">aus</span>'
+            )
 
 
 def nodedb_row_search_text(row: Dict[str, Any]) -> str:
@@ -158,6 +268,10 @@ def nodedb_row_search_text(row: Dict[str, Any]) -> str:
         if text and text != "—":
             parts.append(text)
     parts.append("gps" if row.get("has_gps") else "kein gps")
+    if row.get("blitzwatch_active"):
+        parts.append("blitzwatch an")
+    else:
+        parts.append("blitzwatch aus")
     return " ".join(parts).lower()
 
 
@@ -209,7 +323,7 @@ def save_motd_to_config(motd: str) -> None:
 
 
 BROADCAST_MODES = [
-    ("day", "Täglich zur Uhrzeit"),
+    ("day", "Alle N Tage zur Uhrzeit (1 = täglich)"),
     ("hour", "Alle N Stunden"),
     ("min", "Alle N Minuten"),
     ("mon", "Montags zur Uhrzeit"),
@@ -223,6 +337,7 @@ BROADCAST_MODES = [
 
 _WEEKDAY_MODES = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
 _TIME_REQUIRED_MODES = frozenset({"day"}) | _WEEKDAY_MODES
+_INTERVAL_MODES = frozenset({"day", "hour", "min"})
 
 
 def parse_broadcast_schedule_form(form) -> Tuple[bool, int, int, str, str, str]:
@@ -239,7 +354,7 @@ def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Op
     mode = (mode or "").strip().lower()
     if mode in _TIME_REQUIRED_MODES and not sched_time:
         return "Bitte eine Uhrzeit (HH:MM) angeben."
-    if mode in ("hour", "min"):
+    if mode in _INTERVAL_MODES:
         try:
             if int(interval or "0") < 1:
                 return "Intervall muss mindestens 1 sein."
@@ -258,6 +373,121 @@ def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Op
     return None
 
 
+def channel_select_html(
+    name: str,
+    selected: int | str,
+    *,
+    iface_id: int | None = None,
+    element_id: str | None = None,
+    refresh: bool = False,
+) -> str:
+    """``<select>`` of mesh channels from the Meshtastic instance (radio cache)."""
+    try:
+        selected_n = int(selected)
+    except (TypeError, ValueError):
+        selected_n = 0
+    try:
+        channels = list_radio_channels(iface_id, refresh=refresh)
+    except Exception:
+        channels = []
+    if not any(int(c["number"]) == selected_n for c in channels):
+        channels = list(channels) + [
+            {"number": selected_n, "label": f"Kanal {selected_n}"}
+        ]
+        channels.sort(key=lambda c: int(c["number"]))
+
+    eid = element_id or name.replace("_", "-")
+    parts = [
+        f'<select name="{html.escape(name, quote=True)}" id="{html.escape(eid, quote=True)}" '
+        f'class="form-select" required>'
+    ]
+    for ch in channels:
+        num = int(ch["number"])
+        label = str(ch.get("label") or f"Kanal {num}")
+        sel = " selected" if num == selected_n else ""
+        parts.append(
+            f'<option value="{num}"{sel}>{html.escape(label)} (#{num})</option>'
+        )
+    parts.append("</select>")
+    return "".join(parts)
+
+
+def iface_select_html(
+    name: str,
+    selected: int | str,
+    *,
+    element_id: str | None = None,
+) -> str:
+    """``<select>`` of enabled radio interfaces (fallback 1–9 if none live)."""
+    try:
+        selected_n = int(selected)
+    except (TypeError, ValueError):
+        selected_n = 1
+    try:
+        ifaces = iter_radio_interfaces()
+    except Exception:
+        ifaces = []
+    if not ifaces:
+        ifaces = list(range(1, 10))
+    if selected_n not in ifaces:
+        ifaces = sorted(set(ifaces) | {selected_n})
+
+    eid = element_id or name.replace("_", "-")
+    parts = [
+        f'<select name="{html.escape(name, quote=True)}" id="{html.escape(eid, quote=True)}" '
+        f'class="form-select" required>'
+    ]
+    for i in ifaces:
+        sel = " selected" if int(i) == selected_n else ""
+        parts.append(f'<option value="{int(i)}"{sel}>Interface {int(i)}</option>')
+    parts.append("</select>")
+    return "".join(parts)
+
+
+def _schedule_ui_block(
+    *,
+    mode_name: str,
+    mode_select_html: str,
+    interval_name: str,
+    interval_value: str,
+    time_name: str,
+    time_value: str,
+    heading: str = "Wann und wie oft?",
+) -> str:
+    """Shared adaptive interval/time controls (MOTD/News/Scheduler)."""
+    ivl = html.escape(str(interval_value or "1"))
+    tim = html.escape(str(time_value or ""))
+    return f"""
+<div class="schedule-ui border rounded p-3 mb-3" data-schedule-ui>
+  <h3 class="h6 mb-3">{html.escape(heading)}</h3>
+  <label class="form-label">Art des Zeitplans</label>
+  {mode_select_html}
+  <div class="row g-3 align-items-end mt-1" data-schedule-interval-row>
+    <div class="col-sm-6 col-md-4">
+      <label class="form-label" for="sched-interval-{html.escape(interval_name)}">Alle</label>
+      <div class="input-group">
+        <input type="number" class="form-control" name="{html.escape(interval_name)}"
+               id="sched-interval-{html.escape(interval_name)}"
+               data-schedule-interval min="1" step="1" value="{ivl}">
+        <span class="input-group-text" data-schedule-unit>Tage</span>
+      </div>
+    </div>
+  </div>
+  <div class="mt-3" data-schedule-time-row>
+    <label class="form-label" for="sched-time-{html.escape(time_name)}">Uhrzeit</label>
+    <input type="time" class="form-control" style="max-width: 12rem"
+           name="{html.escape(time_name)}" id="sched-time-{html.escape(time_name)}"
+           data-schedule-time value="{tim}"
+           title="Format HH:MM">
+    <div class="form-text">Nur bei tages- oder uhrzeitbasierten Plänen nötig.</div>
+  </div>
+  <p class="schedule-ui-summary alert alert-secondary small py-2 px-3 mb-0 mt-3"
+     data-schedule-summary role="status">…</p>
+</div>
+<script src="/static/portal/schedule-ui.js?v=1"></script>
+"""
+
+
 def broadcast_schedule_form_html(
     *,
     enabled: bool,
@@ -270,44 +500,142 @@ def broadcast_schedule_form_html(
 ) -> str:
     chk = " checked" if enabled else ""
     cur = (mode or "day").strip().lower()
-    opts = ['<select name="bc_mode" class="form-select mb-2" required>']
-    for val, label in BROADCAST_MODES:
+    opts = [
+        '<select name="bc_mode" class="form-select" required data-schedule-mode>'
+    ]
+    opts.append('<optgroup label="Intervall / Uhrzeit">')
+    for val, label in BROADCAST_MODES[:3]:
         sel = " selected" if cur == val else ""
         opts.append(
             f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(label)}</option>'
         )
-    opts.append("</select>")
-    ivl = html.escape(str(interval or "1"))
-    tim = html.escape(str(sched_time or ""))
+    opts.append("</optgroup>")
+    opts.append('<optgroup label="Wochentag">')
+    for val, label in BROADCAST_MODES[3:]:
+        sel = " selected" if cur == val else ""
+        opts.append(
+            f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(label)}</option>'
+        )
+    opts.append("</optgroup></select>")
+
+    # Normalize HH:MM for type=time (needs HH:MM)
+    tim = (sched_time or "").strip()
+    if tim and len(tim) >= 4 and ":" in tim:
+        parts = tim.split(":")
+        try:
+            tim = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+        except ValueError:
+            pass
+
+    schedule_block = _schedule_ui_block(
+        mode_name="bc_mode",
+        mode_select_html="".join(opts),
+        interval_name="bc_interval",
+        interval_value=str(interval or "1"),
+        time_name="bc_time",
+        time_value=tim,
+    )
     sec = html.escape(config_section)
+    iface_sel = iface_select_html("bc_interface", iface, element_id="bc_interface")
+    ch_sel = channel_select_html(
+        "bc_channel", channel, iface_id=int(iface), element_id="bc_channel"
+    )
     return f"""
 <hr class="my-4">
 <h2 class="h5 mb-3">Automatischer Versand</h2>
-<p class="text-muted small">Einstellungen in <code>config.ini</code> → <code>[{sec}]</code>.
-Unabhängig vom allgemeinen Scheduler.</p>
+<p class="text-muted small mb-3">Einstellungen in <code>config.ini</code> → <code>[{sec}]</code>.
+Unabhängig vom allgemeinen Scheduler. Kanäle kommen von der Meshtastic-Instanz.</p>
 <div class="form-check mb-3">
   <input class="form-check-input" type="checkbox" name="bc_enabled" id="bc_en"{chk}>
   <label class="form-check-label" for="bc_en">Automatisch senden</label>
 </div>
-<div class="row mb-2">
-  <div class="col-md-6"><label class="form-label">Interface (Radio)</label>
-    <input type="number" name="bc_interface" class="form-control" min="1" max="9" value="{iface}"></div>
-  <div class="col-md-6"><label class="form-label">Kanal</label>
-    <input type="number" name="bc_channel" class="form-control" value="{channel}"></div>
+<div class="row mb-3">
+  <div class="col-md-6"><label class="form-label" for="bc_interface">Interface (Radio)</label>
+    {iface_sel}</div>
+  <div class="col-md-6"><label class="form-label" for="bc_channel">Kanal</label>
+    {ch_sel}</div>
 </div>
-<label class="form-label">Rhythmus</label>
-{"".join(opts)}
-<label class="form-label">Intervall</label>
-<input type="number" name="bc_interval" class="form-control mb-2" min="1" step="1" value="{ivl}">
-<p class="small text-muted mb-2">
-  <strong>day:</strong> Intervall = alle N Tage (1 = täglich), Uhrzeit erforderlich.
-  <strong>hour / min:</strong> alle N Stunden bzw. Minuten.
-  <strong>Mo–So:</strong> Uhrzeit erforderlich.
-</p>
-<label class="form-label">Uhrzeit (HH:MM)</label>
-<input type="text" name="bc_time" class="form-control mb-3" placeholder="z. B. 09:00" value="{tim}"
-       pattern="[0-2][0-9]:[0-5][0-9]" title="Format 00:00 bis 23:59">
+{schedule_block}
 """
+
+
+def scheduler_value_select_html(current_raw: str) -> str:
+    """Grouped <select name=value> for the general scheduler."""
+    cur_raw = (current_raw or "").strip()
+    cur = cur_raw.lower()
+
+    groups = [
+        (
+            "Nachricht senden",
+            [
+                ("day", "Alle N Tage zur Uhrzeit (1 = täglich)"),
+                ("hour", "Alle N Stunden"),
+                ("min", "Alle N Minuten"),
+                ("mon", "Montags zur Uhrzeit"),
+                ("tue", "Dienstags zur Uhrzeit"),
+                ("wed", "Mittwochs zur Uhrzeit"),
+                ("thu", "Donnerstags zur Uhrzeit"),
+                ("fri", "Freitags zur Uhrzeit"),
+                ("sat", "Samstags zur Uhrzeit"),
+                ("sun", "Sonntags zur Uhrzeit"),
+            ],
+        ),
+        (
+            "Special Jobs",
+            [
+                ("weather", "Wetter — täglich zur Uhrzeit"),
+                ("news", "News — alle N Stunden"),
+                ("readrss", "RSS — alle N Stunden"),
+                ("sysinfo", "Sysinfo — alle N Stunden"),
+                ("solar", "Sonne — täglich zur Uhrzeit"),
+                ("link", "bbslink — alle N Stunden"),
+                ("custom", "Eigene Logik (custom_scheduler.py)"),
+            ],
+        ),
+    ]
+
+    parts = [
+        '<select name="value" class="form-select" required data-schedule-mode>',
+        '<option value="">— Zeitplantyp wählen —</option>',
+    ]
+    matched = False
+    for group_label, items in groups:
+        parts.append(f'<optgroup label="{html.escape(group_label)}">')
+        for val, lab in items:
+            sel = " selected" if cur == val else ""
+            if sel:
+                matched = True
+            parts.append(
+                f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(lab)}</option>'
+            )
+        parts.append("</optgroup>")
+    if cur_raw and not matched:
+        parts.append(
+            f'<option value="{html.escape(cur_raw, quote=True)}" selected>'
+            f"Freitext: {html.escape(cur_raw)}</option>"
+        )
+    parts.append("</select>")
+    return "".join(parts)
+
+
+def scheduler_schedule_fields_html(*, value: str, interval: str, sched_time: str) -> str:
+    """Adaptive interval/time block for the Scheduler tab."""
+    tim = (sched_time or "").strip()
+    if tim and len(tim) >= 4 and ":" in tim:
+        parts = tim.split(":")
+        try:
+            tim = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+        except ValueError:
+            pass
+    return _schedule_ui_block(
+        mode_name="value",
+        mode_select_html=scheduler_value_select_html(value),
+        interval_name="interval",
+        interval_value=str(interval or "1"),
+        time_name="time",
+        time_value=tim,
+        heading="Wann und wie oft?",
+    )
 
 
 def save_motd_broadcast_to_config(
@@ -397,91 +725,458 @@ def save_scheduler_to_config(
 
 def available_channels_for_test() -> List[Dict[str, Any]]:
     """Channels known across interfaces as [{'number': int, 'label': str}], deduped by number."""
-    sm = _system_mod()
-    seen: Dict[int, str] = {}
+    return list_radio_channels()
+
+
+def list_radio_channels(
+    iface_id: int | None = None, *, refresh: bool = False
+) -> List[Dict[str, Any]]:
+    """Channels from Meshtastic instance(s): [{'number', 'label', 'role'}], sorted.
+
+    Prefers live protobuf slots (real names / preset for unnamed PRIMARY).
+    """
+    sm = None
     try:
-        cache = sm.build_channel_cache()
+        sm = _system_mod()
+        if refresh and hasattr(sm, "refresh_channel_cache"):
+            sm.refresh_channel_cache()
     except Exception:
-        cache = []
-    for entry in cache or []:
-        for name, info in (entry.get("channels") or {}).items():
-            num = info.get("number")
-            if num is None:
-                continue
+        sm = None
+
+    seen: Dict[int, Dict[str, Any]] = {}
+
+    iface_ids: List[int] = []
+    if iface_id is not None:
+        iface_ids = [int(iface_id)]
+    else:
+        try:
+            iface_ids = iter_radio_interfaces()
+        except Exception:
+            iface_ids = []
+        if not iface_ids:
+            iface_ids = list(range(1, 10))
+
+    for iid in iface_ids:
+        slots = []
+        if sm is not None and hasattr(sm, "read_interface_channel_slots"):
             try:
-                num = int(num)
-            except (TypeError, ValueError):
+                slots = sm.read_interface_channel_slots(iid)
+            except Exception:
+                slots = []
+        for slot in slots or []:
+            if slot.get("role_name") not in ("PRIMARY", "SECONDARY"):
                 continue
-            label = name.strip() if name and not name.startswith("Channel") else f"Kanal {num}"
-            # First non-generic name wins
-            if num not in seen or (seen[num].startswith("Kanal ") and not label.startswith("Kanal ")):
-                seen[num] = label
-    return [{"number": n, "label": seen[n]} for n in sorted(seen)]
+            num = int(slot["index"])
+            label = (slot.get("label") or slot.get("name") or f"Kanal {num}").strip()
+            prev = seen.get(num)
+            if prev is None or (
+                prev["label"].startswith("Kanal ") and not label.startswith("Kanal ")
+            ):
+                seen[num] = {
+                    "number": num,
+                    "label": label,
+                    "role": slot.get("role_name") or "",
+                }
+
+    if not seen:
+        # Cache fallback (names from last successful read)
+        cache = []
+        try:
+            if sm is not None:
+                cache = sm.build_channel_cache()
+        except Exception:
+            cache = []
+        for entry in cache or []:
+            if iface_id is not None and int(entry.get("interface_id") or 0) != int(iface_id):
+                continue
+            for name, info in (entry.get("channels") or {}).items():
+                if not isinstance(info, dict):
+                    continue
+                num = info.get("number")
+                if num is None:
+                    continue
+                try:
+                    num = int(num)
+                except (TypeError, ValueError):
+                    continue
+                label = (info.get("label") or name or "").strip()
+                if not label or label.startswith("Channel"):
+                    label = f"Kanal {num}"
+                prev = seen.get(num)
+                if prev is None or (
+                    prev["label"].startswith("Kanal ") and not label.startswith("Kanal ")
+                ):
+                    seen[num] = {
+                        "number": num,
+                        "label": label,
+                        "role": info.get("role") or "",
+                    }
+
+    if not seen:
+        seen[0] = {"number": 0, "label": "Kanal 0", "role": "PRIMARY"}
+        try:
+            import modules.settings as st
+
+            msg_ch = int(getattr(st, "messages_channel", 1) or 1)
+        except Exception:
+            msg_ch = 1
+        if msg_ch not in seen:
+            seen[msg_ch] = {
+                "number": msg_ch,
+                "label": f"Kanal {msg_ch}",
+                "role": "SECONDARY",
+            }
+
+    return [seen[n] for n in sorted(seen)]
 
 
-def save_channel_test_to_config(enabled: bool, channels: List[str]) -> None:
-    """Persist [channelTest] enabled/channels and update live settings."""
+def save_channel_test_to_config(
+    enabled: bool,
+    channels: List[str],
+    modes: Optional[dict] = None,
+) -> None:
+    """Persist [channelTest] enabled/channels/modes and update live settings."""
     import modules.settings as st
 
     clean = [str(c).strip() for c in channels if str(c).strip()]
+    modes = modes or {}
+    mode_clean = {}
+    for ch in clean:
+        if ch in modes:
+            entry = modes[ch]
+            if len(entry) >= 3:
+                mode_clean[ch] = (entry[0], entry[1], bool(entry[2]))
+            else:
+                mode_clean[ch] = (entry[0], entry[1], False)
+        else:
+            mode_clean[ch] = ("long", "", False)
+    modes_s = st.serialize_channel_test_modes(mode_clean)
+
     if "channelTest" not in st.config:
         st.config["channelTest"] = {}
     st.config["channelTest"]["enabled"] = "True" if enabled else "False"
     st.config["channelTest"]["channels"] = ",".join(clean)
+    st.config["channelTest"]["modes"] = modes_s
     with open(st.config_file, "w", encoding="utf-8") as fh:
         st.config.write(fh)
 
     st.channel_test_enabled = enabled
     st.channel_test_channels = clean
+    st.channel_test_modes = modes_s
 
 
-def build_channel_test_html(enabled: bool, selected: List[str]) -> str:
-    """Form for the Channel-Test tab: toggle + channel checkboxes (with manual fallback)."""
+_DEFAULT_EXPENSIVE_CMDS = (
+    "wx,wxc,warning,dealert,blitz,uv,regen,trace,whereami,rlist,satpass,tide,river,earthquake"
+)
+
+
+def normalize_expensive_commands(raw: str) -> List[str]:
+    """Parse comma/space-separated command tokens without leading !."""
+    seen: List[str] = []
+    for part in re.split(r"[,;\s]+", raw or ""):
+        tok = part.strip().lower().lstrip("!").rstrip("?")
+        if tok and tok not in seen:
+            seen.append(tok)
+    return seen
+
+
+def save_rate_limit_settings_to_config(
+    *,
+    enabled: bool,
+    max_cmds: int,
+    window_sec: int,
+    notify_once: bool,
+    expensive_cooldown: int,
+    expensive_commands: List[str],
+) -> bool:
+    """Persist cmdRateLimit* / cmdExpensive* under [messagingSettings]; reload runtime."""
+    import modules.settings as st
+
+    max_cmds = max(1, int(max_cmds))
+    window_sec = max(1, int(window_sec))
+    expensive_cooldown = max(0, int(expensive_cooldown))
+    cmds = [
+        str(c).strip().lower().lstrip("!").rstrip("?")
+        for c in expensive_commands
+        if str(c).strip()
+    ]
+    # stable unique order
+    seen: List[str] = []
+    for c in cmds:
+        if c not in seen:
+            seen.append(c)
+
+    st.config.read(st.config_file, encoding="utf-8")
+    if "messagingSettings" not in st.config:
+        st.config["messagingSettings"] = {}
+    sec = st.config["messagingSettings"]
+    sec["cmdRateLimitEnabled"] = "True" if enabled else "False"
+    sec["cmdRateLimitMax"] = str(max_cmds)
+    sec["cmdRateLimitWindow"] = str(window_sec)
+    sec["cmdRateLimitNotifyOnce"] = "True" if notify_once else "False"
+    sec["cmdExpensiveCooldownSec"] = str(expensive_cooldown)
+    sec["cmdExpensiveCommands"] = ",".join(seen)
+    with open(st.config_file, "w", encoding="utf-8") as fh:
+        st.config.write(fh)
+
+    return reload_runtime_settings()
+
+
+def build_limits_settings_html(
+    *,
+    enabled: bool,
+    max_cmds: int,
+    window_sec: int,
+    notify_once: bool,
+    expensive_cooldown: int,
+    expensive_commands: List[str],
+    form_action: str,
+) -> str:
+    """Settings form for Admin → Limits (airtime throttle)."""
+    en_chk = " checked" if enabled else ""
+    once_chk = " checked" if notify_once else ""
+    cmds_s = ", ".join(expensive_commands) if expensive_commands else _DEFAULT_EXPENSIVE_CMDS
+    action = html.escape(form_action, quote=True)
+    return f"""
+<div class="section-card mb-4 limits-settings-card">
+  <h2 class="h5 mb-1">Befehls-Limits einstellen</h2>
+  <p class="small text-muted mb-3">
+    Schützt die Mesh-Airtime: zu viele Befehle pro Node werden begrenzt.
+    Beim ersten Überschreiten eine kurze Hinweis-DM, danach still.
+    Teure Befehle haben zusätzlich einen eigenen Cooldown.
+  </p>
+  <form method="post" action="{action}" class="limits-settings-form">
+    <input type="hidden" name="action" value="save_limits">
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="limits-settings-block">
+          <h3 class="h6 text-uppercase text-muted mb-3">Global pro Node</h3>
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" name="cmdRateLimitEnabled"
+                   id="limEnabled" value="1"{en_chk}>
+            <label class="form-check-label" for="limEnabled">Rate-Limit aktiv</label>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label" for="limMax">Max. Befehle</label>
+              <input type="number" class="form-control" name="cmdRateLimitMax" id="limMax"
+                     min="1" max="100" step="1" value="{html.escape(str(max_cmds))}" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label" for="limWindow">Fenster (Sekunden)</label>
+              <input type="number" class="form-control" name="cmdRateLimitWindow" id="limWindow"
+                     min="1" max="3600" step="1" value="{html.escape(str(window_sec))}" required>
+            </div>
+          </div>
+          <p class="small text-muted mb-3">
+            Beispiel: <code>{html.escape(str(max_cmds))}</code> Befehle in
+            <code>{html.escape(str(window_sec))}s</code> — der nächste löst den Hinweis aus.
+          </p>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="cmdRateLimitNotifyOnce"
+                   id="limNotifyOnce" value="1"{once_chk}>
+            <label class="form-check-label" for="limNotifyOnce">
+              Nur ein Hinweis pro Fenster, danach still
+            </label>
+          </div>
+          <p class="small text-muted mt-1 mb-0">
+            Aus = bei jedem Limit-Treffer erneut „Bitte etwas langsamer.“ senden (mehr Airtime).
+          </p>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="limits-settings-block">
+          <h3 class="h6 text-uppercase text-muted mb-3">Teure Befehle</h3>
+          <label class="form-label" for="limCool">Cooldown (Sekunden)</label>
+          <input type="number" class="form-control mb-2" name="cmdExpensiveCooldownSec"
+                 id="limCool" min="0" max="3600" step="1"
+                 value="{html.escape(str(expensive_cooldown))}" required>
+          <p class="small text-muted mb-3">
+            Mindestabstand zwischen gleichen teuren Befehlen desselben Nodes.
+            <code>0</code> schaltet den Extra-Cooldown aus.
+          </p>
+          <label class="form-label" for="limCmds">Befehlsliste</label>
+          <textarea class="form-control font-monospace" name="cmdExpensiveCommands"
+                    id="limCmds" rows="4"
+                    placeholder="{html.escape(_DEFAULT_EXPENSIVE_CMDS, quote=True)}">{html.escape(cmds_s)}</textarea>
+          <p class="small text-muted mt-1 mb-0">
+            Kommagetrennt, ohne <code>!</code>. Erster Treffer im Cooldown: kurze Restzeit-DM;
+            Wiederholung: still. Admins (<code>isNodeAdmin</code>) sind ausgenommen.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center mt-4">
+      <button type="submit" class="btn btn-success">Limits speichern</button>
+      <span class="small text-muted">Wird sofort in <code>config.ini</code> und zur Laufzeit übernommen.</span>
+    </div>
+  </form>
+</div>
+"""
+
+
+def build_channel_test_html(
+    enabled: bool,
+    selected: List[str],
+    modes_raw: str = "",
+) -> str:
+    """Modern Channel-Test form: per-channel long vs reaction + emoji picker."""
+    import modules.settings as st
+
     chk = " checked" if enabled else ""
     selected_set = {str(s).strip() for s in selected if str(s).strip()}
+    parsed_modes = st.parse_channel_test_modes(modes_raw)
     avail = available_channels_for_test()
+    emoji_choices = list(st.CHANNEL_TEST_EMOJI_CHOICES)
+    default_emoji = st.CHANNEL_TEST_DEFAULT_EMOJI
 
+    rows_meta: List[Dict[str, Any]] = []
+    seen_nums: set = set()
     if avail:
-        boxes = []
         for ch in avail:
             num = str(ch["number"])
-            sel = " checked" if num in selected_set else ""
-            boxes.append(
-                f'<div class="form-check">'
-                f'<input class="form-check-input" type="checkbox" name="channels" '
-                f'value="{html.escape(num, quote=True)}" id="ct{num}"{sel}>'
-                f'<label class="form-check-label" for="ct{num}">'
-                f'{html.escape(ch["label"])} <span class="text-muted">(#{num})</span></label></div>'
+            seen_nums.add(num)
+            rows_meta.append({"number": num, "label": ch["label"]})
+    for num in sorted(selected_set, key=lambda x: (len(x), x)):
+        if num not in seen_nums and num.isdigit():
+            rows_meta.append({"number": num, "label": f"Kanal #{num}"})
+            seen_nums.add(num)
+
+    channel_rows = []
+    for ch in rows_meta:
+        num = ch["number"]
+        active = num in selected_set
+        entry = parsed_modes.get(num, ("long", "", False))
+        mode = entry[0] if entry else "long"
+        emoji = entry[1] if len(entry) > 1 else ""
+        hops_on = bool(entry[2]) if len(entry) > 2 else False
+        if mode != "react":
+            mode = "long"
+            emoji = ""
+            hops_on = False
+        if mode == "react" and not emoji:
+            emoji = default_emoji
+        active_chk = " checked" if active else ""
+        long_sel = " selected" if mode == "long" else ""
+        react_sel = " selected" if mode == "react" else ""
+        react_hidden = "" if mode == "react" else " is-hidden"
+        hops_chk = " checked" if hops_on else ""
+        emoji_btns = []
+        for em in emoji_choices:
+            is_sel = (mode == "react" and em == emoji) or (
+                mode == "long" and em == default_emoji
             )
-        channel_block = (
-            '<label class="form-label">Kanäle</label>'
-            '<div class="mb-2">' + "".join(boxes) + "</div>"
-        )
-    else:
-        channel_block = (
-            '<label class="form-label">Kanäle (kommagetrennte Nummern)</label>'
-            '<p class="small text-muted mb-2">Keine Kanäle vom Radio gelesen — '
-            "Nummern manuell eintragen.</p>"
+            active_em = " is-active" if (mode == "react" and em == emoji) else ""
+            checked = " checked" if is_sel else ""
+            emoji_btns.append(
+                f'<label class="ct-emoji-btn{active_em}">'
+                f'<input type="radio" name="emoji_{html.escape(num, quote=True)}" '
+                f'value="{html.escape(em, quote=True)}"{checked}>'
+                f"<span>{html.escape(em)}</span></label>"
+            )
+        channel_rows.append(
+            f"""
+<div class="ct-channel-row" data-channel="{html.escape(num, quote=True)}">
+  <div class="ct-channel-main">
+    <div class="form-check form-switch ct-channel-enable">
+      <input class="form-check-input ct-enable" type="checkbox" name="channels"
+             value="{html.escape(num, quote=True)}" id="ctEn{html.escape(num)}"
+             {active_chk}>
+      <label class="form-check-label" for="ctEn{html.escape(num)}">
+        <strong>{html.escape(ch["label"])}</strong>
+        <span class="text-muted small">#{html.escape(num)}</span>
+      </label>
+    </div>
+    <div class="ct-channel-mode">
+      <label class="form-label small mb-1" for="ctMode{html.escape(num)}">Antwort</label>
+      <select class="form-select form-select-sm ct-mode" name="mode_{html.escape(num, quote=True)}"
+              id="ctMode{html.escape(num)}">
+        <option value="long"{long_sel}>Lange Testnachricht</option>
+        <option value="react"{react_sel}>Reaction (Airtime sparen)</option>
+      </select>
+    </div>
+  </div>
+  <div class="ct-react-opts{react_hidden}" data-picker-for="{html.escape(num, quote=True)}">
+    <div class="ct-emoji-picker">
+      <span class="small text-muted me-2">Emoji</span>
+      <div class="ct-emoji-group">{"".join(emoji_btns)}</div>
+    </div>
+    <div class="form-check form-switch ct-hops-switch mt-2 mb-0">
+      <input class="form-check-input" type="checkbox" name="hops_{html.escape(num, quote=True)}"
+             id="ctHops{html.escape(num)}" value="1"{hops_chk}>
+      <label class="form-check-label small" for="ctHops{html.escape(num)}">
+        Hop-Anzahl zusätzlich als Reaction (0️⃣–9️⃣)
+      </label>
+    </div>
+  </div>
+</div>
+"""
         )
 
-    manual = html.escape(",".join(sorted(selected_set, key=lambda x: (len(x), x))))
+    if channel_rows:
+        channel_block = (
+            '<div class="ct-channel-list mb-3">' + "".join(channel_rows) + "</div>"
+        )
+        manual_block = ""
+    else:
+        channel_block = (
+            '<p class="small text-muted mb-2">Keine Kanäle vom Radio gelesen. '
+            "Nummern manuell eintragen, speichern, Seite neu laden.</p>"
+        )
+        manual_block = """
+  <label class="form-label" for="ctManual">Kanal-Nummern (kommagetrennt)</label>
+  <input type="text" name="channels_manual" id="ctManual" class="form-control mb-3"
+         value="" placeholder="z. B. 0,1,2">
+"""
+
     return f"""
-<p class="text-muted small mb-3">Bei aktivierter Funktion antwortet der Bot auf ein einfaches
-<code>test</code> / <code>Test</code> (ohne <code>!</code>) direkt im Kanal — gleiche Antwort wie
-<code>!test</code>. Gilt nur für die ausgewählten Kanäle; alle anderen Befehle bleiben unverändert
-(DM und <code>!</code>).</p>
-<form method="post">
-  <div class="form-check form-switch mb-3">
+<div class="section-card mb-3">
+  <h2 class="h5 mb-1">Channel-Test</h2>
+  <p class="small text-muted mb-0">
+    Auf <code>test</code> / <code>Test</code> (ohne <code>!</code>) im gewählten Kanal antworten.
+    <strong>Lange Testnachricht</strong> = wie <code>!test</code>.
+    <strong>Reaction</strong> = Emoji (👍 oder ✅) auf die Originalnachricht;
+    optional zusätzlich die Hop-Anzahl als Ziffern-Emoji.
+    Andere Befehle bleiben unverändert (DM / <code>!</code>).
+  </p>
+</div>
+<form method="post" id="ctForm" class="section-card">
+  <div class="form-check form-switch mb-4">
     <input class="form-check-input" type="checkbox" name="enabled" id="ctEnabled"{chk}>
-    <label class="form-check-label" for="ctEnabled">Funktion aktiv</label>
+    <label class="form-check-label fw-semibold" for="ctEnabled">Funktion aktiv</label>
   </div>
+  <h3 class="h6 text-uppercase text-muted mb-3">Kanäle</h3>
   {channel_block}
-  <label class="form-label">Zusätzliche Kanal-Nummern (optional, kommagetrennt)</label>
-  <input type="text" name="channels_manual" class="form-control mb-3" value="{manual}"
-         placeholder="z. B. 2,3">
-  <button type="submit" class="btn btn-success w-100">Speichern</button>
+  {manual_block}
+  <button type="submit" class="btn btn-success">Speichern</button>
 </form>
-<p class="small text-muted mt-3">Einstellungen in <code>config.ini</code> → <code>[channelTest]</code>.</p>
+<p class="small text-muted mt-3 mb-0">
+  Gespeichert in <code>config.ini</code> → <code>[channelTest]</code>
+  (<code>channels</code>, <code>modes</code>).
+</p>
+<script>
+(function () {{
+  function syncRow(row) {{
+    var sel = row.querySelector(".ct-mode");
+    var opts = row.querySelector(".ct-react-opts");
+    if (!sel || !opts) return;
+    if (sel.value === "react") opts.classList.remove("is-hidden");
+    else opts.classList.add("is-hidden");
+  }}
+  document.querySelectorAll(".ct-channel-row").forEach(function (row) {{
+    syncRow(row);
+    var sel = row.querySelector(".ct-mode");
+    if (sel) sel.addEventListener("change", function () {{ syncRow(row); }});
+    row.querySelectorAll(".ct-emoji-btn input").forEach(function (inp) {{
+      inp.addEventListener("change", function () {{
+        row.querySelectorAll(".ct-emoji-btn").forEach(function (b) {{
+          b.classList.toggle("is-active", b.querySelector("input") === inp);
+        }});
+      }});
+    }});
+  }});
+}})();
+</script>
 """
 
 
@@ -624,7 +1319,19 @@ _CONFIG_ATTR_ALIASES = {
     "respond_by_dm_only": "useDMForResponse",
     "filemon_enabled": "file_monitor_enabled",
     "LogBackupCount": "log_backup_count",
+    "log_backup_count": "log_backup_count",
+    "lheardCmdIgnoreNodes": "lheardCmdIgnoreNode",
+    "lheardCmdIgnoreNode": "lheardCmdIgnoreNode",
+    "fuzzAllLocations": "fuzzItAll",
+    "fuzzItAll": "fuzzItAll",
+    "sentryAlertAway": "sentryAlertFar",
+    "sentryAlertFar": "sentryAlertFar",
     "bee": "bee_enabled",
+    "bbsDmUserAckEnabled": "bbs_dm_user_ack_enabled",
+    "bbsDmAckRetrySeconds": "bbs_dm_ack_retry_seconds",
+    "bbsDmAckMaxAttempts": "bbs_dm_ack_max_attempts",
+    "bbsDmAckExpireSeconds": "bbs_dm_ack_expire_seconds",
+    "bbsDmNotifySender": "bbs_dm_notify_sender",
 }
 
 
@@ -1049,6 +1756,333 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     return True, f"Gespeichert auf dem Gerät: {', '.join(changes)}."
 
 
+# --- Mesh channels (Meshtastic ChannelSettings via writeChannel) ---
+
+_CHANNEL_ROLE_LABELS: Dict[int, str] = {
+    0: "DISABLED",
+    1: "PRIMARY",
+    2: "SECONDARY",
+}
+
+
+def fetch_local_channels(iface_id: int) -> Tuple[Optional[str], Optional[List[Dict[str, Any]]]]:
+    """Read mesh channel slots 0–7 from the connected local node protobuf."""
+    node, err = _local_node_for_iface(iface_id)
+    if err:
+        return err, None
+
+    sm = _system_mod()
+    slots = []
+    try:
+        slots = sm.read_interface_channel_slots(int(iface_id))
+    except Exception as e:
+        return f"Kanäle konnten nicht gelesen werden: {e!s}", None
+
+    if not slots:
+        return (
+            "Keine Kanäle vom Gerät gelesen — Verbindung prüfen oder Bot neu starten.",
+            None,
+        )
+
+    out: List[Dict[str, Any]] = []
+    for slot in slots:
+        name = slot.get("name") or ""
+        # Show preset-derived label in the name field when firmware name is empty
+        name_field = name or (
+            slot.get("label") if slot.get("role_name") == "PRIMARY" else ""
+        )
+        out.append(
+            {
+                "index": int(slot["index"]),
+                "name": name,
+                "name_display": name_field,
+                "label": slot.get("label") or "",
+                "role": int(slot.get("role") or 0),
+                "role_name": slot.get("role_name") or "",
+                "psk_label": slot.get("psk_kind") or "",
+                "psk_value": slot.get("psk") or "",
+                "uplink": bool(slot.get("uplink")),
+                "downlink": bool(slot.get("downlink")),
+                "empty": int(slot.get("role") or 0) == 0 and not name,
+            }
+        )
+    return None, out
+
+
+def _parse_channel_psk(psk_raw: str) -> Tuple[Optional[bytes], Optional[str]]:
+    """Parse a PSK field into protobuf bytes, or (None, None) if unchanged.
+
+    meshtastic.util.fromPSK() returns a *str* for passphrases/unknown input.
+    Assigning that to ChannelSettings.psk raises TypeError → Flask 500, nothing saved.
+    """
+    s = (psk_raw or "").strip()
+    if not s:
+        return None, None
+
+    low = s.lower()
+    try:
+        from meshtastic import util as mesh_util
+
+        if low in ("none", "default", "random") or (
+            low.startswith("simple") and low[6:].isdigit()
+        ):
+            val = mesh_util.fromPSK(s)
+            if not isinstance(val, (bytes, bytearray)):
+                return None, "PSK ungültig."
+            return bytes(val), None
+    except Exception as e:
+        return None, f"PSK ungültig: {e!s}"
+
+    if s.startswith("0x") or s.startswith("0X"):
+        try:
+            raw = bytes.fromhex(re.sub(r"\s+", "", s[2:]))
+        except ValueError as e:
+            return None, f"PSK Hex ungültig: {e!s}"
+        return raw, None
+
+    body = s[7:].strip() if low.startswith("base64:") else s
+    hexish = re.sub(r"[\s:-]", "", body)
+    if re.fullmatch(r"[0-9a-fA-F]+", hexish) and len(hexish) in (32, 64):
+        return bytes.fromhex(hexish), None
+
+    try:
+        pad = body + ("=" * ((4 - len(body) % 4) % 4))
+        raw = base64.b64decode(pad, validate=False)
+        if len(raw) in (16, 32):
+            return raw, None
+        if low.startswith("base64:") and raw:
+            return raw, None
+    except Exception:
+        pass
+
+    return None, (
+        "PSK bitte als none, default, random, simpleN, 0x… (32/64 Hex-Zeichen) "
+        "oder base64:… angeben — kein Klartext (sonst Absturz beim Speichern)."
+    )
+
+
+def apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
+    """Apply one channel slot from the Node Settings channel form."""
+    try:
+        return _apply_local_channel_settings(iface_id, form)
+    except Exception as e:
+        from modules.log import logger
+
+        logger.exception("Admin: Kanal speichern fehlgeschlagen")
+        return False, f"Kanal konnte nicht gespeichert werden: {e!s}"
+
+
+def _apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
+    node, err = _local_node_for_iface(iface_id)
+    if err:
+        return False, err
+
+    try:
+        idx = int(form.get("channel_index", -1))
+    except (TypeError, ValueError):
+        return False, "Kanal-Index ungültig."
+    if idx < 0 or idx > 7:
+        return False, "Kanal-Index muss 0–7 sein."
+
+    channels = getattr(node, "channels", None)
+    if not channels or idx >= len(channels):
+        return False, "Kanal-Slot nicht auf dem Gerät vorhanden."
+
+    getter = getattr(node, "getChannelByChannelIndex", None)
+    ch = getter(idx) if callable(getter) else channels[idx]
+    if ch is None:
+        return False, "Kanal-Slot nicht auf dem Gerät vorhanden."
+    settings = ch.settings
+
+    name = (form.get("name") or "").strip()
+    if len(name) > 12:
+        return False, "Kanalname: maximal 12 Zeichen."
+
+    try:
+        role = int(form.get("role", int(ch.role)))
+    except (TypeError, ValueError):
+        return False, "Rolle ungültig."
+
+    if idx == 0:
+        if role == 0:
+            return False, "Primärkanal (#0) darf nicht DISABLED sein."
+        if role != 1:
+            return False, "Slot #0 muss PRIMARY bleiben."
+    else:
+        if role == 1:
+            return False, "PRIMARY ist nur für Slot #0 erlaubt."
+        if role not in (0, 2):
+            return False, "Rolle: SECONDARY oder DISABLED."
+
+    uplink = form.get("uplink_enabled") in ("1", "on", "true", "yes")
+    downlink = form.get("downlink_enabled") in ("1", "on", "true", "yes")
+
+    psk_raw = (form.get("psk") or "").strip()
+    psk_changed = False
+    if psk_raw:
+        new_psk, psk_err = _parse_channel_psk(psk_raw)
+        if psk_err:
+            return False, psk_err
+        if new_psk is not None:
+            if len(new_psk) not in (1, 16, 32) and new_psk not in (b"", b"\x00"):
+                return False, (
+                    f"PSK hat {len(new_psk)} Bytes — erwartet 1 (none/default/simpleN), "
+                    "16 oder 32 Bytes."
+                )
+            settings.psk = new_psk
+            psk_changed = True
+
+    settings.name = name
+    settings.uplink_enabled = uplink
+    settings.downlink_enabled = downlink
+    ch.role = role
+    ch.index = idx
+
+    try:
+        node.writeChannel(idx)
+    except Exception as e:
+        return False, f"Kanal #{idx} konnte nicht geschrieben werden: {e!s}"
+
+    try:
+        sm = _system_mod()
+        if hasattr(sm, "refresh_channel_cache"):
+            sm.refresh_channel_cache()
+    except Exception:
+        pass
+
+    bits = [f"Name={name or '(leer)'}", f"Rolle={_CHANNEL_ROLE_LABELS.get(role, role)}"]
+    if psk_changed:
+        try:
+            from meshtastic import util as mesh_util
+
+            bits.append(
+                f"PSK={mesh_util.pskToString(bytes(settings.psk) if settings.psk else b'')}"
+            )
+        except Exception:
+            bits.append("PSK=geändert")
+    bits.append(f"Up={'an' if uplink else 'aus'}")
+    bits.append(f"Down={'an' if downlink else 'aus'}")
+    return True, (
+        f"Kanal #{idx} gespeichert ({', '.join(bits)}). "
+        "Empfang auf einem neuen Slot: Channel-Test neu speichern; "
+        "falls weiter nichts ankommt, Bot/meshtasticd neu starten."
+    )
+
+
+def _channel_role_options(index: int, selected: int) -> str:
+    if index == 0:
+        choices = [(1, "PRIMARY")]
+    else:
+        choices = [(2, "SECONDARY"), (0, "DISABLED")]
+    opts = []
+    for val, label in choices:
+        sel = " selected" if int(selected) == val else ""
+        opts.append(f'<option value="{val}"{sel}>{html.escape(label)}</option>')
+    # If current role is unexpected (e.g. PRIMARY on #1), still show it
+    if not any(int(selected) == v for v, _ in choices):
+        label = _CHANNEL_ROLE_LABELS.get(int(selected), str(selected))
+        opts.insert(
+            0,
+            f'<option value="{int(selected)}" selected>{html.escape(label)}</option>',
+        )
+    return "".join(opts)
+
+
+def build_channels_settings_html(
+    channels: List[Dict[str, Any]],
+    *,
+    iface_id: int,
+    form_action: str,
+) -> str:
+    """Separate forms per channel slot for Node Settings."""
+    rows = []
+    for ch in channels:
+        idx = int(ch["index"])
+        name = html.escape(ch.get("name") or "")
+        name_ph = html.escape(ch.get("label") or "z. B. MeshHessen")
+        psk_label = html.escape(str(ch.get("psk_label") or "—"))
+        psk_value = html.escape(str(ch.get("psk_value") or ""))
+        up_chk = " checked" if ch.get("uplink") else ""
+        down_chk = " checked" if ch.get("downlink") else ""
+        role_opts = _channel_role_options(idx, int(ch.get("role") or 0))
+        badge = ""
+        if idx == 0:
+            badge = '<span class="badge bg-primary ms-1">Primary</span>'
+        elif ch.get("empty"):
+            badge = '<span class="badge bg-secondary ms-1">leer</span>'
+        rows.append(
+            f"""
+<div class="card border-secondary-subtle mb-3">
+  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+    <span><strong>#{idx}</strong> {html.escape(ch.get("label") or "")} {badge}</span>
+    <span class="small text-muted">PSK: <code>{psk_label}</code></span>
+  </div>
+  <div class="card-body py-3">
+    <form method="post" class="row g-2 align-items-end">
+      <input type="hidden" name="action" value="save_channel">
+      <input type="hidden" name="iface_id" value="{iface_id}">
+      <input type="hidden" name="channel_index" value="{idx}">
+      <div class="col-md-3">
+        <label class="form-label" for="ch-name-{idx}">Name (Firmware)</label>
+        <input class="form-control form-control-sm" id="ch-name-{idx}" name="name"
+               maxlength="12" value="{name}" placeholder="{name_ph}">
+        <div class="form-text">Leer bei Primary = Anzeige über LoRa-Preset</div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="ch-role-{idx}">Rolle</label>
+        <select class="form-select form-select-sm" id="ch-role-{idx}" name="role">
+          {role_opts}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="ch-psk-{idx}">PSK ändern</label>
+        <input class="form-control form-control-sm font-monospace" id="ch-psk-{idx}" name="psk"
+               autocomplete="off" placeholder="leer = unverändert"
+               title="none · default · random · base64:… · 0x…">
+        <div class="form-text">aktuell: <code class="user-select-all">{psk_value or "—"}</code>
+          · setzen: <code>none</code>/<code>default</code>/<code>simpleN</code>/<code>base64:…</code></div>
+      </div>
+      <div class="col-md-2">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" name="uplink_enabled"
+                 id="ch-up-{idx}" value="1"{up_chk}>
+          <label class="form-check-label" for="ch-up-{idx}">Uplink</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="downlink_enabled"
+                 id="ch-down-{idx}" value="1"{down_chk}>
+          <label class="form-check-label" for="ch-down-{idx}">Downlink</label>
+        </div>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-sm btn-outline-primary w-100"
+                onclick="return confirm('Kanal #{idx} wirklich auf dem Gerät speichern?');">
+          Speichern
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+"""
+        )
+
+    return f"""
+<hr class="my-4">
+<h5 class="mb-2">Mesh-Kanäle</h5>
+<p class="small text-muted mb-3">
+  Liest die Kanal-Tabelle direkt aus der Meshtastic-Instanz (Protobuf, Slots 0–7).
+  Primärkanal (#0) hat in der Firmware oft <strong>keinen Namen</strong> — die App zeigt dann den
+  LoRa-Preset (z. B. ShortSlow). Der PSK erscheint als <code>none</code>/<code>default</code>/<code>simpleN</code>
+  oder <code>base64:…</code> (lokaler Admin). Feld „PSK ändern“ leer lassen = unverändert.
+</p>
+<div class="alert alert-warning small">
+  Typisch Meshhessen: <strong>#0 ShortSlow</strong> (PRIMARY) · <strong>#1 MeshHessen</strong> (SECONDARY).
+  Primärkanal (#0) nicht deaktivieren. Nach dem Speichern Cache für Admin-Kanal/Channel-Test aktualisiert.
+</div>
+{''.join(rows) if rows else '<p class="text-muted">Keine Kanäle geladen.</p>'}
+"""
+
+
 def node_settings_role_options(selected: int) -> str:
     opts = []
     for val, label in sorted(_NODE_ROLE_LABELS.items()):
@@ -1197,4 +2231,494 @@ def build_node_settings_html(
 
   <button type="submit" class="btn btn-primary">Auf Gerät speichern</button>
 </form>
+"""
+
+
+def build_node_settings_page_html(
+    settings: Dict[str, Any],
+    channels: Optional[List[Dict[str, Any]]],
+    channels_err: Optional[str],
+    *,
+    iface_id: int,
+    ifaces: List[int],
+    form_action: str,
+) -> str:
+    """Node settings form + channel editor section."""
+    body = build_node_settings_html(
+        settings,
+        iface_id=iface_id,
+        ifaces=ifaces,
+        form_action=form_action,
+    )
+    if channels_err:
+        body += (
+            f'<hr class="my-4"><h5>Mesh-Kanäle</h5>'
+            f'<p class="alert alert-warning">{html.escape(channels_err)}</p>'
+        )
+    elif channels is not None:
+        body += build_channels_settings_html(
+            channels, iface_id=iface_id, form_action=form_action
+        )
+    return body
+
+
+def _bw_node_caption(nid: int) -> Tuple[str, str, str]:
+    hex_id = f"!{int(nid):08x}"
+    short = ""
+    long_n = ""
+    try:
+        import modules.nodedb as ndb
+
+        short = ndb.get_node_short_name(int(nid)) or ""
+        long_n = ndb.get_node_long_name(int(nid)) or ""
+    except Exception:
+        pass
+    return hex_id, short, long_n
+
+
+def _bw_parse_node_id(raw: str) -> Optional[int]:
+    s = normalize_ban_node_id(raw)
+    if not s:
+        return None
+    try:
+        n = int(s)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def apply_blitzwatch_admin_form(form) -> Tuple[bool, str, Optional[int]]:
+    """Apply one admin Blitzwatch POST. Returns (ok, flash, redirect_node_id)."""
+    from modules import blitzwatch as bw
+
+    bw.initialize_blitzwatch_database()
+    action = (form.get("action") or "").strip()
+    nid = _bw_parse_node_id(form.get("node_id") or "")
+    if not nid:
+        return False, "Knoten-ID fehlt.", None
+
+    if action == "reset":
+        bw.reset_watch_for_node(nid)
+        return True, f"Einstellungen für {nid} gelöscht (wieder Defaults).", None
+
+    if action == "save_prefs":
+        enabled = form.get("enabled") in ("1", "on", "true", "yes")
+        try:
+            radius = int((form.get("radius_km") or "8").strip())
+        except ValueError:
+            return False, "Radius muss eine ganze Zahl sein.", nid
+        bw._upsert_node_row(nid, enabled=enabled, radius_km=radius)
+        return True, f"Node {nid}: Warnung {'AN' if enabled else 'AUS'}, Home-Radius {bw.clamp_radius_km(radius)} km.", nid
+
+    if action == "home_gps":
+        bw.set_home_gps(nid)
+        return True, f"Home für {nid} wieder GPS.", nid
+
+    if action == "home_place":
+        place = (form.get("place") or "").strip()
+        if not place:
+            return False, "Ort, Koordinaten oder Maidenhead angeben.", nid
+        resolved, err = bw._resolve_explicit_location(
+            f"!blitzwatch home {place}", nid, 1, ("blitzwatch", "home")
+        )
+        if err:
+            return False, err, nid
+        assert resolved is not None
+        lat, lon, label = resolved
+        bw.set_home_fixed(nid, lat, lon, label)
+        return True, f"Home-Fix für {nid}: {label}.", nid
+
+    if action == "add_extra":
+        place = (form.get("place") or "").strip()
+        if not place:
+            return False, "Zusatzort: Ort, Koordinaten oder Grid angeben.", nid
+        radius_raw = (form.get("extra_radius_km") or "").strip()
+        radius_override = None
+        if radius_raw:
+            try:
+                radius_override = int(radius_raw)
+            except ValueError:
+                return False, "Radius Zusatzort ungültig.", nid
+        loc_msg = f"!blitzwatch add {place}"
+        resolved, err = bw._resolve_explicit_location(
+            loc_msg, nid, 1, ("blitzwatch", "add")
+        )
+        if err:
+            return False, err, nid
+        assert resolved is not None
+        lat, lon, label = resolved
+        loc, add_err = bw.add_location(nid, lat, lon, label, radius_override)
+        if add_err:
+            return False, add_err, nid
+        return True, f"Zusatzort {loc['slot']}: {loc['label']}.", nid
+
+    if action == "del_extra":
+        try:
+            slot = int(form.get("slot") or "0")
+        except ValueError:
+            return False, "Slot ungültig.", nid
+        if bw.delete_location(nid, slot):
+            return True, f"Zusatzort {slot} gelöscht.", nid
+        return False, f"Kein Zusatzort {slot}.", nid
+
+    if action == "extra_radius":
+        try:
+            slot = int(form.get("slot") or "0")
+            radius = int(form.get("radius_km") or "0")
+        except ValueError:
+            return False, "Slot/Radius ungültig.", nid
+        loc = bw.set_location_radius(nid, slot, radius)
+        if not loc:
+            return False, f"Kein Zusatzort {slot}.", nid
+        return True, f"Ort {slot}: Radius {loc['radius_km']} km.", nid
+
+    return False, "Unbekannte Aktion.", nid
+
+
+def _bw_collect_admin_list() -> List[Dict[str, Any]]:
+    """NodeDB nodes plus leftover Blitzwatch-only IDs, newest lastSeen first."""
+    from modules import blitzwatch as bw
+
+    bw.initialize_blitzwatch_database()
+    prefs_map = bw.get_all_prefs_map()
+    seen: set[int] = set()
+    items: List[Dict[str, Any]] = []
+    nodedb_list: List[Tuple[int, dict]] = []
+    try:
+        import modules.nodedb as ndb
+
+        nodedb_list = ndb.list_nodes()
+    except Exception:
+        nodedb_list = []
+    for nid, entry in nodedb_list:
+        nid = int(nid)
+        seen.add(nid)
+        prefs = prefs_map.get(nid)
+        if prefs is None:
+            prefs = bw.get_node_prefs(nid)
+        extras = int(prefs.get("extra_count") or 0)
+        if "extra_count" not in prefs:
+            extras = len(bw.list_locations(nid))
+        last_seen = entry.get("lastSeen") or 0
+        try:
+            last_s = (
+                time.strftime("%Y-%m-%d %H:%M", time.localtime(float(last_seen)))
+                if last_seen
+                else "—"
+            )
+        except (OverflowError, OSError, TypeError, ValueError):
+            last_s = "—"
+        items.append(
+            {
+                "node_id": nid,
+                "prefs": prefs,
+                "extra_count": extras,
+                "last_seen_s": last_s,
+            }
+        )
+    leftover = sorted(int(n) for n in prefs_map if int(n) not in seen)
+    for nid in leftover:
+        prefs = prefs_map[nid]
+        extras = int(prefs.get("extra_count") or 0)
+        items.append(
+            {
+                "node_id": nid,
+                "prefs": prefs,
+                "extra_count": extras,
+                "last_seen_s": "—",
+            }
+        )
+    return items
+
+
+def build_blitzwatch_node_editor_html(
+    edit_nid: int,
+    *,
+    extra_footer: str = "",
+) -> str:
+    """Shared prefs editor (admin + public PIN session)."""
+    from modules import blitzwatch as bw
+
+    prefs = bw.get_node_prefs(edit_nid)
+    locs = bw.list_locations(edit_nid)
+    hex_id, short, long_n = _bw_node_caption(edit_nid)
+    title = " · ".join(x for x in (short, long_n) if x) or hex_id
+    en_chk = " checked" if prefs.get("enabled") else ""
+    home_lab = html.escape(prefs.get("home_label") or "")
+    last = prefs.get("last_alert_ts") or 0
+    last_s = "—"
+    if last:
+        ago = int((time.time() - float(last)) / 60)
+        last_s = f"vor {ago} min"
+
+    extra_rows = []
+    for loc in locs:
+        slot = int(loc["slot"])
+        extra_rows.append(
+            f"""
+<div class="d-flex flex-wrap gap-2 align-items-end mb-2">
+  <div class="flex-grow-1 small">
+    <strong>Ort {slot}</strong> {html.escape(loc["label"])}
+    <span class="text-muted">({loc["lat"]:.4f}, {loc["lon"]:.4f})</span>
+  </div>
+  <form method="post" class="d-flex gap-1">
+    <input type="hidden" name="action" value="extra_radius">
+    <input type="hidden" name="node_id" value="{edit_nid}">
+    <input type="hidden" name="slot" value="{slot}">
+    <input class="form-control form-control-sm" style="width:5rem" name="radius_km"
+           type="number" min="1" max="50" value="{int(loc["radius_km"])}">
+    <button class="btn btn-sm btn-outline-primary" type="submit">km</button>
+  </form>
+  <form method="post" onsubmit="return confirm('Ort {slot} löschen?');">
+    <input type="hidden" name="action" value="del_extra">
+    <input type="hidden" name="node_id" value="{edit_nid}">
+    <input type="hidden" name="slot" value="{slot}">
+    <button class="btn btn-sm btn-outline-danger" type="submit">Löschen</button>
+  </form>
+</div>"""
+        )
+    if not extra_rows:
+        extra_rows.append('<p class="text-muted small mb-2">Keine Zusatzorte.</p>')
+
+    return f"""
+<div class="card border-primary mb-4 bw-admin-edit" id="bw-edit">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <span><strong>Einstellungen:</strong> {html.escape(title)}</span>
+    <span class="small text-muted"><code>{edit_nid}</code> · <code>{html.escape(hex_id)}</code></span>
+  </div>
+  <div class="card-body">
+    <p class="small text-muted mb-3">letzte Home-Warnung: {html.escape(last_s)}</p>
+    <form method="post" class="row g-2 align-items-end mb-3">
+      <input type="hidden" name="action" value="save_prefs">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <div class="col-auto">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" name="enabled" id="bwEn" value="1"{en_chk}>
+          <label class="form-check-label" for="bwEn">Warnung AN</label>
+        </div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Home-Radius (km)</label>
+        <input class="form-control" type="number" min="1" max="50" name="radius_km"
+               value="{int(prefs.get("radius_km") or 8)}">
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-primary" type="submit">Speichern</button>
+      </div>
+    </form>
+    <p class="small mb-2">Home: <strong>{"Fix " + home_lab if prefs.get("home_mode") == "fixed" and home_lab else "GPS"}</strong></p>
+    <div class="row g-2 mb-3">
+      <div class="col-md-7">
+        <form method="post" class="d-flex gap-2">
+          <input type="hidden" name="action" value="home_place">
+          <input type="hidden" name="node_id" value="{edit_nid}">
+          <input class="form-control" name="place" placeholder="Ort, 50.34 8.76 oder JO40AA" required>
+          <button class="btn btn-outline-primary" type="submit">Home-Fix setzen</button>
+        </form>
+      </div>
+      <div class="col-md-3">
+        <form method="post">
+          <input type="hidden" name="action" value="home_gps">
+          <input type="hidden" name="node_id" value="{edit_nid}">
+          <button class="btn btn-outline-secondary" type="submit">Home = GPS</button>
+        </form>
+      </div>
+    </div>
+    <h6 class="mt-3">Zusatzorte (max. {bw.MAX_EXTRA_LOCATIONS})</h6>
+    {"".join(extra_rows)}
+    <form method="post" class="row g-2 align-items-end mt-2">
+      <input type="hidden" name="action" value="add_extra">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <div class="col-md-5">
+        <label class="form-label">Neuer Zusatzort</label>
+        <input class="form-control" name="place" placeholder="Ort / Coords / Grid" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Radius km</label>
+        <input class="form-control" name="extra_radius_km" type="number" min="1" max="50" placeholder="wie Home">
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-outline-success" type="submit">Hinzufügen</button>
+      </div>
+    </form>
+    <form method="post" class="mt-4" onsubmit="return confirm('Alle Blitzwatch-Daten dieses Knotens löschen?');">
+      <input type="hidden" name="action" value="reset">
+      <input type="hidden" name="node_id" value="{edit_nid}">
+      <button class="btn btn-sm btn-outline-danger" type="submit">Eintrag zurücksetzen</button>
+    </form>
+    {extra_footer}
+  </div>
+</div>
+"""
+
+
+def build_blitzwatch_public_html(
+    *,
+    node_id: Optional[int],
+    global_on: bool,
+    location_on: bool,
+) -> str:
+    from modules.web_commands_help import render_blitzwatch_guide
+
+    guide = render_blitzwatch_guide()
+    if not location_on or not global_on:
+        return (
+            '<p class="alert alert-warning">Blitzwatch ist derzeit deaktiviert.</p>'
+            + guide
+        )
+    if not node_id:
+        return f"""
+<div class="portal-card p-4 mb-4">
+  <h1 class="h3 section-title mb-3">
+    <i class="bi bi-lightning-charge text-success me-2"></i>Blitzwatch
+  </h1>
+  <p class="text-muted">
+    Stelle Home, Radius und Zusatzorte hier im Browser ein.
+    Der Code kommt nur per <strong>Direktnachricht</strong> vom Bot.
+  </p>
+  <ol class="text-muted small mb-4">
+    <li>In der Meshtastic-App eine <strong>DM an den Bot</strong> senden:
+      <code>!blitzwatch web</code> (oder <code>!blitzwatch set</code>)</li>
+    <li>Den <strong>5-stelligen Code</strong> unten eingeben (15 Minuten gültig, einmalig).</li>
+  </ol>
+  <form method="post" class="row g-2 align-items-end" style="max-width: 22rem;">
+    <input type="hidden" name="action" value="unlock">
+    <div class="col-8">
+      <label class="form-label" for="bwCode">Code</label>
+      <input class="form-control form-control-lg text-center font-monospace bw-pin-input"
+             id="bwCode" name="code" inputmode="numeric" pattern="[0-9]{{5}}"
+             maxlength="5" minlength="5" autocomplete="one-time-code" required
+             placeholder="•••••">
+    </div>
+    <div class="col-4">
+      <button class="btn btn-success w-100" type="submit">Öffnen</button>
+    </div>
+  </form>
+  <p class="small text-muted mt-4 mb-0">
+    Mesh-Befehle bleiben: <code>!blitzwatch</code> · Übersicht:
+    <a href="/befehle">Befehle</a>
+  </p>
+</div>
+{guide}
+"""
+    logout = """
+<form method="post" class="mt-3">
+  <input type="hidden" name="action" value="logout">
+  <button class="btn btn-sm btn-outline-secondary" type="submit">Sitzung beenden</button>
+</form>
+"""
+    return f"""
+<div class="mb-3">
+  <h1 class="h3 section-title mb-2">
+    <i class="bi bi-lightning-charge text-success me-2"></i>Deine Blitzwatch-Einstellungen
+  </h1>
+  <p class="small text-muted mb-0">Gilt nur für deine Node. Nach einer Stunde oder „Sitzung beenden“ ist der Zugang wieder zu.</p>
+</div>
+{build_blitzwatch_node_editor_html(int(node_id), extra_footer=logout)}
+{guide}
+"""
+
+
+def build_blitzwatch_admin_html(
+    *,
+    edit_nid: Optional[int],
+    form_action: str,
+    global_on: bool,
+    location_on: bool,
+) -> str:
+    if not location_on or not global_on:
+        return (
+            '<p class="alert alert-warning">Blitzwatch ist in der Config aus '
+            '(<code>[location] enabled</code> / <code>blitzWatchEnabled</code>). '
+            "Globale Schalter unter Einstellungen.</p>"
+        )
+
+    watchers = _bw_collect_admin_list()
+    rows = []
+    for w in watchers:
+        nid = int(w["node_id"])
+        prefs = w["prefs"]
+        hex_id, short, long_n = _bw_node_caption(nid)
+        name_plain = " · ".join(x for x in (short, long_n) if x) or "—"
+        name = html.escape(name_plain)
+        en = bool(prefs.get("enabled", True))
+        badge = (
+            '<span class="badge bg-success">AN</span>'
+            if en
+            else '<span class="badge bg-secondary">AUS</span>'
+        )
+        if prefs.get("home_mode") == "fixed" and prefs.get("home_lat") is not None:
+            home = html.escape(str(prefs.get("home_label") or "Fix"))
+            home_plain = str(prefs.get("home_label") or "Fix")
+        else:
+            home = "GPS"
+            home_plain = "GPS"
+        extras = int(w.get("extra_count") or 0)
+        sel = " table-active" if edit_nid == nid else ""
+        search = " ".join(
+            [
+                str(nid),
+                hex_id,
+                name_plain,
+                "an" if en else "aus",
+                home_plain,
+                w.get("last_seen_s") or "",
+            ]
+        ).lower()
+        search_attr = html.escape(search, quote=True)
+        href = html.escape(f"{form_action}?node={nid}#bw-edit")
+        rows.append(
+            f'<tr class="{sel}" data-search="{search_attr}">'
+            f"<td><code>{nid}</code><br><code class=\"small\">{html.escape(hex_id)}</code></td>"
+            f"<td>{name}</td>"
+            f"<td>{badge}</td>"
+            f"<td>{home} · {int(prefs.get('radius_km') or 8)} km</td>"
+            f"<td>{extras}</td>"
+            f"<td>{html.escape(str(w.get('last_seen_s') or '—'))}</td>"
+            f'<td><a class="btn btn-sm btn-outline-primary" href="{href}">Bearbeiten</a></td>'
+            "</tr>"
+        )
+
+    empty_row = (
+        '<tr class="nodedb-search-empty" hidden>'
+        '<td colspan="7" class="text-muted small">Keine Treffer für die Suche.</td></tr>'
+    )
+    if rows:
+        tbody = "".join(rows) + empty_row
+    else:
+        tbody = (
+            '<tr><td colspan="7" class="text-muted">Keine Knoten in der NodeDB.</td></tr>'
+            + empty_row
+        )
+
+    table = f"""
+<div class="nodedb-search-block bw-admin-list">
+  {nodedb_search_toolbar_html(placeholder="Knoten suchen (ID, Name, Hex …)")}
+  <div class="table-scroll mb-0">
+    <table class="table table-sm table-bordered table-hover nodes-table mb-0">
+      <thead><tr>
+        <th>Node</th><th>Name</th><th>Warnung</th><th>Home</th>
+        <th>Zusatz</th><th>Zuletzt</th><th></th>
+      </tr></thead>
+      <tbody>{tbody}</tbody>
+    </table>
+  </div>
+</div>
+<script src="/static/portal/nodedb-search.js"></script>
+"""
+
+    detail = """
+<div class="alert alert-secondary small mb-4" id="bw-edit">
+  Wähle in der Liste einen Knoten — die Einstellungen erscheinen hier oben,
+  ohne nach unten zu scrollen.
+</div>
+"""
+    if edit_nid:
+        detail = build_blitzwatch_node_editor_html(edit_nid)
+
+    return f"""
+<p class="small text-muted">Liste folgt der persistenten NodeDB. Ohne gespeicherten Blitzwatch-Eintrag gelten Defaults (Warnung AN, Default-Radius).
+  Globale Optionen: <a href="/einstellungen">Einstellungen</a> → location / blitzWatch.</p>
+{detail}
+{table}
 """

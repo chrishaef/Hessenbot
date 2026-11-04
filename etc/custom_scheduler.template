@@ -4,7 +4,7 @@ from modules.log import logger
 from modules.settings import MOTD
 from modules.system import send_message
 
-def setup_custom_schedules(send_message, tell_joke, welcome_message, handle_wxc, MOTD, schedulerChannel, schedulerInterface):
+def setup_custom_schedules(send_message, welcome_message, handle_wxc, MOTD, schedulerChannel, schedulerInterface):
     """
     Set up custom schedules. Edit the example schedules as needed.
     
@@ -18,7 +18,6 @@ def setup_custom_schedules(send_message, tell_joke, welcome_message, handle_wxc,
     6. System Tasks run every 20min try and avoid overlapping schedules to reduce API rapid fire issues. use like 8:05
     
     Available functions you can import and use, be sure they are enabled modules in config.ini:
-    - tell_joke() - Returns a random joke
     - welcome_message - A welcome message string
     - handle_wxc(message_from_id, deviceID, days=None) - Weather information
     - handleNews(message_from_id, deviceID, message, isDM) - News reader
@@ -35,10 +34,6 @@ def setup_custom_schedules(send_message, tell_joke, welcome_message, handle_wxc,
         from modules.rss import get_rss_feed
         
         # Example task functions, modify as needed the channel and interface parameters default to schedulerChannel and schedulerInterface
-        def send_joke(channel, interface):
-            ## uses system.send_message to send the result of tell_joke()
-            send_message(tell_joke(), channel, 0, interface)
-
         def send_good_morning(channel, interface):
             ## uses system.send_message to send "Good Morning"
             send_message("Good Morning", channel, 0, interface)
@@ -91,8 +86,6 @@ def setup_custom_schedules(send_message, tell_joke, welcome_message, handle_wxc,
             ## uses system.send_message to send the result of handle_sun()
             send_message(handle_sun(0, interface, channel), channel, 0, interface)
 
-        ### Send a joke every 2 minutes
-        #schedule.every(2).minutes.do(lambda: send_joke(schedulerChannel, schedulerInterface))
         ### Send a good morning message every day at 9 AM
         #schedule.every().day.at("09:00").do(lambda: send_good_morning(schedulerChannel, schedulerInterface))
         ### Send a good morning message every day at 9 AM to DM node 4258675309 without above function

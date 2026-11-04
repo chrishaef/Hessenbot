@@ -52,7 +52,7 @@ def _hour_label(iso_time: str) -> str:
         return iso_time[-5:] if len(iso_time) >= 5 else iso_time
 
 
-def get_uv(lat=0, lon=0) -> str:
+def get_uv(lat=0, lon=0, from_gps=None, *, source=None, label=None) -> str:
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
@@ -77,7 +77,9 @@ def get_uv(lat=0, lon=0) -> str:
         logger.error(f"Error fetching UV data: {e}")
         return ERROR_FETCHING_DATA
 
-    header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "UV")
+    header = format_wx_info_header(
+        lat_f, lon_f, from_gps=from_gps, source=source, label=label
+    ).replace("WX INFO", "UV")
     body = (
         f"Heute max {today:.1f} ({_uv_risk_de(today)}), "
         f"Morgen {tomorrow:.1f}. "
@@ -86,7 +88,7 @@ def get_uv(lat=0, lon=0) -> str:
     return f"{header}\n{body}"
 
 
-def get_regen(lat=0, lon=0, hours: int = 18) -> str:
+def get_regen(lat=0, lon=0, hours: int = 18, from_gps=None, *, source=None, label=None) -> str:
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
@@ -111,7 +113,9 @@ def get_regen(lat=0, lon=0, hours: int = 18) -> str:
         logger.error(f"Error fetching rain data: {e}")
         return ERROR_FETCHING_DATA
 
-    header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "REGEN")
+    header = format_wx_info_header(
+        lat_f, lon_f, from_gps=from_gps, source=source, label=label
+    ).replace("WX INFO", "REGEN")
     lines: list[str] = []
     total = 0.0
     max_prob = 0
@@ -219,8 +223,8 @@ def _strike_records_from_features(
     return out
 
 
-def _fetch_dmi_strikes(lat: float, lon: float, radius_km: float) -> tuple[list[dict], str]:
-    west, south, east, north = _bbox_for_radius(lat, lon, radius_km)
+def _fetch_dmi_features(west: float, south: float, east: float, north: float) -> tuple[list, str]:
+    """Raw GeoJSON features from DMI for a bbox. Returns (features, source_label)."""
     bbox = f"{west},{south},{east},{north}"
     for period, label in (
         ("latest-hour", "60 Min"),
@@ -243,10 +247,127 @@ def _fetch_dmi_strikes(lat: float, lon: float, radius_km: float) -> tuple[list[d
         except Exception as e:
             logger.debug(f"DMI lightning ({period}): {e}")
             continue
-        strikes = _strike_records_from_features(features, lat, lon, radius_km)
-        if strikes:
-            return strikes, f"DMI, {label}"
+        if features:
+            return features, f"DMI, {label}"
     return [], "DMI, 60 Min"
+
+
+def _fetch_dmi_strikes(lat: float, lon: float, radius_km: float) -> tuple[list[dict], str]:
+    west, south, east, north = _bbox_for_radius(lat, lon, radius_km)
+    features, label = _fetch_dmi_features(west, south, east, north)
+    if not features:
+        return [], label
+    return _strike_records_from_features(features, lat, lon, radius_km), label
+
+
+def fetch_live_strikes_for_region(
+    points: list[tuple[float, float]],
+    pad_km: float,
+) -> tuple[list[dict], str]:
+    """Fetch live strikes covering all lat/lon points expanded by pad_km.
+
+    Returns raw strike dicts with lat/lon/age_min (no per-node km/dir yet) and a
+    source label. Empty points → empty result.
+    """
+    if not points:
+        return [], ""
+    lats = [p[0] for p in points]
+    lons = [p[1] for p in points]
+    mid_lat = (min(lats) + max(lats)) / 2.0
+    mid_lon = (min(lons) + max(lons)) / 2.0
+    # Expand extrema by pad_km
+    dlat = pad_km / 111.0
+    dlon = pad_km / (111.0 * max(0.35, math.cos(math.radians(mid_lat))))
+    west, south = min(lons) - dlon, min(lats) - dlat
+    east, north = max(lons) + dlon, max(lats) + dlat
+
+    live_on, _radius, bo_user, bo_pass = _blitz_settings()
+    if not live_on:
+        return [], ""
+
+    # Prefer Blitzortung when credentials exist; fall back to DMI.
+    if bo_user and bo_pass:
+        try:
+            response = requests.get(
+                _BLITZORTUNG_URL,
+                params={
+                    "number": 500,
+                    "west": west,
+                    "east": east,
+                    "south": south,
+                    "north": north,
+                    "sig": 0,
+                },
+                auth=(bo_user, bo_pass),
+                timeout=25,
+                headers=_HTTP_HEADERS,
+            )
+            response.raise_for_status()
+            now_ns = time.time_ns()
+            out: list[dict] = []
+            for line in response.text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                    slat = float(row["lat"])
+                    slon = float(row["lon"])
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                    continue
+                age_min = None
+                try:
+                    age_min = max(0, int((now_ns - int(row["time"])) / 1e9 / 60))
+                except (KeyError, TypeError, ValueError):
+                    pass
+                out.append({"lat": slat, "lon": slon, "age_min": age_min})
+            if out:
+                return out, "Blitzortung.org"
+        except Exception as e:
+            logger.debug(f"Blitzortung region fetch: {e}")
+
+    features, label = _fetch_dmi_features(west, south, east, north)
+    out = []
+    now = time.time()
+    for feat in features:
+        try:
+            slon, slat = feat["geometry"]["coordinates"]
+            props = feat.get("properties") or {}
+            observed = props.get("observed") or ""
+            age_min = None
+            if observed:
+                try:
+                    obs_dt = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+                    age_min = max(0, int((now - obs_dt.timestamp()) / 60))
+                except ValueError:
+                    pass
+            out.append({"lat": float(slat), "lon": float(slon), "age_min": age_min})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out, label
+
+
+def nearest_strike_for_point(
+    lat: float, lon: float, strikes: list[dict], radius_km: float
+) -> dict | None:
+    """Closest strike within radius_km, with km/dir filled in."""
+    best = None
+    for s in strikes:
+        try:
+            km = _haversine_km(lat, lon, float(s["lat"]), float(s["lon"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if km > radius_km:
+            continue
+        if best is None or km < best["km"]:
+            best = {
+                "lat": float(s["lat"]),
+                "lon": float(s["lon"]),
+                "km": km,
+                "age_min": s.get("age_min"),
+                "dir": _compass_dir(lat, lon, float(s["lat"]), float(s["lon"])),
+            }
+    return best
 
 
 def _fetch_blitzortung_strikes(
@@ -371,34 +492,31 @@ def _get_blitz_forecast(lat_f: float, lon_f: float, hours: int = 24) -> tuple[st
     return f"Modell {hours}h: kein Gewitter-Risiko.", False
 
 
-def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None) -> str:
+def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None, *, source=None, label=None) -> str:
     """Live-Einschläge (DMI / optional Blitzortung) + kurze Modell-Vorhersage.
 
-    ``from_gps`` (optional): True wenn der Standort der anfragenden Station bekannt
-    ist, False wenn auf den Bot-Standort zurückgegriffen wurde. Wird in der Antwort
-    angezeigt, damit klar ist, worauf sich die Distanzen beziehen.
+    ``from_gps`` / ``source`` / ``label``: Herkunft des Standorts (Node-GPS, Bot
+    oder explizites Orts-/Koordinaten-Argument).
     """
     coords = _coords_ok(lat, lon)
     if not coords:
         return NO_DATA_NOGPS
     lat_f, lon_f = coords
 
-    header = format_wx_info_header(lat_f, lon_f).replace("WX INFO", "BLITZ")
-    if from_gps is True:
-        header += "\n📍 Standort bekannt"
-    elif from_gps is False:
-        header += "\n📍 Standort unbekannt – Bot-Standort"
+    header = format_wx_info_header(
+        lat_f, lon_f, from_gps=from_gps, source=source, label=label
+    ).replace("WX INFO", "BLITZ")
 
     live_on, radius_km, bo_user, bo_pass = _blitz_settings()
     strikes: list[dict] = []
-    source = ""
+    source_name = ""
     if live_on:
         if bo_user and bo_pass:
             strikes = _fetch_blitzortung_strikes(lat_f, lon_f, radius_km, bo_user, bo_pass)
             if strikes:
-                source = "Blitzortung.org"
+                source_name = "Blitzortung.org"
         if not strikes:
-            strikes, source = _fetch_dmi_strikes(lat_f, lon_f, radius_km)
+            strikes, source_name = _fetch_dmi_strikes(lat_f, lon_f, radius_km)
 
     try:
         forecast, has_risk = _get_blitz_forecast(lat_f, lon_f, hours)
@@ -412,6 +530,6 @@ def get_blitz(lat=0, lon=0, hours: int = 24, from_gps=None) -> str:
 
     parts = [header]
     if live_on:
-        parts.append(_format_live_blitz(strikes, source, radius_km))
+        parts.append(_format_live_blitz(strikes, source_name, radius_km))
     parts.append(forecast)
     return "\n".join(parts)

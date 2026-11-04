@@ -67,7 +67,7 @@ Docker is recommended for Windows or if you want an isolated environment.
 
 ### Purpose
 
-`install.sh` automates installation, configuration, and service setup for the Meshing Around Bot project. It is designed for Linux systems (Debian/Ubuntu/Raspberry Pi and embedded devices).
+`install.sh` automates installation, configuration, and service setup for **Hessenbot**. It is designed for Linux systems (Debian/Ubuntu/Raspberry Pi and embedded devices).
 
 ### Usage
 
@@ -86,7 +86,7 @@ bash install.sh --nope
 ### What it does
 
 - Checks for existing installations and permissions.
-- Optionally moves the project to `/opt/meshing-around`.
+- Optionally moves the project to `/opt/Hessenbot`.
 - Installs Python and pip if missing (unless on embedded systems).
 - Adds the current user (or a dedicated `meshbot` user) to necessary groups for serial and Bluetooth access.
 - Copies and configures systemd service files for running the bot as a service.
@@ -100,7 +100,7 @@ bash install.sh --nope
 
 ### When to use
 
-- For first-time installation of the Meshing Around Bot.
+- For first-time installation of Hessenbot.
 - When migrating to a new device or environment.
 - After cloning or updating the repository to set up dependencies and services.
 
@@ -115,7 +115,7 @@ bash install.sh --nope
 
 ### Purpose
 
-`update.sh` is an update and maintenance script for the Meshing Around Bot project. It automates the process of safely updating your codebase, backing up data, and merging configuration changes.
+`update.sh` is an update and maintenance script for **Hessenbot**. It automates the process of safely updating your codebase, backing up data, and merging configuration changes.
 
 ### Usage
 
@@ -157,19 +157,15 @@ chmod +x update.sh
 
 ### Purpose
 
-`launch.sh` is a convenience script for starting the Mesh Bot, Pong Bot, or generating reports within the Python virtual environment. It ensures the correct environment is activated and the appropriate script is run.
+`launch.sh` is a convenience script for starting Hessenbot or generating reports within the Python virtual environment. It ensures the correct environment is activated and the appropriate script is run.
 
 ### How to Use
 
 From your project root, run one of the following commands:
 
-- Launch Mesh Bot:  
+- Launch Hessenbot (mesh_bot):  
   ```sh
   bash launch.sh mesh
-  ```
-- Launch Pong Bot:  
-  ```sh
-  bash launch.sh pong
   ```
 - Generate HTML report:  
   ```sh
@@ -196,7 +192,7 @@ From your project root, run one of the following commands:
 
 - The script requires a Python virtual environment (`venv`) to be present in the project directory.
 - If `venv` is missing, the script will exit with an error message.
-- Always provide an argument (`mesh`, `pong`, `html`, `html5`, or `add`) to specify what you want to launch.
+- Always provide an argument (`mesh`, `html`, `html5`, or `add`) to specify what you want to launch.
 
 ## Troubleshooting
 

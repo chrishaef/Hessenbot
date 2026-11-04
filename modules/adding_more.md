@@ -161,35 +161,6 @@ Your test_bot.py file contains a comprehensive suite of unit tests for the vario
 
 ---
 
-## Game Module Tests
-
-Each game module has a dedicated test that simulates a typical user interaction:
-
-- **Tic-Tac-Toe:**  
-  Starts a game and makes one move.
-- **Video Poker:**  
-  Starts a session and places a bet.
-- **Blackjack:**  
-  Starts a game and places a bet.
-- **Hangman:**  
-  Starts a game and guesses a letter.
-- **Lemonade Stand:**  
-  Starts a game and buys a box of cups.
-- **GolfSim:**  
-  Starts a hole and takes a shot.
-- **DopeWars:**  
-  Starts a game, selects a city, and checks the list.
-- **MasterMind:**  
-  Starts a game and makes one guess.
-- **Quiz:**  
-  Starts a quiz, joins as a player, answers one question, and ends the quiz.
-- **Survey:**  
-  Starts a survey, answers one question, and ends the survey.
-- **HamTest:**  
-  Starts a ham radio test and answers one question.
-
----
-
 ## Extended API Tests
 
 If the `.checkall` file is present, additional API and data-fetching tests are run for:

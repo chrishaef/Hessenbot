@@ -2,7 +2,7 @@
 
 **Hessenbot** ist ein Meshtastic-Autoresponder für [Meshhessen](https://meshhessen.de) — ein Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
 
-Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, Traceroute, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Spiele, US-Warnsysteme (NOAA/FEMA/USGS) und das alte `modules/web`-Frontend wurden entfernt; der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
+Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, Traceroute, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
 
 ## Screenshots
 
@@ -14,7 +14,7 @@ Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS
 |:---:|:---:|:---:|:---:|
 | ![Befehlsliste](docs/screenshots/befehle.png) | ![NodeDB — 543 Knoten](docs/screenshots/nodedb.png) | ![FAQ & PKI-Check](docs/screenshots/faq.png) | ![BBS öffentlich & DM-Warteschlange](docs/screenshots/bbs.png) |
 
-Öffentlich unter `/`, `/befehle`, `/nodedb`, `/faq`, `/bbs` — Admin-Login unter `/admin`.
+Öffentlich unter `/`, `/befehle`, `/mein-blitzwatch`, `/faq`, `/impressum`, `/datenschutz` — Admin-Login unter `/admin`.
 
 ### Mesh: Befehle & Trace
 
@@ -62,6 +62,9 @@ Weitere Credits unten unter [Credits (Upstream)](#credits-upstream).
 | Installation | [INSTALL.md](INSTALL.md) |
 | Konfiguration | [config.template](config.template) → `config.ini` |
 | Modul-Details | [modules/README.md](modules/README.md) |
+| Mitwirken | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Sicherheit | [SECURITY.md](SECURITY.md) |
+| Änderungen | [CHANGELOG.md](CHANGELOG.md) |
 | Befehlsreferenz (Web) | `/befehle` am laufenden Portal |
 | FAQ | `/faq` am laufenden Portal |
 
@@ -85,47 +88,83 @@ cp config.template config.ini
 - **Wetter** über **Open-Meteo**: `!wx`, `!wxc`, `!uv`, `!regen`, `!blitz`
 - **METAR** (`!metar`, optional ICAO): nächstgelegener Flughafen
 - **Standort**: `!whereami`, `!loc` (mit Höhe), `!howfar`, `!map`, Repeater (`!rlist`)
-- **Standort-Auflösung** (für Wetter, Warnungen, Blitz): zuerst frische NodeDB-Position (≤ 24 h), dann [Mesh-Karte](https://map.meshhessen.de), sonst Bot-Standort aus `config.ini`
+- **Standort-Auflösung** (für Wetter, Warnungen, Blitz, METAR ohne ICAO, …):
+  1. Ort / Koordinaten / Maidenhead in der Nachricht (z. B. `!wx Fulda`)
+  2. sonst frische NodeDB-Position (≤ 24 h) oder [Mesh-Karte](https://map.meshhessen.de)
+  3. fehlt alles → **Positionsanfrage** an die Node (`Standort angefragt – kurz warten…`); bei Erfolg wird der Befehl automatisch nachgeholt
+  4. Timeout → Hinweis, Ort/Koordinaten mitzuschicken (z. B. `!wx 50.34 8.76`) — **kein** stiller Bot-Standort-Fallback
+- **Optional Ort/Koordinaten/Maidenhead-Grid**: z. B. `!wx Fulda`, `!blitz Friedberg`, `!regen 50.55 9.68` (auch `50,55 9,68`), `!wx JO40AA`. Ohne Angabe: NodeDB/Karte bzw. Positionsanfrage. Ausnahme: `!metar EDDF` (ICAO), `!loc` (andere Node)
+- **Befehle per DM**: mit oder ohne `!`, wenn der Befehl das erste Wort ist (`ping`, `wx`, …). Im **Kanal** nur mit `!` (Ausnahme Channel-Test: nacktes `test`/`Test`)
 
 ### Ping, Trace & DM-Zustellung
 
-- **`!ping` / `!pong` / `!test` / `!ack` / `!cq`**: QSL-Antwort im Format  
-  `LongName [!nodeid] QSL @ "Ort" | N Hops LoRa|MQTT`
+- **`!ping` / `!test` / `!ack` / `!cq`**: QSL-Antwort in mehreren Zeilen mit Ort, optional Maidenhead-Grid, Hops und SNR bzw. MQTT
 - **Hop-Anzeige bei MQTT-Gateways:** Für über MQTT getunnelte Pakete werden Hops aus NodeDB, Trace-Cache und Paket-Metadaten aufgelöst — nicht mehr pauschal „0 Hops MQTT“.
 - **`!trace` / `!trace MHH` / `!trace !604f8594`**: Meshtastic-Traceroute zum Bot bzw. Ziel; Ergebnis (Hin- und Rückweg) per **DM**. Globale Warteschlange (ein Trace gleichzeitig), ~65 s Abstand pro Funk-Interface.
 - **Channel-Test** (optional): Auf konfigurierten Kanälen antwortet der Bot auf ein nacktes **`test`** / **`Test`** (ohne `!`) **direkt im Kanal** — gleiche Antwort wie `!test`. Ein-/Aus-Schaltung und Kanalauswahl im Web-Admin (Tab **Channel-Test**). Alle anderen Befehle bleiben unverändert (DM und/oder `!`).
 - **`wantAckOnDm`**: Mesh-ACK auf DM-Antworten; Fehlzustellungen (inkl. PKI) werden geloggt und im Admin/Dashboard ausgewertet
 - Konfiguration: `[messagingSettings]` in `config.ini` (`wantAckOnDm`, `dmDeliveryFailAlertThreshold`)
 
-### Blitz (`!blitz`)
+### Blitz (`!blitz`) und Blitzwatch
 
 - Live-Einschläge (DMI, optional Blitzortung.org) + kurze Modell-Vorhersage (Open-Meteo)
 - Ausgabe: Anzahl Einschläge, **Nächster**, **Weitester** und **Letzter** (zeitlich neuester) mit Distanz und Himmelsrichtung
-- Standort der anfragenden Station; in der Antwort wird angezeigt, ob der Standort bekannt ist oder der Bot-Standort genutzt wird
+- Standort der anfragenden Station oder optional `!blitz <Ort|Coords>`; in der Antwort wird die Standortquelle angezeigt
+- **Blitzwatch** (automatisch, wenn `blitzWatchEnabled = True`):
+  - prüft alle paar Minuten Live-Blitze gegen **Home** (frisches GPS ≤ 24 h oder Fix-Standort) und bis zu **3 Zusatzorte** (z. B. Relais/Equipment)
+  - Standortangaben wie bei Wetter/`!blitz`: Ort, Koordinaten, Maidenhead-Grid
+  - Warnung per **DM** (pro Treffer-Punkt) und **eine** Kanalnachricht (Kurzname + Distanz + Label)
+  - Standard: aktiv (Opt-out), Home-Radius **8 km** (1–10 km), Cooldown **60 min** **pro Watch-Punkt** (+ Kanal), Bot-Node ausgeschlossen
+  - Steuerung nur für die eigene Node:
+    - `!blitzwatch` — Status; `!blitzwatch?` — Einstell-Hilfe
+    - `on` / `off` — alle Warnungen
+    - `5km` — Home-Radius (Default für neue Zusatzorte)
+    - `home <Ort|Coords|Grid>` / `home gps` — Home Fix bzw. wieder GPS
+    - `add [Nkm] <…>` — Zusatzort (max. 3); `N 5km` — Radius Slot N; `del N` — löschen
+    - **`!blitzwatch web`** (Alias `set`) — nur per **DM**: 5-stelliger Code (ca. 15 Min., einmalig) für die Web-Einstellungen
+  - **Web:** öffentliches Menü **Blitzwatch** (`/mein-blitzwatch`) — Code eingeben, dann Home/Radius/Zusatzorte im Browser setzen
+  - Admin: Tab **Blitzwatch** (NodeDB-Liste, Suche, Editor); optional `[webAdmin] publicUrl` für den Link in der DM
+  - Nutzerhilfe: **`/mein-blitzwatch#blitzwatch`** (auch verlinkt unter `/befehle` → Wetter & Warnungen)
+  - Status in der NodeDB (Admin/öffentlich): z. B. **an 8km** / **an 8km+2** / **bereit 8km** / **aus**
+  - Config: `[location]` `blitzWatchEnabled` und zugehörige Parameter (siehe `config.template`)
+
+### Admin Mesh-Chat (DM & Kanal)
+
+- **Mesh-DM**: Feed scrollt nur nach unten, wenn du schon unten bist, der Peer gewechselt wird oder du selbst sendest — Hochscrollen bleibt stehen. Suche findet bisherige Chats **und** Nodes aus der NodeDB (neue DM starten).
+- **Kanal**: Dropdown mit allen Kanälen der verbundenen Meshtastic-Instanz (`get_channels_with_hash` beim Bot-Start, Refresh beim Öffnen der Seite); Umschalten von Feed und Sendeziel; Startkanal = `messagesChannel` (typisch `#1 MeshHessen`, `#0` oft ShortSlow)
 
 ### Web-UI (Flask)
 
 | URL | Inhalt |
 |-----|--------|
 | `/` | Öffentliches Statistik-Dashboard (Charts, BBS, NodeDB, Leaderboard 24h, DM-Zustellung 24h) |
-| `/befehle` | Befehlsliste inkl. `!trace` |
+| `/befehle` | Befehlsliste inkl. `!trace`; Link zur Blitzwatch-Erklärung |
+| `/mein-blitzwatch` | Blitzwatch-Einstellungen per DM-Code + ausführliche Hilfe (`#blitzwatch`) |
 | `/faq` | Hilfe & PKI-Check |
-| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Einstellungen, … |
+| `/impressum` | Impressum (Angaben aus `[webAdmin]`) |
+| `/datenschutz` | Datenschutzhinweise |
+| `/admin` | Login: BBS, DM, Logs, MOTD, Scheduler, News, NodeDB, Node Settings, Channel-Test, Blitzwatch, Einstellungen, **API**, … |
+| `/admin/api` | Service-API: einschalten, API-Key einmalig erzeugen, Doku, Request-Log |
+| `/api/v1/dm` | Service-API (Token): Text-DM an eine Node senden — für externe Dienste wie das MQTT-Webadmin (Watchcat) |
+| `/api/v1/whoami` | Service-API (Token): verbundene Bot-Radios / Node-IDs |
 
 **Öffentliches Dashboard:** Metriken, Aktivitätscharts, Leaderboard (24-Stunden-Ansicht), BBS, NodeDB — ohne interne Log-Warnungen/Fehler-Kacheln.
 
-**Admin-Bereich** (Tabs): Übersicht, DM, News, Messages, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, BBS, Umfragen, Einstellungen, Banliste, Logs.
+**Admin-Bereich** (Tabs): Übersicht, DM, News, Kanal, NodeDB, **Node Settings**, Admin, MOTD, Scheduler, **Channel-Test**, **Blitzwatch**, BBS, Umfragen, Einstellungen, **API**, Banliste, Logs.
 
-- **MOTD** und **News**: Text bearbeiten plus automatischer Versand (Rhythmus, Kanal, Interface) — unabhängig vom allgemeinen Scheduler
-- **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …)
-- **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot)
-- Einheitliche **Top-Navigation** (Statistik, Befehle, BBS, NodeDB, FAQ) in öffentlichem und Admin-Bereich
-- Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template))
+- **MOTD** und **News**: Text bearbeiten plus automatischer Versand — Zeitplan mit klarer UI; Kanalwahl aus der Meshtastic-Instanz
+- **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …) mit derselben Intervall-UI und Kanalwahl vom Radio
+- **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot) sowie **Mesh-Kanäle** (Name, Rolle, PSK, Up-/Downlink je Slot 0–7)
+- **Blitzwatch (Admin):** NodeDB-Liste mit Suche; Nutzer-Einstellungen (Home, Radius, Zusatzorte)
+- Einheitliche **Top-Navigation** (Statistik, Befehle, Blitzwatch, BBS, NodeDB, FAQ); Footer: Impressum · Datenschutz · GitHub
+- Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template)); optional `publicUrl`, Impressumsfelder
+- **Service-API** (optional, Tab **API**): `POST /api/v1/dm` sendet eine Text-DM (`{"node_id": "!aabbccdd", "text": "…"}`, optional `channel`/`interface`), `GET /api/v1/whoami` liefert Bot-Node-IDs. Auth per `Authorization: Bearer <token>` (oder `X-Api-Token`). Key wird im Admin zufällig erzeugt und **nur einmal** angezeigt; in der Config liegt der SHA-256-Hash (`api_token_hash`), Schalter `api_enabled`. Optional Env `HESSENBOT_API_TOKEN`. Ohne aktiven Token: `503`. Rate-Limit 30/min; Request-Audit in `logs/service_api.log`. Lange Texte chunkt der Bot wie gewohnt; DM-Zustell-ACKs über die bestehende DM-Statistik
+
 
 ### Kernfunktionen (aus meshing-around, beibehalten)
 
 - Keyword-Responder, Notfall-Stichwörter (112, …)
-- **BBS** (Posten, Lesen, DM, Link zwischen Bots)
+- **BBS** (Posten, Lesen, DM, Link zwischen Bots; optional DM-Lesebestätigung `bbspost ack` / `ack <id>`)
 - **LLM** (Ollama / OpenWebUI, optional)
 - **Solar / HF** (`!solar`, `!hfcond`, `!sun`, `!moon`, `!howtall`)
 - Scheduler, File-Monitor (`!readnews`), Sentry-Nähe, QRZ-Begrüßung, Inventar/Checklist (optional)
@@ -138,19 +177,22 @@ cp config.template config.ini
 | Befehl | Beschreibung |
 |--------|----------------|
 | `!cmd` | Kurze Befehlsliste (aktivierte Traps) |
-| `!ping` / `!pong` / `!test` | QSL mit Ort, Hops, LoRa/MQTT |
+| `!ping` / `!test` | QSL mit Ort, optional Grid, Hops, SNR/MQTT |
 | `!trace` / `!trace MHH` | Traceroute zu dir bzw. Ziel-Station (Ergebnis per DM, Warteschlange) |
 | `!trace?` | Kurzhilfe zu `!trace` |
 | `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
-| `!ack` | Wie Ping, Keyword ACK |
-| `!warning` | NINA/Katwarn für **deinen** Standort |
+| `!ack` | Wie Ping; bei wartender ACK-DM: Nutzer-Lesebestätigung (`ack <id>`) |
+| `!bbspost ack @Node #Text` | BBS-DM mit Lesebestätigung (Config `bbsDmUserAckEnabled`) |
+| `!warning` / `!warning Fulda` | NINA/Katwarn für deinen Standort oder angegebenen Ort |
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
-| `!wx` / `!wxc` | Wetter (Open-Meteo) |
-| `!uv` / `!regen` / `!blitz` | UV-Index, Regenradar, Blitz (Live + Vorhersage) |
+| `!wx` / `!wx Fulda` / `!wx JO40AA` | Wetter (Open-Meteo); ohne Ort: Node-GPS bzw. Positionsanfrage |
+| `!uv` / `!regen` / `!blitz` | UV, Regen, Blitz — optional Ort/Koordinaten; sonst wie `!wx` |
+| `!blitzwatch` / `?` / `on` / `off` / `home` / `add` / `del` | Blitz-Nähe: Home + bis 3 Zusatzorte |
+| `!blitzwatch web` | DM: Code für Web-Einstellungen (`/mein-blitzwatch`) |
 | `!metar` / `!metar EDDF` | METAR nächster Flughafen bzw. ICAO |
-| `!whereami` | Ortsname (Geocoding) + Höhe falls übertragen |
+| `!whereami` | Adresse der eigenen Node; ohne GPS: Positionsanfrage, sonst Hinweis |
 | `!loc` | Letzte Position eines Knotens (NodeDB / Mesh-Karte) inkl. Höhe |
-| `!howfar` / `!howfar reset` | Zurückgelegte Strecke seit letztem Aufruf |
+| `!howfar` / `!howfar reset` | Zurückgelegte Strecke seit letztem Aufruf (braucht GPS) |
 | `!howtall <Schatten>` | Höhe per Sonnenwinkel (Schattenlänge in m/ft) |
 | `!messages` | Letzte Nachrichten von Kanal 1 (ohne Bot-Befehle) |
 | `!readnews` | News aus `data/news.txt` (oder `{quelle}_news.txt`) |
@@ -171,6 +213,10 @@ cmdBang = True
 enabled = True
 enableDEalerts = True
 UseMeteoWxAPI = True
+# Positionsanfrage wenn Node-GPS fehlt (Timeout/Cooldown siehe config.template)
+locationRequestEnabled = True
+locationRequestTimeoutSec = 25
+locationRequestCooldownSec = 60
 
 [messagingSettings]
 wantAckOnDm = True
@@ -194,14 +240,7 @@ news_file_path = data/news.txt
 enabled = True
 ```
 
-`cmdBang = True` — normale Befehle beginnen mit `!`. Ausnahme: **Channel-Test** (siehe oben).
-
-## Was in diesem Fork **nicht** mehr enthalten ist
-
-- Spiele (Blackjack, DopeWars, Quiz, …) und `modules/games/`
-- US-/UK-Alerts (NOAA EAS, FEMA iPAWS, USGS, UK-Scraper)
-- Legacy-Webserver `modules/web.py` und `etc/www/` (Port 8420)
-- `launch.sh game` / Display-Spiele
+`cmdBang = True` — im Kanal beginnen Befehle mit `!`. Per DM auch ohne `!`, wenn der Befehl das erste Wort ist. Weitere Ausnahme: **Channel-Test** (nacktes `test`/`Test`). Unbekannte DMs: einmal Welcome, danach kurzer Hinweis max. alle 5 Min. (mit Link zu `/befehle` wenn `publicUrl` gesetzt).
 
 ## Entwicklung & Plattform
 
@@ -233,7 +272,11 @@ touch .checkall && python3 modules/test_bot.py
 
 ## Lizenz & Haftung
 
+**Lizenz:** [GNU GPL v3](LICENSE) (wie Upstream meshing-around).
+
 Meshtastic® ist eine eingetragene Marke von Meshtastic LLC. Die Meshtastic-Softwarekomponenten stehen unter verschiedenen Lizenzen — siehe GitHub. **Keine Gewährleistung — Nutzung auf eigenes Risiko.**
+
+Sicherheitsmeldungen: siehe [SECURITY.md](SECURITY.md).
 
 ## Credits (Upstream)
 

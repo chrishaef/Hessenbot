@@ -69,7 +69,10 @@ def _sections() -> List[FaqSection]:
                 FaqEntry(
                     "Bot reagiert gar nicht",
                     (
-                        "Befehle beginnen meist mit <strong>!</strong>, z. B. <code>!ping</code> oder <code>!cmd</code>. "
+                        "Im <strong>Kanal</strong> beginnen Befehle mit <strong>!</strong>, "
+                        "z. B. <code>!ping</code> oder <code>!cmd</code>. "
+                        "Per <strong>DM</strong> reicht der Befehl als erstes Wort auch ohne "
+                        "<code>!</code> (z. B. <code>ping</code>). "
                         "Nur die Zeile senden, die mit dem Befehl beginnt — kein Text davor. "
                         "Welche Befehle dieser Bot unterstützt, steht unter "
                         '<a href="/befehle">Befehle</a> und mit <code>!cmd</code> im Mesh.'
@@ -94,6 +97,14 @@ def _sections() -> List[FaqSection]:
                         "z. B. <code>!metar?</code> oder <code>!cmd?</code>."
                     ),
                 ),
+                FaqEntry(
+                    "Channel-Test: nacktes „test“",
+                    (
+                        "Auf manchen Kanälen antwortet der Bot auf <code>test</code> / <code>Test</code> "
+                        "<strong>ohne</strong> <code>!</code> direkt im Kanal (lange Antwort oder Emoji-Reaction). "
+                        "Alle anderen Befehle brauchen im Kanal weiterhin <code>!</code>."
+                    ),
+                ),
             ),
         ),
         FaqSection(
@@ -104,9 +115,20 @@ def _sections() -> List[FaqSection]:
                 FaqEntry(
                     "!wx, !metar, !whereami: kein Standort / kein GPS",
                     (
-                        "Der Bot nutzt die <strong>letzte bekannte Position deiner Node</strong> im Mesh. "
-                        "GPS am Gerät aktivieren, Position freigeben und kurz warten, bis deine Node "
-                        "im Netz sichtbar ist — danach Befehl erneut senden."
+                        "Der Bot nutzt Ort/Koordinaten in der Nachricht, sonst die "
+                        "<strong>letzte bekannte Position deiner Node</strong> (NodeDB/Mesh-Karte). "
+                        "Fehlt sie, fragt er deine Node kurz per Mesh nach GPS und holt den Befehl "
+                        "automatisch nach. Timeout: z. B. <code>!wx Fulda</code> oder "
+                        "<code>!wx 50.34 8.76</code> senden. "
+                        "GPS am Gerät aktivieren und Position freigeben hilft dauerhaft."
+                    ),
+                ),
+                FaqEntry(
+                    "Befehl ohne ! per DM",
+                    (
+                        "Per Direktnachricht reichen <code>ping</code>, <code>wx</code> usw. als "
+                        "<strong>erstes Wort</strong> (mit oder ohne <code>!</code>). "
+                        "Im Kanal weiterhin mit <code>!</code> (Ausnahme: Channel-Test <code>test</code>)."
                     ),
                 ),
                 FaqEntry(
@@ -114,6 +136,19 @@ def _sections() -> List[FaqSection]:
                     (
                         "Mit ICAO-Code, z. B. <code>!metar EDDF</code>. "
                         "Ohne Argument: METAR des nächsten Flugplatzes zu deiner Position."
+                    ),
+                ),
+                FaqEntry(
+                    "Blitzwatch: Home und Zusatzorte",
+                    (
+                        "Automatische Blitz-Nähe-Warnung für deinen Standort (GPS oder Fix) "
+                        "und bis zu <strong>3 Zusatzorte</strong> (Relais/Equipment). "
+                        "Steuerung per <code>!blitzwatch</code>, "
+                        "<code>home …</code>, <code>add …</code>, <code>del N</code>, "
+                        "oder im Browser: <code>!blitzwatch web</code> (DM) und Menü "
+                        '<a href="/mein-blitzwatch">Blitzwatch</a>. '
+                        "Ausführliche Erklärung: "
+                        '<a href="/mein-blitzwatch#blitzwatch">so funktioniert’s</a>.'
                     ),
                 ),
             ),
@@ -188,6 +223,10 @@ def render_faq_page_body(pki_result: Optional[dict] = None) -> str:
   <p class="text-muted mb-0">
     Tipps für Nutzer im Meshhessen-Netz — Befehle im Funknetz, DMs und typische Stolpersteine.
     Alle Befehle: <a href="/befehle">Befehle</a>.
+    Quellcode &amp; ausführliche Doku:
+    <a href="https://github.com/chrishaef/Hessenbot" target="_blank" rel="noopener noreferrer">
+      <i class="bi bi-github"></i> GitHub
+    </a>.
   </p>
 </div>"""
 

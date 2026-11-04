@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # Usage: python3 script/injectDM.py -s NODEID -d NODEID -m "message"
-# meshing-around - helper script - enable the bbsAPI in config.ini first
+# Hessenbot - helper script - enable the bbsAPI in config.ini first
 import sys
 import os
 import argparse
 
 # welcome header
-print("meshing-around: injectDM.py -s NODEID -d NODEID -m 'Hello World'")
+print("Hessenbot: injectDM.py -s NODEID -d NODEID -m 'Hello World'")
 print("Auto-Inject DM messages to data/bbsdm.pkl")
 print(" needs config.ini [bbs] bbsAPI_enabled = True ")
 print("---------------------------------------------------------------")

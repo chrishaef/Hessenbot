@@ -22,6 +22,48 @@
     });
   }
 
+  function refreshButton() {
+    return document.getElementById("dash-refresh-btn");
+  }
+
+  function currentView() {
+    var hash = (window.location.hash || "").replace("#", "");
+    if (VALID_VIEWS.indexOf(hash) >= 0) {
+      return hash;
+    }
+    var visible = "stats";
+    panels().forEach(function (panel) {
+      if (!panel.hidden) {
+        visible = panel.getAttribute("data-dash-panel") || "stats";
+      }
+    });
+    if (VALID_VIEWS.indexOf(visible) >= 0) {
+      return visible;
+    }
+    try {
+      var stored = localStorage.getItem(STORAGE_KEY);
+      if (VALID_VIEWS.indexOf(stored) >= 0) {
+        return stored;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    return "stats";
+  }
+
+  function refreshDashboard() {
+    var target = normalizeView(currentView());
+    var path = window.location.pathname || "/";
+    var nextHash = target === "stats" ? "" : "#" + target;
+    var nextUrl = path + nextHash;
+    var currentUrl = path + (window.location.hash || "");
+    if (currentUrl === nextUrl) {
+      window.location.reload();
+      return;
+    }
+    window.location.href = nextUrl;
+  }
+
   function setView(view) {
     var target = normalizeView(view);
     panels().forEach(function (panel) {
@@ -59,6 +101,12 @@
         setView(btn.getAttribute("data-dash-view"));
       });
     });
+    var refreshBtn = refreshButton();
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", function () {
+        refreshDashboard();
+      });
+    }
     window.addEventListener("hashchange", function () {
       setView(viewFromHash());
     });

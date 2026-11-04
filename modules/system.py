@@ -32,15 +32,14 @@ from modules.locale_de import HELP_PREFIX
 
 help_message = HELP_PREFIX
 asyncLoop = asyncio.new_event_loop()
-games_enabled = False
 multiPingList = [{'message_from_id': 0, 'count': 0, 'type': '', 'deviceID': 0, 'channel_number': 0, 'startCount': 0}]
 interface_retry_count = 3
 _interface_reconnecting: set[int] = set()
 
 # Ping Configuration
 if ping_enabled:
-    # ping, pinging, ack, testing, test, pong, trace
-    trap_list_ping = ("ping", "pinging", "ack", "testing", "test", "pong", "trace", "🔔", "cq","cqcq", "cqcqcq")
+    # ping, ack, test, cq, trace
+    trap_list_ping = ("ping", "ack", "test", "trace", "🔔", "cq", "cqcq", "cqcqcq")
     trap_list = trap_list + trap_list_ping
     help_message = help_message + "ping, trace"
 
@@ -117,6 +116,12 @@ if location_enabled:
 
         trap_list = trap_list + trap_list_wx_extra
         help_message = help_message + ", uv, regen, blitz"
+    if blitz_watch_enabled and location_enabled:
+        from modules.blitzwatch import initialize_blitzwatch_database, trap_list_blitzwatch
+
+        trap_list = trap_list + trap_list_blitzwatch
+        help_message = help_message + ", blitzwatch"
+        initialize_blitzwatch_database()
     if repeater_lookup != False:
         help_message = help_message + ", rlist"
 
@@ -164,8 +169,6 @@ if llm_enabled:
     from modules.llm import * # from the spudgunman/meshing-around repo
     trap_list = trap_list + trap_list_llm # items ask:
     help_message = help_message + ", askai"
-
-gamesCmdList = ""
 
 # Sentry Configuration
 if sentry_enabled:
@@ -310,6 +313,119 @@ for i in range(1, 10):
 # Fetch channel list from each device
 _channel_cache = None
 
+
+def _modem_preset_label(node) -> str:
+    """Human LoRa preset name (ShortSlow, LongFast, …) for unnamed PRIMARY channels."""
+    try:
+        from meshtastic.protobuf import config_pb2
+
+        preset = int(node.localConfig.lora.modem_preset)
+        raw = config_pb2.Config.LoRaConfig.ModemPreset.Name(preset)
+        return raw.replace("_", " ").title().replace(" ", "")
+    except Exception:
+        return ""
+
+
+def _psk_admin_string(psk) -> str:
+    """PSK as used by the Meshtastic CLI: none / default / simpleN / base64:…"""
+    try:
+        raw = bytes(psk) if psk else b""
+    except Exception:
+        return ""
+    if not raw or raw == b"\x00":
+        return "none"
+    if len(raw) == 1:
+        if raw[0] == 1:
+            return "default"
+        if raw[0] > 1:
+            return f"simple{raw[0] - 1}"
+    try:
+        from meshtastic import util as mesh_util
+
+        return mesh_util.toStr(raw)
+    except Exception:
+        import base64
+
+        return "base64:" + base64.b64encode(raw).decode("ascii")
+
+
+def _channel_display_name(name: str, index: int, role: int | str, preset_label: str) -> str:
+    n = (name or "").strip()
+    if n and not n.lower().startswith("channel"):
+        return n
+    role_s = str(role).upper() if not isinstance(role, int) else (
+        {0: "DISABLED", 1: "PRIMARY", 2: "SECONDARY"}.get(role, "")
+    )
+    if role_s == "PRIMARY" and preset_label:
+        return preset_label
+    return f"Kanal {index}"
+
+
+def read_interface_channel_slots(iface_id: int) -> list:
+    """Live channel slots 0–7 from the connected node's protobuf (not the hash cache).
+
+    Each item: index, name, label, role, role_name, psk, psk_kind, uplink, downlink.
+    """
+    iface = globals().get(f"interface{iface_id}")
+    if not iface or not globals().get(f"interface{iface_id}_enabled"):
+        return []
+    node = getattr(iface, "localNode", None)
+    if node is None:
+        try:
+            node = iface.getNode("^local")
+        except Exception:
+            return []
+    raw = getattr(node, "channels", None)
+    if not raw:
+        return []
+    preset = _modem_preset_label(node)
+    role_names = {0: "DISABLED", 1: "PRIMARY", 2: "SECONDARY"}
+    out = []
+    for i, ch in enumerate(list(raw)[:8]):
+        if ch is None:
+            continue
+        try:
+            settings = ch.settings
+            role_i = int(ch.role)
+            try:
+                idx = int(ch.index)
+            except Exception:
+                idx = i
+            if idx < 0:
+                idx = i
+            name = str(getattr(settings, "name", "") or "").strip()
+            psk_bytes = bytes(settings.psk) if getattr(settings, "psk", None) else b""
+            try:
+                from meshtastic import util as mesh_util
+
+                psk_kind = mesh_util.pskToString(psk_bytes)
+            except Exception:
+                psk_kind = ""
+            try:
+                from meshtastic.util import generate_channel_hash
+
+                ch_hash = int(generate_channel_hash(name, psk_bytes))
+            except Exception:
+                ch_hash = None
+            out.append(
+                {
+                    "index": idx if 0 <= idx <= 7 else i,
+                    "name": name,
+                    "label": _channel_display_name(name, idx if idx >= 0 else i, role_i, preset),
+                    "role": role_i,
+                    "role_name": role_names.get(role_i, str(role_i)),
+                    "psk": _psk_admin_string(psk_bytes),
+                    "psk_kind": psk_kind,
+                    "hash": ch_hash,
+                    "uplink": bool(getattr(settings, "uplink_enabled", False)),
+                    "downlink": bool(getattr(settings, "downlink_enabled", False)),
+                }
+            )
+        except Exception as e:
+            logger.debug(f"System: channel slot {i} parse failed: {e}")
+    return out
+
+
 def build_channel_cache(force_refresh: bool = False):
     """
     Build and cache channel_list from interfaces once (or when forced).
@@ -323,33 +439,50 @@ def build_channel_cache(force_refresh: bool = False):
         if not globals().get(f'interface{i}') or not globals().get(f'interface{i}_enabled'):
             continue
         try:
-            node = globals()[f'interface{i}'].getNode('^local')
-            # Try to use the node-provided channel/hash table if available
-            try:
-                ch_hash_table_raw = node.get_channels_with_hash()
-                #print(f"System: Device{i} Channel Hash Table: {ch_hash_table_raw}")
-            except Exception:
-                logger.warning(f"System: API version error update API `pip3 install --upgrade meshtastic[cli]`")
-                ch_hash_table_raw = []
-
             channel_dict = {}
-            # Use the hash table as the source of truth for channels
-            if isinstance(ch_hash_table_raw, list):
-                for entry in ch_hash_table_raw:
-                    channel_name = entry.get("name", "").strip()
-                    channel_number = entry.get("index")
-                    ch_hash = entry.get("hash")
-                    role = entry.get("role", "")
-                    # Always add PRIMARY/SECONDARY channels, even if name is empty
-                    if role in ("PRIMARY", "SECONDARY"):
-                        channel_dict[channel_name if channel_name else f"Channel{channel_number}"] = {
-                            "number": channel_number,
-                            "hash": ch_hash
-                        }
-            elif isinstance(ch_hash_table_raw, dict):
-                for channel_name, ch_hash in ch_hash_table_raw.items():
-                    channel_dict[channel_name] = {"number": None, "hash": ch_hash}
-            # Always add the interface, even if no named channels
+            slots = read_interface_channel_slots(i)
+            if slots:
+                for slot in slots:
+                    if slot["role_name"] not in ("PRIMARY", "SECONDARY"):
+                        continue
+                    label = slot["label"] or slot["name"] or f"Channel{slot['index']}"
+                    # Unique dict key: prefer real name, else label+index
+                    key = slot["name"] or f"{label}#{slot['index']}"
+                    channel_dict[key] = {
+                        "number": slot["index"],
+                        "hash": slot.get("hash"),
+                        "label": label,
+                        "role": slot["role_name"],
+                    }
+            else:
+                # Fallback: hash table (older API / channels not yet loaded)
+                node = globals()[f'interface{i}'].getNode('^local')
+                try:
+                    ch_hash_table_raw = node.get_channels_with_hash()
+                except Exception:
+                    logger.warning(f"System: API version error update API `pip3 install --upgrade meshtastic[cli]`")
+                    ch_hash_table_raw = []
+                preset = _modem_preset_label(node)
+                if isinstance(ch_hash_table_raw, list):
+                    for entry in ch_hash_table_raw:
+                        channel_name = (entry.get("name") or "").strip()
+                        channel_number = entry.get("index")
+                        ch_hash = entry.get("hash")
+                        role = entry.get("role", "")
+                        if role in ("PRIMARY", "SECONDARY"):
+                            label = _channel_display_name(
+                                channel_name, channel_number, role, preset
+                            )
+                            key = channel_name or f"{label}#{channel_number}"
+                            channel_dict[key] = {
+                                "number": channel_number,
+                                "hash": ch_hash,
+                                "label": label,
+                                "role": role,
+                            }
+                elif isinstance(ch_hash_table_raw, dict):
+                    for channel_name, ch_hash in ch_hash_table_raw.items():
+                        channel_dict[channel_name] = {"number": None, "hash": ch_hash}
             cache.append({"interface_id": i, "channels": channel_dict})
             logger.debug(f"System: Fetched Channel List from Device{i} (cached)")
         except Exception as e:
@@ -357,6 +490,56 @@ def build_channel_cache(force_refresh: bool = False):
 
     _channel_cache = cache
     return _channel_cache
+
+
+def normalize_mesh_channel_index(raw, iface_id: int = 1) -> int:
+    """Map MeshPacket.channel (local slot 0–7 or XOR-hash) to the local slot index."""
+    if raw is None or raw is False:
+        return 0
+    try:
+        raw_i = int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+    hash_to_idx: dict[int, int] = {}
+    known_idx = set()
+    try:
+        for slot in read_interface_channel_slots(int(iface_id or 1)) or []:
+            if slot.get("role_name") not in ("PRIMARY", "SECONDARY"):
+                continue
+            idx = int(slot["index"])
+            known_idx.add(idx)
+            h = slot.get("hash")
+            if h is not None:
+                hash_to_idx[int(h)] = idx
+    except Exception:
+        pass
+
+    if not hash_to_idx:
+        try:
+            for device in build_channel_cache() or []:
+                if iface_id and device.get("interface_id") != iface_id:
+                    continue
+                for info in (device.get("channels") or {}).values():
+                    if not isinstance(info, dict):
+                        continue
+                    num = info.get("number")
+                    h = info.get("hash")
+                    if num is not None:
+                        known_idx.add(int(num))
+                    if h is not None and num is not None:
+                        hash_to_idx[int(h)] = int(num)
+        except Exception:
+            pass
+
+    if raw_i > 7:
+        return int(hash_to_idx.get(raw_i, raw_i))
+    if raw_i in hash_to_idx and raw_i not in known_idx:
+        return int(hash_to_idx[raw_i])
+    if 0 <= raw_i <= 7:
+        return raw_i
+    return int(hash_to_idx.get(raw_i, raw_i))
+
 
 def refresh_channel_cache():
     """Force rebuild of channel cache (call only when channel config changes)."""
@@ -383,7 +566,8 @@ def resolve_channel_name(channel_number, rxNode=1, interface_obj=None):
                 try:
                     if isinstance(info, dict):
                         if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
-                            return (chan_name, info.get('number') or info.get('hash'))
+                            display = (info.get("label") or chan_name or "").strip()
+                            return (display, info.get('number') or info.get('hash'))
                     else:
                         if str(info) == str(channel_number):
                             return (chan_name, info)
@@ -399,7 +583,8 @@ def resolve_channel_name(channel_number, rxNode=1, interface_obj=None):
                     try:
                         if isinstance(info, dict):
                             if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
-                                return (chan_name, info.get('number') or info.get('hash'))
+                                display = (info.get("label") or chan_name or "").strip()
+                                return (display, info.get('number') or info.get('hash'))
                     except Exception:
                         continue
     except Exception as e:
@@ -507,11 +692,9 @@ def cleanup_memory():
         #                       ping.get('count', 0) > 0]
 
         # Clean up stale entries from cmd rate tracker
-        if _cmd_rate_tracker:
-            cutoff = current_time - cmdRateLimitWindow
-            stale = [k for k, ts_list in _cmd_rate_tracker.items() if not any(t > cutoff for t in ts_list)]
-            for k in stale:
-                del _cmd_rate_tracker[k]
+        from modules.cmd_throttle import cleanup_throttle_state
+
+        cleanup_throttle_state(current_time)
 
         # Clean up stale nodeDB entries (only when >1000 and older than 60 days)
         _ndb.cleanup_nodedb()
@@ -535,9 +718,75 @@ def mesh_hops_consumed(hop_away: int, hop_start: int, hop_limit: int) -> int:
 _TRACE_HOP_CACHE: dict[int, tuple[int, float]] = {}
 _TRACE_HOP_CACHE_TTL = 86400.0
 
+# Hop counts learned from packets with usable hopStart/hopLimit (survives MQTT
+# copies that arrive with hopStart == hopLimit and overwrite NodeDB hopsAway to 0).
+_PACKET_HOP_CACHE: dict[int, tuple[int, float]] = {}
+_PACKET_HOP_CACHE_TTL = 86400.0
+_HOP_CACHE_PATH = "data/hop_cache.json"
+_hop_cache_loaded = False
+_hop_cache_dirty = False
+
+
+def _load_hop_caches() -> None:
+    global _hop_cache_loaded
+    if _hop_cache_loaded:
+        return
+    _hop_cache_loaded = True
+    try:
+        path = path_in_repo(_HOP_CACHE_PATH)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    now = time.time()
+    for nid, entry in (data.get("packet") or {}).items():
+        try:
+            hops = int(entry.get("hops") or 0)
+            ts = float(entry.get("ts") or 0)
+            if hops > 0 and now - ts <= _PACKET_HOP_CACHE_TTL:
+                _PACKET_HOP_CACHE[int(nid)] = (hops, ts)
+        except (TypeError, ValueError, AttributeError):
+            continue
+    for nid, entry in (data.get("trace") or {}).items():
+        try:
+            hops = int(entry.get("hops") or 0)
+            ts = float(entry.get("ts") or 0)
+            if hops > 0 and now - ts <= _TRACE_HOP_CACHE_TTL:
+                _TRACE_HOP_CACHE[int(nid)] = (hops, ts)
+        except (TypeError, ValueError, AttributeError):
+            continue
+
+
+def _save_hop_caches() -> None:
+    global _hop_cache_dirty
+    if not _hop_cache_dirty:
+        return
+    try:
+        path = path_in_repo(_HOP_CACHE_PATH)
+        ensure_parent_dir(path)
+        payload = {
+            "packet": {
+                str(nid): {"hops": hops, "ts": ts}
+                for nid, (hops, ts) in _PACKET_HOP_CACHE.items()
+            },
+            "trace": {
+                str(nid): {"hops": hops, "ts": ts}
+                for nid, (hops, ts) in _TRACE_HOP_CACHE.items()
+            },
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        _hop_cache_dirty = False
+    except Exception as exc:
+        logger.debug(f"System: hop cache save failed: {exc}")
+
 
 def record_mesh_hops_from_trace(node_id: int, hops: int) -> None:
     """Remember mesh hop count from a successful traceroute (for ping QSL fallback)."""
+    global _hop_cache_dirty
+    _load_hop_caches()
     try:
         hops_i = int(hops)
         node_i = int(node_id)
@@ -545,10 +794,21 @@ def record_mesh_hops_from_trace(node_id: int, hops: int) -> None:
         return
     if hops_i <= 0:
         return
-    _TRACE_HOP_CACHE[node_i] = (hops_i, time.time())
+    now = time.time()
+    _TRACE_HOP_CACHE[node_i] = (hops_i, now)
+    # Keep the shared hop cache warm so !test matches app NodeDB hopsAway sooner.
+    _PACKET_HOP_CACHE[node_i] = (hops_i, now)
+    _hop_cache_dirty = True
+    try:
+        _ndb.update_node(node_i, hops_away=hops_i)
+        _ndb.save_nodedb()
+    except Exception:
+        pass
+    _save_hop_caches()
 
 
 def mesh_hops_from_trace_cache(node_id: int, ttl: float = _TRACE_HOP_CACHE_TTL) -> int | None:
+    _load_hop_caches()
     entry = _TRACE_HOP_CACHE.get(int(node_id))
     if not entry:
         return None
@@ -557,6 +817,57 @@ def mesh_hops_from_trace_cache(node_id: int, ttl: float = _TRACE_HOP_CACHE_TTL) 
         _TRACE_HOP_CACHE.pop(int(node_id), None)
         return None
     return hops if hops > 0 else None
+
+
+def record_mesh_hops_from_packet(node_id: int, hops: int) -> None:
+    """Remember hop count from a packet with hopStart > hopLimit (or hopsAway > 0)."""
+    global _hop_cache_dirty
+    _load_hop_caches()
+    try:
+        hops_i = int(hops)
+        node_i = int(node_id)
+    except (TypeError, ValueError):
+        return
+    if hops_i <= 0:
+        return
+    prev = _PACKET_HOP_CACHE.get(node_i)
+    _PACKET_HOP_CACHE[node_i] = (hops_i, time.time())
+    _hop_cache_dirty = True
+    try:
+        _ndb.update_node(node_i, hops_away=hops_i)
+    except Exception:
+        pass
+    # Persist when value changes or first seen for this node.
+    if not prev or prev[0] != hops_i:
+        try:
+            _ndb.save_nodedb()
+        except Exception:
+            pass
+        _save_hop_caches()
+
+
+def mesh_hops_from_packet_cache(
+    node_id: int, ttl: float = _PACKET_HOP_CACHE_TTL
+) -> int | None:
+    _load_hop_caches()
+    entry = _PACKET_HOP_CACHE.get(int(node_id))
+    if not entry:
+        return None
+    hops, ts = entry
+    if time.time() - ts > ttl:
+        _PACKET_HOP_CACHE.pop(int(node_id), None)
+        return None
+    return hops if hops > 0 else None
+
+
+def mesh_hops_from_persistent_nodedb(node_id: int) -> int | None:
+    """Positive hopsAway from data/nodedb.json (survives interface NodeDB resets to 0)."""
+    try:
+        _ndb._ensure_nodedb_loaded()
+        hops = _ndb.get_node_hops_away(int(node_id))
+        return hops if hops > 0 else None
+    except Exception:
+        return None
 
 
 def _interface_node(node_id: int, node_int: int = 1) -> dict | None:
@@ -655,10 +966,13 @@ def resolve_mesh_hop_count(
     Mesh hop count for ping/QSL display.
 
     Local RF (serial/BLE): packet metadata only — accurate when a radio is connected.
-    Tunneled (MQTT/Gateway/TCP meshtasticd): optional fallbacks when metadata is empty.
+    Tunneled (MQTT/Gateway/TCP meshtasticd): when hopStart==hopLimit (often 0 via MQTT),
+    prefer NodeDB hopsAway / learned hop cache — same idea as the app node list — before
+    falling back to traceroute cache.
     """
     hop_count = mesh_hops_consumed(hop_away, hop_start, hop_limit)
     if hop_count > 0:
+        record_mesh_hops_from_packet(message_from_id, hop_count)
         return hop_count, "packet"
 
     tunneled = is_tunneled_mesh_packet(packet, transport_mechanism)
@@ -670,9 +984,25 @@ def resolve_mesh_hop_count(
     if not getattr(st, "mqtt_hop_fallbacks", True):
         return hop_count, "tunneled-strict"
 
-    ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=True)
+    # Prefer NodeDB hopsAway first (what the Meshtastic app shows for the node),
+    # then our persistent nodedb / cache of earlier packets with hopStart > hopLimit.
+    ndb_hops = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=False)
     if ndb_hops is not None and ndb_hops > 0:
+        record_mesh_hops_from_packet(message_from_id, ndb_hops)
         return ndb_hops, "nodedb"
+
+    persistent_hops = mesh_hops_from_persistent_nodedb(message_from_id)
+    if persistent_hops is not None and persistent_hops > 0:
+        return persistent_hops, "nodedb-file"
+
+    cached_hops = mesh_hops_from_packet_cache(message_from_id)
+    if cached_hops is not None and cached_hops > 0:
+        return cached_hops, "packet-cache"
+
+    # Soft MQTT hints (SNR → 1) only after real hopsAway / learned cache miss.
+    ndb_hint = mesh_hops_from_nodedb(message_from_id, node_int, mqtt_hints=True)
+    if ndb_hint is not None and ndb_hint > 0:
+        return ndb_hint, "nodedb-hint"
 
     trace_hops = mesh_hops_from_trace_cache(message_from_id)
     if trace_hops is not None and trace_hops > 0:
@@ -749,23 +1079,93 @@ def bot_place_name() -> str:
     return "Meshhessen"
 
 
+def bot_maidenhead() -> str:
+    """Maidenhead grid of the bot position (e.g. JO40AA)."""
+    try:
+        import maidenhead as mh
+
+        grid = mh.to_maiden(float(latitudeValue), float(longitudeValue))
+        return str(grid or "").strip().upper()[:10]
+    except Exception:
+        return ""
+
+
+_PING_TITLE = {
+    "test": ("🎙", "Test"),
+    "ping": ("🏓", "Ping"),
+    "ack": ("✋", "ACK"),
+    "cq": ("📡", "CQ"),
+    "qsl": ("✅", "QSL"),
+}
+
+
+def _fmt_rf_signal(snr, rssi) -> str:
+    """SNR / RSSI for LoRa replies; skip empty or sentinel values."""
+    parts: list[str] = []
+    try:
+        sv = float(snr)
+        if sv not in (0.0, -128.0):
+            parts.append(f"SNR {sv:.1f}".rstrip("0").rstrip("."))
+    except (TypeError, ValueError):
+        pass
+    try:
+        rv = float(rssi)
+        if rv != 0.0:
+            iv = int(round(rv))
+            parts.append(f"RSSI {iv}")
+    except (TypeError, ValueError):
+        pass
+    return " · ".join(parts)
+
+
+def _ping_signal_line(hop: str, snr=None, rssi=None) -> str:
+    hop_n, _link = _parse_hop_info(hop)
+    hop_s = (hop or "").strip()
+    upper = hop_s.upper()
+    if "GATEWAY" in upper or hop_s.startswith("Gateway"):
+        via = "Gateway"
+    elif "MQTT" in upper:
+        via = "MQTT"
+    else:
+        via = None
+    if via:
+        if hop_n is None or hop_n == 0:
+            return f"☁️ über {via}"
+        return f"☁️ über {via} · {_hop_count_label(hop_n)}"
+    if hop_n is None:
+        hop_txt = "? Hops"
+    elif hop_n == 0:
+        hop_txt = "direkt"
+    else:
+        hop_txt = _hop_count_label(hop_n)
+    sig = _fmt_rf_signal(snr, rssi)
+    if sig:
+        return f"📶 {sig} · {hop_txt}"
+    return f"📶 {hop_txt}"
+
+
 def format_ping_qsl_response(
     message_from_id,
     deviceID,
     hop: str,
-    keyword: str = "QSL",
+    keyword: str = "test",
+    snr=None,
+    rssi=None,
 ) -> str:
-    """
-    QSL-Antwort: LongName [NodeID] KEYWORD @ "Bot-Standort" | N Hops LoRa|MQTT
-    """
+    """Heard-confirmation: title, place, then RF signal or MQTT hops."""
     long_name = get_name_from_number(message_from_id, "long", deviceID)
     if not long_name or str(long_name).startswith("!"):
         long_name = get_name_from_number(message_from_id, "short", deviceID)
-    node_hex = decimal_to_hex(message_from_id)
+    key = (keyword or "test").strip().lower()
+    emoji, title = _PING_TITLE.get(key, ("🎙", (keyword or "Test").strip() or "Test"))
     place = bot_place_name()
-    hop_n, link = _parse_hop_info(hop)
-    hop_part = _hop_count_label(hop_n)
-    return f'{long_name} [{node_hex}] {keyword} @ "{place}" | {hop_part} {link}'
+    grid = bot_maidenhead()
+    loc = f"{place} {grid}".strip() if grid else place
+    return (
+        f"{emoji} {title} von {long_name}\n"
+        f"✅ vom Hessenbot in {loc} gehört\n"
+        f"{_ping_signal_line(hop, snr, rssi)}"
+    )
 
 
 def get_name_from_number(number, type='long', nodeInt=1):
@@ -805,6 +1205,19 @@ def get_name_from_number(number, type='long', nodeInt=1):
         return cached
 
     return str(decimal_to_hex(number))
+
+
+def format_dm_peer_for_log(node_id, nodeInt=1) -> str:
+    """Long name plus [!hex] so Mesh-DM UI can thread by stable node id."""
+    name = get_name_from_number(node_id, "long", nodeInt)
+    try:
+        hex_id = f"!{int(node_id):08x}"
+    except (TypeError, ValueError):
+        hex_id = str(decimal_to_hex(node_id))
+    if str(name).strip().lower() == hex_id.lower():
+        return f"[{hex_id}]"
+    return f"{name} [{hex_id}]"
+
 
 def get_num_from_short_name(short_name, nodeInt=1):
     # First, search the specified interface
@@ -1173,13 +1586,11 @@ def _nodedb_fresh_position(nodeID, nodeInt, round_digits):
 
 def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
     """
-    Returns [latitude, longitude] for a node.
-    Flow (same for all location commands): fresh (<=24h) NodeDB position →
-    mesh map snapshot → bot/config location.
+    Returns [latitude, longitude] for a node, or None if unknown.
+    Flow: fresh (<=24h) NodeDB position → mesh map snapshot.
+    Never falls back to bot/config lat/lon.
     """
     _ensure_mesh_map_positions_loaded()
-    fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
-    config_position = [latitudeValue, longitudeValue]
 
     fresh = _nodedb_fresh_position(nodeID, nodeInt, round_digits)
     if fresh:
@@ -1195,23 +1606,16 @@ def get_node_location(nodeID, nodeInt=1, channel=0, round_digits=2):
             lon = round(lon, round_digits)
         return [lat, lon]
 
-    if fuzz_config_location:
-        # Return fuzzed config location if no valid position found
-        return fuzzed_position
-    else:
-        return config_position
+    return None
 
 
 def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
-    """Returns [latitude, longitude, from_gps] for warning/location replies.
+    """Returns [latitude, longitude, from_gps] or None if unknown.
 
-    Same flow as get_node_location; from_gps is True when the location came from a
-    fresh NodeDB position or the mesh map, False when falling back to the bot
-    location.
+    from_gps is True when the location came from a fresh NodeDB position or the mesh map.
+    Never falls back to bot/config lat/lon.
     """
     _ensure_mesh_map_positions_loaded()
-    fuzzed_position = [round(latitudeValue, round_digits), round(longitudeValue, round_digits)]
-    config_position = [latitudeValue, longitudeValue]
 
     fresh = _nodedb_fresh_position(nodeID, nodeInt, round_digits)
     if fresh:
@@ -1226,9 +1630,46 @@ def get_node_location_with_source(nodeID, nodeInt=1, round_digits=2):
             lon = round(lon, round_digits)
         return [lat, lon, True]
 
-    if fuzz_config_location:
-        return [fuzzed_position[0], fuzzed_position[1], False]
-    return [config_position[0], config_position[1], False]
+    return None
+
+
+def format_location_source_note(from_gps=None, *, source=None, label=None) -> str:
+    """Clarify location origin (GPS or explicit place/coords argument)."""
+    src = source
+    if src is None:
+        if from_gps is True:
+            src = "gps"
+        elif from_gps is False:
+            src = "missing"
+    if src in ("arg-coords", "arg-grid", "arg-place"):
+        if label:
+            return f"📍 Standort: {label}"
+        return "📍 Standort (Angabe)"
+    if src == "gps":
+        return "📍 Standort bekannt"
+    if src in ("bot", "missing"):
+        return "📍 Standort unbekannt"
+    return ""
+
+
+def with_location_source_note(text: str, from_gps=None, *, source=None, label=None) -> str:
+    """Append location-source note to a reply when origin is known."""
+    note = format_location_source_note(from_gps, source=source, label=label)
+    if not note:
+        return text
+    text = (text or "").rstrip()
+    if not text:
+        return note
+    return f"{text}\n{note}"
+
+
+def location_source_as_from_gps(source: str):
+    """Map resolve_message_location source to legacy from_gps bool/None."""
+    if source == "gps":
+        return True
+    if source in ("bot", "missing"):
+        return False
+    return None
 
 async def get_closest_nodes(nodeInt=1,returnCount=3, channel=publicChannel):
         interface = globals()[f'interface{nodeInt}']
@@ -1439,7 +1880,8 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
     error_reason = routing.get('errorReason', routing.get('error_reason', ''))
     request_id = decoded.get('requestId', decoded.get('request_id', packet.get('id')))
     dest_name = get_name_from_number(dest_node, 'long', device_id)
-    if _significant_routing_error(error_reason):
+    mesh_ok = not _significant_routing_error(error_reason)
+    if not mesh_ok:
         is_pki = str(error_reason).startswith('PKI_')
         try:
             from modules.dm_delivery_stats import record_dm_delivery_outcome
@@ -1473,6 +1915,14 @@ def _log_dm_delivery_result(packet, dest_node, device_id):
             f"System: DM delivery confirmed Device:{device_id} To:{dest_name} Node:{dest_node} "
             f"RequestId:{request_id}"
         )
+    # BBS-DM Nutzer-ACK path: Node-Empfang vs. Nutzer bestätigt getrennt melden
+    try:
+        if bbs_enabled:
+            from modules.bbstools import bbs_on_mesh_delivery_result
+
+            bbs_on_mesh_delivery_result(dest_node, mesh_ok, device_id, request_id=request_id)
+    except Exception as e:
+        logger.debug(f"System: BBS mesh-ACK hook failed: {e}")
 
 
 def _dm_delivery_ack_callback(dest_node, device_id):
@@ -1481,7 +1931,23 @@ def _dm_delivery_ack_callback(dest_node, device_id):
     return _on_dm_routing_response
 
 
-def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_id=None):
+def _extract_mesh_packet_id(packet):
+    """Best-effort packet id from meshtastic sendText/sendData return value."""
+    if packet is None:
+        return None
+    try:
+        if isinstance(packet, dict):
+            raw = packet.get("id", packet.get("requestId", packet.get("request_id")))
+        else:
+            raw = getattr(packet, "id", None)
+        if raw is None:
+            return None
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_id=None, packet_ids_out=None):
     # Send a message to a channel or DM
     interface = globals()[f'interface{nodeInt}']
     # Check if the message is empty
@@ -1551,9 +2017,13 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
                     logger.info(
                         f"Device:{nodeInt} {ack_tag}Chunker{chunk_of} Sending DM: {CustomFormatter.white}"
                         f"{m.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
-                        f"{get_name_from_number(nodeid, 'long', nodeInt)}"
+                        f"{format_dm_peer_for_log(nodeid, nodeInt)}"
                     )
-                _send_with_reply(**send_kwargs)
+                sent = _send_with_reply(**send_kwargs)
+                if packet_ids_out is not None:
+                    pid = _extract_mesh_packet_id(sent)
+                    if pid is not None:
+                        packet_ids_out.append(pid)
 
                 if (idx + 1) % 4 == 0:
                     time.sleep(responseDelay + 1)
@@ -1578,15 +2048,86 @@ def send_message(message, ch, nodeid=0, nodeInt=1, bypassChuncking=False, reply_
                 logger.info(
                     f"Device:{nodeInt} {ack_tag}Sending DM: {CustomFormatter.white}"
                     f"{message.replace(chr(10), ' ')}{CustomFormatter.purple} To: {CustomFormatter.white}"
-                    f"{get_name_from_number(nodeid, 'long', nodeInt)}"
+                    f"{format_dm_peer_for_log(nodeid, nodeInt)}"
                 )
-            _send_with_reply(**send_kwargs)
+            sent = _send_with_reply(**send_kwargs)
+            if packet_ids_out is not None:
+                pid = _extract_mesh_packet_id(sent)
+                if pid is not None:
+                    packet_ids_out.append(pid)
             time.sleep(responseDelay)
         return True
     except Exception as e:
         logger.error(f"System: Exception during send_message: {e} (message length: {len(message)})")
         mark_interface_for_retry(nodeInt, f"send_message failed: {e}")
         return False
+
+
+def hop_count_emoji(hops) -> str:
+    """Meshtastic-style keycap digit for hop count (0–9, clamped)."""
+    keycaps = (
+        "0️⃣",
+        "1️⃣",
+        "2️⃣",
+        "3️⃣",
+        "4️⃣",
+        "5️⃣",
+        "6️⃣",
+        "7️⃣",
+        "8️⃣",
+        "9️⃣",
+    )
+    try:
+        n = int(hops)
+    except (TypeError, ValueError):
+        n = 0
+    if n < 0:
+        n = 0
+    if n > 9:
+        n = 9
+    return keycaps[n]
+
+
+def send_emoji_reaction(emoji: str, channel: int, reply_to_id, nodeInt: int = 1) -> bool:
+    """Send a Meshtastic tapback/reaction on a channel message (emoji + reply_id)."""
+    import modules.settings as st
+
+    interface = globals().get(f"interface{nodeInt}")
+    if interface is None:
+        logger.error(f"System: send_emoji_reaction — interface{nodeInt} missing")
+        return False
+    try:
+        rid = int(reply_to_id)
+    except (TypeError, ValueError):
+        logger.warning(f"System: send_emoji_reaction — invalid reply_to_id={reply_to_id!r}")
+        return False
+    text = (emoji or getattr(st, "CHANNEL_TEST_DEFAULT_EMOJI", "👍") or "👍").strip()
+    if not text:
+        text = "👍"
+    try:
+        from meshtastic import mesh_pb2
+        from meshtastic import portnums_pb2
+
+        mesh_packet = mesh_pb2.MeshPacket()
+        mesh_packet.channel = int(channel)
+        mesh_packet.decoded.payload = text.encode("utf-8")
+        mesh_packet.decoded.portnum = portnums_pb2.PortNum.TEXT_MESSAGE_APP
+        mesh_packet.decoded.reply_id = rid
+        mesh_packet.decoded.emoji = 1
+        mesh_packet.id = interface._generatePacketId()
+        interface._sendPacket(mesh_packet, "^all", wantAck=False)
+        logger.info(
+            f"Device:{nodeInt} {format_channel_log(channel, nodeInt)} "
+            f"SendingReaction: {CustomFormatter.white}{text} "
+            f"{CustomFormatter.purple}replyId:{CustomFormatter.white}{rid}"
+        )
+        time.sleep(responseDelay)
+        return True
+    except Exception as e:
+        logger.error(f"System: send_emoji_reaction failed: {e}")
+        mark_interface_for_retry(nodeInt, f"send_emoji_reaction failed: {e}")
+        return False
+
 
 def send_raw_bytes(nodeid, raw_bytes, nodeInt=1, channel=0, portnum=256, want_ack=True, reply_id=None):
     # Send raw bytes to a node using the Meshtastic interface.
@@ -1625,20 +2166,41 @@ def decode_raw_bytes(raw_bytes):
         logger.debug(f"System: Error decoding raw bytes: {e} bytes: {raw_bytes}")
         return ""
 
-def messageTrap(msg):
+def detect_missing_cmd_bang(msg: str):
+    """If cmdBang is on: first word matches a trap but message has no leading !."""
+    if not cmdBang:
+        return None
+    text = (msg or "").strip()
+    if not text or text.startswith("!"):
+        return None
+    first = text.split()[0]
+    token = first[:-1] if first.endswith("?") else first
+    token_lower = token.lower()
+    for t in trap_list:
+        if t.lower() == token_lower:
+            return token
+    return None
+
+
+def messageTrap(msg, require_bang=None):
     # Check if the message contains a trap word, this is the first filter for listning to messages
     # after this the message is passed to the command_handler in the bot.py which is switch case filter for applying word to function
+    # require_bang: None → use cmdBang; False → DMs accept commands with or without leading "!".
 
     # Split Message on assumed words spaces m for m = msg.split(" ")
     # t in trap_list, built by the config and system.py not the user
-    message_list=msg.split(" ")
-    
-    if cmdBang:
-        # check for ! at the start of the message to force a command
-        if not message_list[0].startswith('!'):
-            return False
-        else:
-            message_list[0] = message_list[0][1:]
+    message_list = msg.split(" ")
+    if not message_list or not message_list[0]:
+        return False
+
+    need_bang = cmdBang if require_bang is None else bool(require_bang)
+
+    if need_bang and not message_list[0].startswith("!"):
+        return False
+
+    # Strip optional leading "!" so "!ping" and "ping" both match (DMs).
+    if message_list[0].startswith("!"):
+        message_list[0] = message_list[0][1:]
 
     for m in message_list:
         for t in trap_list:
@@ -1653,7 +2215,7 @@ def messageTrap(msg):
     # if no trap words found, run a search for near misses like ping? or cmd?
     for m in message_list:
         for t in range(len(trap_list)):
-            if m.endswith('?') and m[:-1].lower() == trap_list[t]:
+            if m.endswith("?") and m[:-1].lower() == trap_list[t]:
                 return True
     return False
 
@@ -1779,28 +2341,37 @@ def ban_hammer(node_id, rxInterface=None, channel=None, reason=""):
     return False  # No ban applied
 
 
-_cmd_rate_tracker: dict = {}  # node_id_str -> list of timestamps
+from modules.cmd_throttle import (
+    check_command_throttle as _check_command_throttle,
+    extract_command_token,
+    get_rate_limit_snapshot as _get_rate_limit_snapshot,
+    is_cmd_rate_limited as _is_cmd_rate_limited,
+    reset_rate_limit,
+    take_unknown_dm_hint,
+)
+
 
 def is_cmd_rate_limited(node_id) -> bool:
-    """Returns True and logs a warning if the node is sending commands too fast."""
-    if not cmdRateLimitEnabled:
-        return False
-    if isNodeAdmin(str(node_id)):
-        return False
+    return _is_cmd_rate_limited(node_id, is_admin=isNodeAdmin)
 
-    node_key = str(node_id)
-    now = time.time()
-    cutoff = now - cmdRateLimitWindow
-    timestamps = _cmd_rate_tracker.get(node_key, [])
-    # Drop timestamps outside the current window
-    timestamps = [t for t in timestamps if t > cutoff]
-    timestamps.append(now)
-    _cmd_rate_tracker[node_key] = timestamps
 
-    if len(timestamps) > cmdRateLimitMax:
-        logger.warning(f"System: Rate limit hit for node {node_key} ({len(timestamps)} cmds in {cmdRateLimitWindow}s)")
-        return True
-    return False
+def check_command_throttle(node_id, command_token=None):
+    return _check_command_throttle(
+        node_id, command_token=command_token, is_admin=isNodeAdmin
+    )
+
+
+def get_rate_limit_snapshot() -> list:
+    def _resolve(node_key: str):
+        try:
+            nid = int(node_key)
+            short = get_name_from_number(nid, "short", 1)
+            long_n = get_name_from_number(nid, "long", 1)
+            return short or "", long_n or "", f"!{nid:08x}"
+        except (TypeError, ValueError):
+            return "", "", node_key
+
+    return _get_rate_limit_snapshot(resolve_names=_resolve)
 
 
 def bbs_ban_list_file_path():
@@ -2918,6 +3489,17 @@ def consumeMetadata(packet, rxNode=0, channel=-1):
                 apply_leaderboard_altitude_speed_from_position(
                     nodeID, position_data, lb_ts
                 )
+            try:
+                from modules.location_request import try_complete_pending_location
+
+                try_complete_pending_location(
+                    nodeID,
+                    lat=position_data.get("latitude"),
+                    lon=position_data.get("longitude"),
+                )
+            except Exception as _loc_e:
+                logger.debug(f"System: location_request complete hook: {_loc_e}")
+            if position_data.get("altitude") is not None:
                 altitude = position_data["altitude"]
                 highflying = altitude > highfly_altitude
                 if logMetaStats:
@@ -3763,6 +4345,14 @@ async def watchdog():
                 if usAlerts or checklist_enabled or (enableDEalerts and deAlertAutoBroadcast):
                     handleAlertBroadcast(i)
 
+                if blitz_watch_enabled and location_enabled:
+                    try:
+                        from modules.blitzwatch import handleBlitzWatch
+
+                        handleBlitzWatch(i)
+                    except Exception as e:
+                        logger.error(f"System: Blitzwatch error: {e}")
+
                 intData = displayNodeTelemetry(0, i)
                 if intData != -1 and localTelemetryData[0][f'lastAlert{i}'] != intData:
                     logger.debug(intData + f" Firmware:{firmware}")
@@ -3780,6 +4370,15 @@ async def watchdog():
         if bbs_enabled and bbsAPI_enabled:
             load_bbsdm()
             load_bbsdb()
+
+        # BBS-DM ACK: expire / NodeDB first delivery / retry (no live radio required for logic)
+        if bbs_enabled:
+            try:
+                from modules.bbstools import bbs_ack_maintenance_tick
+
+                bbs_ack_maintenance_tick(1)
+            except Exception as e:
+                logger.debug(f"System: BBS ACK maintenance tick failed: {e}")
 
 def saveAllData():
     try:

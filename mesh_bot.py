@@ -23,15 +23,24 @@ restrictedCommands = []
 restrictedResponse = ""
 
 
-def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):
+def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM, reply_id=None):
     global cmdHistory
     #Auto response to messages
+    from modules.location_request import set_command_context
+
+    set_command_context(
+        channel=channel_number,
+        is_dm=isDM,
+        device_id=deviceID,
+        node_id=message_from_id,
+        reply_id=reply_id,
+    )
     message_lower = message.lower()
-    bot_response = "🤖I'm sorry, I'm afraid I can't do that."
+    bot_response = ""
 
     # Command List processes system.trap_list. system.messageTrap() sends any commands to here
     default_commands = {
-    "ack": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
+    "ack": lambda: handle_ack_or_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "ask:": lambda: handle_llm(message_from_id, channel_number, deviceID, message, publicChannel),
     "askai": lambda: handle_llm(message_from_id, channel_number, deviceID, message, publicChannel),
     "bannode": lambda: handle_bbsban(message, message_from_id, isDM),
@@ -81,27 +90,24 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "lheard": lambda: handle_lheard(message, message_from_id, deviceID, isDM),
     "map": lambda: mapHandler(message_from_id, deviceID, channel_number, message, snr, rssi, hop),
     "messages": lambda: handle_messages(message, deviceID, channel_number, msg_history, publicChannel, isDM),
-    "moon": lambda: handle_moon(message_from_id, deviceID, channel_number),
+    "moon": lambda: handle_moon(message_from_id, deviceID, channel_number, message=message),
     "motd": lambda: handle_motd(message, message_from_id, isDM),
     "ping": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "pinging": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "pong": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "readnews": lambda: handleNews(message_from_id, deviceID, message, isDM),
     "readrss": lambda: get_rss_feed(message),
-    "rlist": lambda: handle_repeaterQuery(message_from_id, deviceID, channel_number),
+    "rlist": lambda: handle_repeaterQuery(message_from_id, deviceID, channel_number, message=message),
     "satpass": lambda: handle_satpass(message_from_id, deviceID, message),
     "setemail": lambda: handle_email(message_from_id, message),
     "setsms": lambda: handle_sms( message_from_id, message),
     "sitrep": lambda: handle_lheard(message, message_from_id, deviceID, isDM),
     "sms:": lambda: handle_sms(message_from_id, message),
     "solar": lambda: drap_xray_conditions() + "\n" + solar_conditions() + "\n" + get_noaa_scales_summary(),
-    "sun": lambda: handle_sun(message_from_id, deviceID, channel_number),
+    "sun": lambda: handle_sun(message_from_id, deviceID, channel_number, message=message),
     "sysinfo": lambda: sysinfo(message, message_from_id, deviceID, isDM),
     "test": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
-    "testing": lambda: handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number),
     "trace": lambda: handle_trace(message, message_from_id, deviceID, channel_number),
     "warning": lambda: handle_warning(
-        message_from_id, deviceID, channel_number, isDM
+        message_from_id, deviceID, channel_number, isDM, message=message
     ),
     "dealert": lambda: handle_dealert(message_from_id, deviceID),
     "whereami": lambda: handle_whereami(message_from_id, deviceID, channel_number),
@@ -109,10 +115,11 @@ def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_n
     "whoami": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
     "whois": lambda: handle_whois(message, deviceID, channel_number, message_from_id),
     "wiki": lambda: handle_wiki(message, isDM),
-    "wx": lambda: handle_wxc(message_from_id, deviceID),
-    "uv": lambda: handle_wx_extra(message_from_id, deviceID, "uv"),
-    "regen": lambda: handle_wx_extra(message_from_id, deviceID, "regen"),
-    "blitz": lambda: handle_wx_extra(message_from_id, deviceID, "blitz"),
+    "wx": lambda: handle_wxc(message_from_id, deviceID, message=message),
+    "uv": lambda: handle_wx_extra(message_from_id, deviceID, "uv", message),
+    "regen": lambda: handle_wx_extra(message_from_id, deviceID, "regen", message),
+    "blitz": lambda: handle_wx_extra(message_from_id, deviceID, "blitz", message),
+    "blitzwatch": lambda: handle_blitzwatch(message, message_from_id, deviceID, isDM),
     "metar": lambda: handle_metar(message_from_id, deviceID, message),
     "x:": lambda: handleShellCmd(message, message_from_id, channel_number, isDM, deviceID),
     "📍": lambda: handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus),
@@ -176,7 +183,7 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
     if  "?" in message and isDM:
         pingHelp = (
             "🤖 Hessenbot · Ping-Hilfe:\n"
-            "🏓 ping / pong / test — QSL: Name [ID] @ Ort | Hops LoRa/MQTT\n"
+            "🏓 ping / test — gehört-Bestätigung mit Ort, Hops, SNR/RSSI oder MQTT\n"
             "🏓 ping <Zahl> — mehrere Pings per DM.\n"
             "🏓 ping @Knoten — Ping als BBS-DM."
         )
@@ -187,24 +194,24 @@ def handle_ping(message_from_id, deviceID,  message, hop, snr, rssi, isDM, chann
     msg = ""
     type = ""
     rich_ping = True
+    first = words[0].lstrip("!") if words else ""
+    if first.endswith("?"):
+        first = first[:-1]
 
-    if "test" in msg_lower or "testing" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+    if first == "test":
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "test", snr, rssi)
         type = "🎙TEST"
-    elif "pong" in words:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
-        type = "🏓PONG"
-    elif "ping" in msg_lower or "pinging" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+    elif first == "ping":
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ping", snr, rssi)
         type = "🏓PING"
-    elif "ack" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ACK")
+    elif first == "ack":
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "ack", snr, rssi)
         type = "✋ACK"
-    elif "cqcq" in msg_lower or "cq" in words or "cqcqcq" in msg_lower:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+    elif first in ("cq", "cqcq", "cqcqcq"):
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "cq", snr, rssi)
         type = "CQ"
     else:
-        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "QSL")
+        msg = format_ping_qsl_response(message_from_id, deviceID, hop, "qsl", snr, rssi)
         type = "QSL"
         rich_ping = True
 
@@ -290,8 +297,7 @@ def handle_emergency(message_from_id, deviceID, message):
     # trgger alert to emergency_responder_alert_channel
     if message_from_id != 0:
         nodeLocation = get_node_location(message_from_id, deviceID)
-        # if default location is returned set to Unknown
-        if nodeLocation[0] == my_settings.latitudeValue and nodeLocation[1] == my_settings.longitudeValue:
+        if not nodeLocation:
             nodeLocation = ["?", "?"]
         nodeInfo = (
             f"{get_name_from_number(message_from_id, 'short', deviceID)} "
@@ -394,19 +400,95 @@ def handle_dealert(message_from_id, deviceID):
         return get_nina_alerts()
     return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
 
-def handle_wxc(message_from_id, deviceID, days=None, vox=False):
+def handle_blitzwatch(message, message_from_id, deviceID, isDM=True):
+    from modules.blitzwatch import handle_blitzwatch_command
+
+    return handle_blitzwatch_command(message, message_from_id, deviceID, is_dm=bool(isDM))
+
+
+def _resolve_cmd_location(
+    message,
+    message_from_id,
+    deviceID,
+    command_tokens,
+    *,
+    skip_numeric=False,
+    cmd_key="",
+    timeout_kind="weather",
+    build_response=None,
+):
+    """Resolve lat/lon from args or node; may defer with mesh position request.
+
+    Returns:
+      (lat, lon, source, label) — ready
+      str — error/hint
+      None — deferred (ack already sent; build_response runs async)
+    """
+    from modules.location_request import resolve_or_request_location
+
+    return resolve_or_request_location(
+        message or "",
+        message_from_id,
+        deviceID,
+        command_tokens=command_tokens,
+        skip_numeric=skip_numeric,
+        cmd_key=cmd_key or (command_tokens[0] if command_tokens else "cmd"),
+        timeout_kind=timeout_kind,
+        build_response=build_response,
+    )
+
+
+def handle_wxc(message_from_id, deviceID, days=None, vox=False, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !wx — Wettervorhersage (Open-Meteo).\n"
+            "Ohne Angabe: GPS der Node (sonst Positionsanfrage).\n"
+            "Mit Ort/Coords/Grid: !wx Friedberg · !wx 50.34 8.76 · !wx JO40AA\n"
+            "Verwandt: !uv · !regen · !blitz · !metar"
+        )
+
     from modules.wx_meteo import format_wx_info_header, get_wx_meteo
 
-    location = get_node_location(message_from_id, deviceID)
-    unit = 1 if my_settings.use_metric else 0
-    report = get_wx_meteo(str(location[0]), str(location[1]), unit)
-    if not report or report == ERROR_FETCHING_DATA:
-        return report
-    header = format_wx_info_header(location[0], location[1])
-    return f"{header}\n{report}"
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        unit = 1 if my_settings.use_metric else 0
+        report = get_wx_meteo(str(lat), str(lon), unit)
+        if not report or report == ERROR_FETCHING_DATA:
+            return report
+        header = format_wx_info_header(lat, lon, from_gps=from_gps, source=source, label=label)
+        return f"{header}\n{report}"
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("wx", "wxc"),
+        cmd_key="wx", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
-def handle_wx_extra(message_from_id, deviceID, cmd: str):
+def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
+    if "?" in (message or ""):
+        helps = {
+            "uv": (
+                "🤖 !uv — UV-Index heute und morgen (Open-Meteo).\n"
+                "Optional: !uv Friedberg · !uv 50.34 8.76 · !uv JO40AA"
+            ),
+            "regen": (
+                "🤖 !regen — stündlicher Regen für die nächsten Stunden (Open-Meteo).\n"
+                "Optional: !regen Frankfurt · !regen 50.34 8.76 · !regen JO40AA"
+            ),
+            "blitz": (
+                "🤖 !blitz — Live-Blitze im Umkreis plus kurze Gewitter-Vorhersage.\n"
+                "Ohne Angabe: GPS der Node (sonst Positionsanfrage).\n"
+                "Optional: !blitz Friedberg · !blitz 50.34 8.76 · !blitz JO40AA"
+            ),
+        }
+        return helps.get(cmd, f"🤖 !{cmd} — Wetter-Zusatzbefehl.")
+
     if not my_settings.location_enabled:
         return "Standortmodul aus ([location] enabled = False)."
     if not getattr(my_settings, "use_meteo_wxApi", False):
@@ -415,17 +497,26 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str):
         return f"🤖 !{cmd} ist in der Konfiguration deaktiviert (wxExtraCommands)."
     from modules.wx_extra import get_blitz, get_regen, get_uv
 
-    if cmd == "blitz":
-        b_lat, b_lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-        return get_blitz(str(b_lat), str(b_lon), from_gps=from_gps)
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        if cmd == "blitz":
+            return get_blitz(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
+        if cmd == "uv":
+            return get_uv(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
+        if cmd == "regen":
+            return get_regen(str(lat), str(lon), from_gps=from_gps, source=source, label=label)
+        return "Unbekannter Wetter-Befehl."
 
-    location = get_node_location(message_from_id, deviceID)
-    lat, lon = str(location[0]), str(location[1])
-    if cmd == "uv":
-        return get_uv(lat, lon)
-    if cmd == "regen":
-        return get_regen(lat, lon)
-    return "Unbekannter Wetter-Befehl."
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, (cmd,),
+        cmd_key=cmd, timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handleNews(message_from_id, deviceID, message, isDM):
@@ -481,23 +572,54 @@ def handle_metar(message_from_id, deviceID, message=""):
     if icao:
         return get_metar_by_icao(icao)
 
-    location = get_node_location(message_from_id, deviceID)
-    return get_metar(str(location[0]), str(location[1]))
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        return get_metar(str(lat), str(lon), from_gps=from_gps)
+
+    resolved = _resolve_cmd_location(
+        message or "", message_from_id, deviceID, ("metar",),
+        cmd_key="metar", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
-def handle_warning(message_from_id, deviceID, channel_number, isDM):
+def handle_warning(message_from_id, deviceID, channel_number, isDM, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !warning — NINA-Warnungen für den Standort.\n"
+            "Optional: !warning Friedberg · !warning 50.34 8.76 · !warning JO40AA"
+        )
     if not my_settings.enableDEalerts:
         return "🤖NINA/Warnung Bund ist in der Konfiguration deaktiviert."
-    lat, lon, from_gps = get_node_location_with_source(message_from_id, deviceID)
-    # include_detail only for real DMs — channel requests (even DM-responded) stay short
-    parts = build_warning_messages(lat, lon, from_gps, include_detail=isDM)
-    if not parts:
-        return WARNING_NONE_MSG
-    dest = message_from_id if my_settings.useDMForResponse or isDM else 0
-    for extra in parts[1:]:
-        time.sleep(my_settings.splitDelay)
-        send_message(extra, channel_number, dest, deviceID)
-    return parts[0]
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        parts = build_warning_messages(
+            lat, lon, from_gps, include_detail=isDM, source=source, label=label
+        )
+        if not parts:
+            return WARNING_NONE_MSG
+        dest = message_from_id if my_settings.useDMForResponse or isDM else 0
+        for extra in parts[1:]:
+            time.sleep(my_settings.splitDelay)
+            send_message(extra, channel_number, dest, deviceID)
+        return parts[0]
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("warning", "dealert"),
+        cmd_key="warning", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 def handle_emergency_alerts(message, message_from_id, deviceID):
     if my_settings.enableDEalerts:
@@ -506,12 +628,28 @@ def handle_emergency_alerts(message, message_from_id, deviceID):
 
 def handle_checklist(message, message_from_id, deviceID):
     name = get_name_from_number(message_from_id, 'short', deviceID)
-    location = get_node_location(message_from_id, deviceID)
+    location = get_node_location(message_from_id, deviceID) or [None, None]
     return process_checklist_command(message_from_id, message, name, location)
 
 def handle_inventory(message, message_from_id, deviceID):
     name = get_name_from_number(message_from_id, 'short', deviceID)
     return process_inventory_command(message_from_id, message, name)
+
+def handle_ack_or_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number):
+    """Prefer BBS-DM Lesebestätigung (ack / ack <id>); else classic ping/QSL ack."""
+    if my_settings.bbs_enabled and bool(getattr(my_settings, "bbs_dm_user_ack_enabled", False)):
+        try:
+            from modules.bbstools import bbs_handle_user_ack, parse_ack_command
+
+            is_ack, msg_id = parse_ack_command(message)
+            if is_ack:
+                result = bbs_handle_user_ack(message_from_id, msg_id, deviceID)
+                if result is not None:
+                    return result
+        except Exception as e:
+            logger.debug(f"System: BBS user-ACK handler skipped: {e}")
+    return handle_ping(message_from_id, deviceID, message, hop, snr, rssi, isDM, channel_number)
+
 
 def handle_bbspost(message, message_from_id, deviceID):
     if "$" in message and not "example:" in message:
@@ -520,11 +658,18 @@ def handle_bbspost(message, message_from_id, deviceID):
         if "#" in message:
             body = message.split("#", 1)[1]
             body = body.rstrip()
-            logger.info(f"System: BBS Post: {subject} Body: {body}")
+            logger.info(
+                f"System: BBS Post: subjectLen={len(subject)} BodyLen={len(body)}"
+            )
             return bbs_post_message(subject, body, message_from_id)
         elif not "example:" in message:
             return "Beispiel: bbspost $Betreff #✉️Nachricht"
     elif "@" in message and not "example:" in message:
+        # bbspost ack @empfänger #text → require_user_ack
+        at_idx = message.find("@")
+        require_user_ack = bool(
+            at_idx > 0 and re.search(r"\back\b", message[:at_idx], flags=re.IGNORECASE)
+        )
         toNode = message.split("@")[1].split("#")[0]
         toNode = toNode.rstrip()
         if toNode.startswith("!") and len(toNode) == 9:
@@ -542,10 +687,12 @@ def handle_bbspost(message, message_from_id, deviceID):
                 return "Knoten nicht gefunden: " + message.split("@")[1].split("#")[0]
             body = message.split("#", 1)[1]
             body = body.rstrip()
-            logger.info(f"System: BBS Post DM to: {toNode} Body: {body}")
-            return bbs_post_dm(toNode, body, message_from_id)
+            logger.info(
+                f"System: BBS Post DM to: {toNode} ack={require_user_ack} BodyLen={len(body)}"
+            )
+            return bbs_post_dm(toNode, body, message_from_id, require_user_ack=require_user_ack)
         else:
-            return "Beispiel: bbspost @Kurzname/!hex #✉️Nachricht"
+            return "Beispiel: bbspost @Kurzname/!hex #✉️Nachricht oder bbspost ack @Knoten #Text"
     elif not "example:" in message:
         return "Beispiel: bbspost $Betreff #✉️Text oder bbspost @Knoten #✉️Text"
 
@@ -618,19 +765,40 @@ def handle_messages(message, deviceID, channel_number, msg_history, publicChanne
         return header + response
     return f"Keine 📭 Nachrichten auf {ch_label} im Verlauf"
 
-def handle_sun(message_from_id, deviceID, channel_number, vox=False):
+def handle_sun(message_from_id, deviceID, channel_number, vox=False, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !sun — Sonnenauf-/untergang und Azimut.\n"
+            "Optional: !sun Frankfurt · !sun 50.34 8.76 · !sun JO40AA"
+        )
     if vox:
-        # return a default message if vox is enabled
         return get_sun(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    location = get_node_location(message_from_id, deviceID, channel_number)
-    return get_sun(str(location[0]), str(location[1]))
+
+    def build(lat, lon, source, label):
+        return with_location_source_note(
+            get_sun(str(lat), str(lon)),
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("sun",),
+        cmd_key="sun", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 def handle_satpass(message_from_id, deviceID, message):
     if "?" in message:
         return (
-            "satpass [NORAD] — nächster sichtbarer Überflug (n2yo). "
-            "Ohne Nummer: erster Eintrag aus satList in config.ini. "
-            "Beispiel ISS: satpass 25544"
+            "satpass [NORAD] [Ort] — nächster sichtbarer Überflug (n2yo).\n"
+            "Ohne Nummer: erster Eintrag aus satList in config.ini.\n"
+            "Beispiel: !satpass 25544 · !satpass Frankfurt · !satpass JO40AA · !satpass 25544 Frankfurt"
         )
     norad = None
     for part in message.replace("!", " ").split():
@@ -640,8 +808,31 @@ def handle_satpass(message_from_id, deviceID, message):
     if norad is None:
         sat_list = getattr(my_settings, "satListConfig", ["25544"])
         norad = (sat_list[0] if sat_list else "25544").strip()
-    location = get_node_location(message_from_id, deviceID)
-    return getNextSatellitePass(norad, location[0], location[1])
+
+    def build(lat, lon, source, label):
+        return with_location_source_note(
+            getNextSatellitePass(norad, lat, lon),
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
+    resolved = _resolve_cmd_location(
+        message,
+        message_from_id,
+        deviceID,
+        ("satpass",),
+        skip_numeric=True,
+        cmd_key="satpass",
+        timeout_kind="weather",
+        build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 def sysinfo(message, message_from_id, deviceID, isDM):
     if "?" in message:
@@ -743,16 +934,30 @@ def handle_history(message, nodeid, deviceID, isDM, lheard=False):
     return msg
 
 def handle_whereami(message_from_id, deviceID, channel_number):
-    location = get_node_location(message_from_id, deviceID, channel_number)
-    # check api_throttle
     check_throttle = api_throttle(message_from_id, deviceID, apiName='whereami')
     if check_throttle:
         return check_throttle
-    msg = where_am_i(str(location[0]), str(location[1]))
-    alt = get_node_altitude_m(message_from_id, deviceID)
-    if alt is not None:
-        msg += f"\n{format_node_altitude_line(alt)}"
-    return msg
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        if not from_gps:
+            return my_settings.NO_DATA_NOGPS
+        msg = where_am_i(str(lat), str(lon))
+        alt = get_node_altitude_m(message_from_id, deviceID)
+        if alt is not None:
+            msg += f"\n{format_node_altitude_line(alt)}"
+        return with_location_source_note(msg, from_gps)
+
+    resolved = _resolve_cmd_location(
+        "", message_from_id, deviceID, ("whereami",),
+        cmd_key="whereami", timeout_kind="gps_only", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handle_howfar(message, message_from_id, deviceID, isDM):
@@ -766,9 +971,24 @@ def handle_howfar(message, message_from_id, deviceID, isDM):
     check_throttle = api_throttle(message_from_id, deviceID, apiName="howfar")
     if check_throttle:
         return check_throttle
-    location = get_node_location(message_from_id, deviceID)
     reset = "reset" in message.lower()
-    return distance(location[0], location[1], message_from_id, reset=reset)
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        return with_location_source_note(
+            distance(lat, lon, message_from_id, reset=reset), from_gps
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("howfar",),
+        cmd_key="howfar", timeout_kind="gps_only", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handle_howtall(message, message_from_id, deviceID, isDM):
@@ -782,7 +1002,6 @@ def handle_howtall(message, message_from_id, deviceID, isDM):
     check_throttle = api_throttle(message_from_id, deviceID, apiName="howtall")
     if check_throttle:
         return check_throttle
-    location = get_node_location(message_from_id, deviceID)
     shadow = None
     parts = message.replace("!", " ").split()
     for i, part in enumerate(parts):
@@ -805,7 +1024,21 @@ def handle_howtall(message, message_from_id, deviceID, isDM):
                 continue
     if shadow is None:
         return "Bitte Schattenlänge angeben, z. B. !howtall 2"
-    return measureHeight(location[0], location[1], shadow)
+
+    def build(lat, lon, source, label):
+        from_gps = location_source_as_from_gps(source)
+        return with_location_source_note(measureHeight(lat, lon, shadow), from_gps)
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("howtall",),
+        cmd_key="howtall", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 
 def handle_trace(message, message_from_id, deviceID, channel_number):
@@ -876,24 +1109,68 @@ def handle_loc(message, message_from_id, deviceID, channel_number):
     return msg
 
 
-def handle_repeaterQuery(message_from_id, deviceID, channel_number):
-    location = get_node_location(message_from_id, deviceID, channel_number)
-    # check api_throttle
-    check_throttle = api_throttle(message_from_id, deviceID, apiName='repeaterQuery')
-    if check_throttle:
-        return check_throttle
-    if repeater_lookup == "rbook":
-        return getRepeaterBook(str(location[0]), str(location[1]))
-    elif repeater_lookup == "artsci":
-        return getArtSciRepeaters(str(location[0]), str(location[1]))
-    else:
-        return "Repeater-Suche ist nicht aktiviert."
+def handle_repeaterQuery(message_from_id, deviceID, channel_number, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !rlist — Relais in der Nähe.\n"
+            "Optional: !rlist Friedberg · !rlist 50.34 8.76 · !rlist JO40AA"
+        )
 
-def handle_moon(message_from_id, deviceID, channel_number, vox=False):
+    def build(lat, lon, source, label):
+        check_throttle = api_throttle(message_from_id, deviceID, apiName='repeaterQuery')
+        if check_throttle:
+            return check_throttle
+        if repeater_lookup == "rbook":
+            body = getRepeaterBook(str(lat), str(lon))
+        elif repeater_lookup == "artsci":
+            body = getArtSciRepeaters(str(lat), str(lon))
+        else:
+            return "Repeater-Suche ist nicht aktiviert."
+        return with_location_source_note(
+            body,
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("rlist",),
+        cmd_key="rlist", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
+
+def handle_moon(message_from_id, deviceID, channel_number, vox=False, message=""):
+    if "?" in (message or ""):
+        return (
+            "🤖 !moon — Mondphase und Auf-/Untergang.\n"
+            "Optional: !moon Frankfurt · !moon 50.34 8.76 · !moon JO40AA"
+        )
     if vox:
         return get_moon(str(my_settings.latitudeValue), str(my_settings.longitudeValue))
-    location = get_node_location(message_from_id, deviceID, channel_number)
-    return get_moon(str(location[0]), str(location[1]))
+
+    def build(lat, lon, source, label):
+        return with_location_source_note(
+            get_moon(str(lat), str(lon)),
+            location_source_as_from_gps(source),
+            source=source,
+            label=label,
+        )
+
+    resolved = _resolve_cmd_location(
+        message, message_from_id, deviceID, ("moon",),
+        cmd_key="moon", timeout_kind="weather", build_response=build,
+    )
+    if resolved is None:
+        return ""
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, source, label = resolved
+    return build(lat, lon, source, label)
 
 def handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus):
     try:
@@ -909,7 +1186,7 @@ def handle_whoami(message_from_id, deviceID, hop, snr, rssi, pkiStatus):
             msg += f"\nPKI {pkiStatus[0]} pubKey: {pkiStatus[1]}"
 
         loc = get_node_location(message_from_id, deviceID)
-        if loc != [my_settings.latitudeValue, my_settings.longitudeValue]:
+        if loc:
             msg += f"\nPosition: {loc[0]}, {loc[1]}"
 
             if positionMetadata and message_from_id in positionMetadata:
@@ -1223,41 +1500,39 @@ def onReceive(packet, interface):
             session_passkey = decoded.get('admin', {}).get('sessionPasskey', None)
         rxNode = 1
 
-    # check if the packet has a channel flag use it ## FIXME needs to be channel hash lookup
-    if packet.get('channel'):
-        channel_number = packet.get('channel')
-        channel_name = "unknown"
+    # MeshPacket.channel: local slot index (0 = primary / omitted) or XOR-hash on some paths.
+    raw_ch = packet.get("channel")
+    if raw_ch is None and getattr(packet.get("raw"), "channel", None):
         try:
-            res = resolve_channel_name(channel_number, rxNode, interface)
-            if res:
-                try:
-                    channel_name, _ = res
-                except Exception:
-                    channel_name = "unknown"
-            else:
-                # Search all interfaces for this channel
-                cache = build_channel_cache()
-                found_on_other = None
-                for device in cache:
-                    for chan_name, info in device.get("channels", {}).items():
-                        if str(info.get('number')) == str(channel_number) or str(info.get('hash')) == str(channel_number):
-                            found_on_other = device.get("interface_id")
-                            found_chan_name = chan_name
-                            break
-                    if found_on_other:
+            raw_ch = int(packet["raw"].channel)
+        except Exception:
+            raw_ch = None
+    channel_number = normalize_mesh_channel_index(raw_ch, rxNode or 1)
+    channel_name = "unknown"
+    try:
+        res = resolve_channel_name(channel_number, rxNode, interface)
+        if res:
+            try:
+                channel_name, _ = res
+            except Exception:
+                channel_name = "unknown"
+        else:
+            cache = build_channel_cache()
+            found_on_other = None
+            for device in cache:
+                for chan_name, info in device.get("channels", {}).items():
+                    if str(info.get("number")) == str(channel_number) or str(info.get("hash")) == str(raw_ch):
+                        found_on_other = device.get("interface_id")
+                        found_chan_name = chan_name
                         break
-                if found_on_other and found_on_other != rxNode:
-                    logger.debug(
-                        f"System: Received Packet on Channel:{channel_number} ({found_chan_name}) on Interface:{rxNode}, but this channel is configured on Interface:{found_on_other}"
-                    )
-        except Exception as e:
-            logger.debug(f"System: channel resolution error: {e}")
-    
-        #debug channel info
-        # if "unknown" in str(channel_name):
-        #     logger.debug(f"System: Received Packet on Channel:{channel_number} on Interface:{rxNode}")
-        # else:
-        #     logger.debug(f"System: Received Packet on Channel:{channel_number} Name:{channel_name} on Interface:{rxNode}")
+                if found_on_other:
+                    break
+            if found_on_other and found_on_other != rxNode:
+                logger.debug(
+                    f"System: Received Packet on Channel:{channel_number} ({found_chan_name}) on Interface:{rxNode}, but this channel is configured on Interface:{found_on_other}"
+                )
+    except Exception as e:
+        logger.debug(f"System: channel resolution error: {e}")
 
     # check if the packet has a simulator flag
     simulator_flag = decoded.get('simulator', False)
@@ -1282,19 +1557,18 @@ def onReceive(packet, interface):
             if node.get('nodeID') == message_from_id:
                 node['lastSeen'] = time.time()
                 break
-    # BBS DM MAIL CHECKER
+    # BBS DM MAIL CHECKER (NodeDB/packet trigger; ACK-mails stay until user ack / expire)
     if bbs_enabled and decoded:
-        msg = bbs_check_dm(message_from_id)
-        if msg:
-            logger.info(
-                f"System: BBS DM Delivery: from={msg[2]} to={message_from_id}"
-            )
-            logger.debug(
-                f"System: BBS DM Delivery body for {get_name_from_number(message_from_id, 'long', rxNode)}: {msg[1]}"
-            )
-            message = "Mail: " + msg[1] + "  From: " + get_name_from_number(msg[2], 'long', rxNode)
-            bbs_delete_dm(msg[0], msg[1])
-            send_message(message, channel_number, message_from_id, rxNode)
+        try:
+            from modules.bbstools import bbs_try_deliver_for_node
+
+            result = bbs_try_deliver_for_node(message_from_id, rxNode, channel_number)
+            if result:
+                logger.info(
+                    f"System: BBS DM Delivery: to={message_from_id} result={result}"
+                )
+        except Exception as e:
+            logger.error(f"System: BBS DM delivery error: {e}")
 
     # CHECK with ban_hammer() if the node is banned
     if str(message_from_id) in my_settings.bbs_ban_list or str(message_from_id) in my_settings.autoBanlist:
@@ -1333,7 +1607,8 @@ def onReceive(packet, interface):
                 if n
             ]
             if message_from_id in _my_nodes:
-                logger.warning(
+                # MQTT/Kanal-Echo eigener Antworten — normal, kein Betriebsfehler
+                logger.debug(
                     f"System: Packet from self {message_from_id} loop or traffic replay detected"
                 )
                 return
@@ -1364,17 +1639,13 @@ def onReceive(packet, interface):
             if packet.get('emoji'):
                 emojiSeen = packet.get('emoji', False)
 
-            from modules.packet_dedup import apply_hop_enrichment
+            from modules.packet_dedup import wait_for_hop_enrichment
             from modules.system import is_tunneled_mesh_packet, interface_has_local_rf
             if (
                 getattr(my_settings, "packet_dedup_enabled", True)
                 and is_tunneled_mesh_packet(packet, transport_mechanism)
-                and packet.get("hopStart") is not None
-                and packet.get("hopLimit") is not None
-                and packet.get("hopStart") == packet.get("hopLimit")
             ):
-                time.sleep(0.1)
-            apply_hop_enrichment(packet)
+                wait_for_hop_enrichment(packet)
             decoded = packet.get('decoded') or {}
             via_mqtt = decoded.get('viaMqtt', False)
             transport_mechanism = (
@@ -1385,15 +1656,17 @@ def onReceive(packet, interface):
                 or transport_mechanism
             )
 
-            if 'hopsAway' in packet:
-                hop_away = packet.get('hopsAway', 0)
-            if packet.get('hopStart') is not None:
-                hop_start = packet.get('hopStart', 0)
-            if packet.get('hopLimit') is not None:
-                hop_limit = packet.get('hopLimit', 0)
-            if packet.get('rxSnr') or packet.get('rxRssi'):
-                snr = packet.get('rxSnr', 0)
-                rssi = packet.get('rxRssi', 0)
+            if "hopsAway" in packet or "hops_away" in packet:
+                hop_away = packet.get("hopsAway", packet.get("hops_away", 0)) or 0
+            hop_start_val = packet.get("hopStart", packet.get("hop_start"))
+            if hop_start_val is not None:
+                hop_start = hop_start_val
+            hop_limit_val = packet.get("hopLimit", packet.get("hop_limit"))
+            if hop_limit_val is not None:
+                hop_limit = hop_limit_val
+            if packet.get("rxSnr") or packet.get("rxRssi"):
+                snr = packet.get("rxSnr", 0)
+                rssi = packet.get("rxRssi", 0)
 
             hop = ""
             hop_source = "packet"
@@ -1402,6 +1675,28 @@ def onReceive(packet, interface):
             hop_count, hop_source = resolve_mesh_hop_count(
                 message_from_id, rxNode, hop_away, hop_start, hop_limit, packet, transport_mechanism
             )
+            # Second chance: a richer MQTT duplicate may have arrived during resolve.
+            if hop_count == 0 and is_tunneled_mesh_packet(packet, transport_mechanism):
+                from modules.packet_dedup import apply_hop_enrichment
+
+                if apply_hop_enrichment(packet):
+                    if "hopsAway" in packet or "hops_away" in packet:
+                        hop_away = packet.get("hopsAway", packet.get("hops_away", 0)) or 0
+                    hop_start_val = packet.get("hopStart", packet.get("hop_start"))
+                    if hop_start_val is not None:
+                        hop_start = hop_start_val
+                    hop_limit_val = packet.get("hopLimit", packet.get("hop_limit"))
+                    if hop_limit_val is not None:
+                        hop_limit = hop_limit_val
+                    hop_count, hop_source = resolve_mesh_hop_count(
+                        message_from_id,
+                        rxNode,
+                        hop_away,
+                        hop_start,
+                        hop_limit,
+                        packet,
+                        transport_mechanism,
+                    )
 
             if (
                 hop_start == hop_limit
@@ -1447,14 +1742,24 @@ def onReceive(packet, interface):
             if packet.get('to') in [myNodeNum1, myNodeNum2, myNodeNum3, myNodeNum4, myNodeNum5, myNodeNum6, myNodeNum7, myNodeNum8, myNodeNum9]:
                 # message is DM to us
                 isDM = True
-                # check if the message contains a trap word, DMs are always responded to
-                if (messageTrap(message_string) and not llm_enabled) or messageTrap(message_string.split()[0]):
+                # DMs: accept first-word commands with or without "!"; channels still require bang
+                if messageTrap(message_string, require_bang=False):
                     # log the message to stdout
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + f"Received DM: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
-                                "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
+                                "From: " + CustomFormatter.white + f"{format_dm_peer_for_log(message_from_id, rxNode)}")
                     # rate limit check
-                    if is_cmd_rate_limited(message_from_id):
-                        send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                    _thr = check_command_throttle(
+                        message_from_id,
+                        command_token=extract_command_token(message_string),
+                    )
+                    if _thr is not None:
+                        if _thr:
+                            send_message(_thr, channel_number, message_from_id, rxNode)
+                        else:
+                            logger.debug(
+                                f"System: rate-limit silent DM from "
+                                f"{get_name_from_number(message_from_id, 'short', rxNode)}"
+                            )
                     else:
                         # respond with DM
                         send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode)
@@ -1463,14 +1768,16 @@ def onReceive(packet, interface):
                         llm = handle_llm(message_from_id, channel_number, rxNode, message_string, publicChannel)
                         send_message(llm, channel_number, message_from_id, rxNode)
                     else:
-                        logger.warning(f"Device:{rxNode} Ignoring DM: {message_log_string} From: {get_name_from_number(message_from_id, 'long', rxNode)}")
+                        logger.warning(f"Device:{rxNode} Ignoring DM: {message_log_string} From: {format_dm_peer_for_log(message_from_id, rxNode)}")
                         if not any(node['nodeID'] == message_from_id and node['welcome'] == True for node in seenNodes):
                             send_message(welcome_message, channel_number, message_from_id, rxNode)
                             for node in seenNodes:
                                 if node['nodeID'] == message_from_id:
                                     node['welcome'] = True
                         else:
-                            send_message(help_message, channel_number, message_from_id, rxNode)
+                            hint = take_unknown_dm_hint(message_from_id)
+                            if hint:
+                                send_message(hint, channel_number, message_from_id, rxNode)
                     
                     # add message to tts queue
                     if meshagesTTS:
@@ -1483,27 +1790,60 @@ def onReceive(packet, interface):
                         msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | DM | " + message_log_string)
             else:
                 # message is on a channel
-                # Channel "test" feature: a bare "test"/"Test" (no "!") on a
-                # configured channel gets the !test reply directly in the channel,
-                # bypassing the cmdBang requirement and DM-only behaviour.
+                # Channel "test" feature: bare "test"/"Test" (no "!") on a configured
+                # channel only. All other channel commands require a leading "!".
+                _ct_channels = {
+                    str(c).strip()
+                    for c in (getattr(my_settings, "channel_test_channels", None) or [])
+                    if str(c).strip()
+                }
                 _bare_test = (
                     getattr(my_settings, "channel_test_enabled", False)
                     and message_string.strip().lower() == "test"
-                    and str(channel_number) in my_settings.channel_test_channels
+                    and str(int(channel_number)) in _ct_channels
                 )
                 if _bare_test and str(message_from_id) in my_settings.bbs_ban_list:
                     logger.debug(f"System: Ignoring channel test from banned node: {get_name_from_number(message_from_id, 'short', rxNode)}")
                 elif _bare_test:
                     logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                 "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
-                    if is_cmd_rate_limited(message_from_id):
-                        logger.debug(f"System: channel test rate-limited from: {get_name_from_number(message_from_id, 'short', rxNode)}")
+                    _thr = check_command_throttle(message_from_id, command_token="test")
+                    if _thr is not None:
+                        if _thr:
+                            # Hinweis nur per DM, Channel-Test nicht zusätzlich fluten
+                            send_message(_thr, channel_number, message_from_id, rxNode)
+                        logger.debug(
+                            f"System: channel test rate-limited from: "
+                            f"{get_name_from_number(message_from_id, 'short', rxNode)}"
+                        )
                     else:
-                        _test_resp = handle_ping(message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number)
-                        send_message(_test_resp, channel_number, 0, rxNode, reply_id=packet_id)
+                        from modules.settings import channel_test_mode
+
+                        _ct_mode, _ct_emoji, _ct_hops = channel_test_mode(channel_number)
+                        if _ct_mode == "react":
+                            send_emoji_reaction(
+                                _ct_emoji or "👍",
+                                channel_number,
+                                packet_id,
+                                rxNode,
+                            )
+                            if _ct_hops:
+                                send_emoji_reaction(
+                                    hop_count_emoji(hop_count),
+                                    channel_number,
+                                    packet_id,
+                                    rxNode,
+                                )
+                        else:
+                            _test_resp = handle_ping(
+                                message_from_id, rxNode, "test", hop, snr, rssi, False, channel_number
+                            )
+                            send_message(
+                                _test_resp, channel_number, 0, rxNode, reply_id=packet_id
+                            )
                         if my_settings.log_messages_to_file:
                             msgLogger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} | {get_name_from_number(message_from_id, 'long', rxNode)} | " + message_log_string)
-                elif messageTrap(message_string):
+                elif messageTrap(message_string, require_bang=True):
                     # message is for us to respond to, or is it...
                     if my_settings.ignoreDefaultChannel and channel_number == my_settings.publicChannel:
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Default Channel:{channel_number}")
@@ -1511,18 +1851,29 @@ def onReceive(packet, interface):
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Cantankerous Node")
                     elif str(channel_number) in my_settings.ignoreChannels:
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Ignored Channel:{channel_number}")
-                    elif my_settings.cmdBang and not message_string.startswith("!"):
+                    elif not message_string.startswith("!"):
+                        # Defense in depth: channels always require "!" (except bare test above)
                         logger.debug(f"System: Ignoring CMD:{message_log_string} From: {get_name_from_number(message_from_id, 'short', rxNode)} Didnt sound like they meant it")
                     else:
                         # message is for bot to respond to, seriously this time..
                         logger.info(f"Device:{rxNode} {format_channel_log(channel_number, rxNode)} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\
                                     "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, 'long', rxNode)}")
                         # rate limit check
-                        if is_cmd_rate_limited(message_from_id):
-                            send_message("⏱️ Bitte etwas langsamer.", channel_number, message_from_id, rxNode)
+                        _thr = check_command_throttle(
+                            message_from_id,
+                            command_token=extract_command_token(message_string),
+                        )
+                        if _thr is not None:
+                            if _thr:
+                                send_message(_thr, channel_number, message_from_id, rxNode)
+                            else:
+                                logger.debug(
+                                    f"System: rate-limit silent channel from "
+                                    f"{get_name_from_number(message_from_id, 'short', rxNode)}"
+                                )
                         elif my_settings.useDMForResponse:
                             # respond to channel message via direct message
-                            send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode, reply_id=packet_id)
+                            send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM, reply_id=packet_id), channel_number, message_from_id, rxNode, reply_id=packet_id)
                         else:
                             # or respond to channel message on the channel itself
                             if channel_number == my_settings.publicChannel and my_settings.antiSpam:
@@ -1530,10 +1881,10 @@ def onReceive(packet, interface):
                                 logger.warning(f"System: AntiSpam protection, sending DM to: {get_name_from_number(message_from_id, 'long', rxNode)}")
                             
                                 # respond to channel message via direct message
-                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, message_from_id, rxNode, reply_id=packet_id)
+                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM, reply_id=packet_id), channel_number, message_from_id, rxNode, reply_id=packet_id)
                             else:
                                 # respond to channel message on the channel itself
-                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM), channel_number, 0, rxNode, reply_id=packet_id)
+                                send_message(auto_response(message_string, snr, rssi, hop, pkiStatus, message_from_id, channel_number, rxNode, isDM, reply_id=packet_id), channel_number, 0, rxNode, reply_id=packet_id)
 
                 else:
                     # message is not for us to respond to

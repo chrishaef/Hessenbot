@@ -25,6 +25,7 @@ class CommandSection:
     intro: str
     commands: tuple[CommandEntry, ...]
     section_enabled: Optional[Callable[[], bool]] = None
+    intro_html: bool = False
 
 
 def _prefix() -> str:
@@ -57,22 +58,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}ping",
-                    "QSL-Antwort: LongName [NodeID] @ Bot-Standort | Hops LoRa/MQTT.",
-                    enabled=lambda: getattr(st, "ping_enabled", True),
-                ),
-                _cmd(
-                    f"{p}pong",
-                    "Wie ping — QSL mit Ort, Hops und Verbindungstyp.",
-                    enabled=lambda: getattr(st, "ping_enabled", True),
-                ),
-                _cmd(
-                    f"{p}pinging",
-                    "Alias für ping.",
-                    enabled=lambda: getattr(st, "ping_enabled", True),
-                ),
-                _cmd(
-                    f"{p}testing",
-                    "Alias für ping.",
+                    "Gehört-Bestätigung: Name, Standort des Bots, SNR/RSSI oder MQTT-Hops.",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
@@ -83,6 +69,12 @@ def _sections() -> List[CommandSection]:
                 _cmd(
                     f"{p}cq",
                     "Alias für ping.",
+                    enabled=lambda: getattr(st, "ping_enabled", True),
+                ),
+                _cmd(
+                    f"{p}ack",
+                    "Alias für ping. Bei wartender BBS-DM mit Lesebestätigung: Nutzer-ACK "
+                    "(nacktes ack nur wenn genau eine Mail wartet; sonst ack <id>).",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
@@ -126,15 +118,19 @@ def _sections() -> List[CommandSection]:
             "Knoten & Position",
             "bi-geo-alt",
             (
-                "Standortdaten stammen aus der Meshtastic-NodeDB (GPS am Gerät). Ohne GPS kann der Bot keine "
-                "Koordinaten liefern.\n\n"
-                f"Entfernungen messen: Mit aktivem GPS sendest du {p}map <Name> — der Bot antwortet mit Richtung "
-                "und Distanz zu einem zuvor gespeicherten Ort (bezogen auf deine aktuelle Position). "
-                f"{p}howfar summiert die zurückgelegte Strecke seit dem letzten Aufruf (erneut senden aktualisiert "
-                f"den Zähler; {p}howfar reset setzt den Startpunkt zurück).\n\n"
-                f"Standorte speichern: An der gewünschten Position {p}map save <Name> [Beschreibung] (nur für dich) "
-                f"oder {p}map save public <Name> [Beschreibung] (für alle). {p}map list zeigt deine Einträge, "
-                f"{p}map delete <Name> entfernt einen Ort. {p}map public <Name> fragt einen öffentlichen Ort ab."
+                "Standortdaten kommen aus der Meshtastic-NodeDB (GPS am Gerät) oder der regionalen Mesh-Karte. "
+                "Viele Wetter-/Standort-Befehle akzeptieren auch Ort, Koordinaten oder Maidenhead-Grid "
+                f"(z. B. <code>{p}wx Fulda</code>, <code>{p}wx 50.34 8.76</code>, <code>{p}wx JO40AA</code>).\n\n"
+                "Fehlt die Position und du gibst keinen Ort an, fragt der Bot deine Node kurz per Mesh "
+                "nach GPS (<em>Standort angefragt – kurz warten…</em>) und führt den Befehl danach "
+                "automatisch aus. Kommt keine Position: Hinweis, Ort oder Koordinaten mitzuschicken "
+                "(kein stiller Bot-Standort).\n\n"
+                f"Entfernungen: Mit GPS <code>{p}map &lt;Name&gt;</code> — Richtung und Distanz zu einem "
+                f"gespeicherten Ort. <code>{p}howfar</code> summiert die Strecke seit dem letzten Aufruf "
+                f"(<code>{p}howfar reset</code> setzt zurück).\n\n"
+                f"Orte speichern: <code>{p}map save &lt;Name&gt;</code> (privat) oder "
+                f"<code>{p}map save public &lt;Name&gt;</code>; <code>{p}map list</code> / "
+                f"<code>{p}map delete &lt;Name&gt;</code>."
             ),
             (
                 _cmd(
@@ -164,7 +160,8 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}whereami",
-                    "Ortstext zu deiner Position (Geocoding), plus Höhe falls übertragen.",
+                    "Ortstext zu deiner Position (Geocoding), plus Höhe falls übertragen. "
+                    "Ohne GPS: Positionsanfrage, sonst Hinweis.",
                     enabled=lambda: getattr(st, "location_enabled", False),
                 ),
                 _cmd(
@@ -214,17 +211,29 @@ def _sections() -> List[CommandSection]:
         CommandSection(
             "Wetter & Warnungen (DE/EU)",
             "bi-cloud-lightning-rain",
-            "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD).",
+            "Wetter über Open-Meteo. Warnungen über warnung.bund.de (NINA/Katwarn/DWD). "
+            "Ohne Ort-Angabe: GPS der Node, sonst Positionsanfrage (siehe Abschnitt Knoten & Position). "
+            "Blitzwatch: !blitzwatch (Status), !blitzwatch? (Einstellen), "
+            "!blitzwatch web / set (Web-Code per DM). "
+            'Ausführliche Erklärung: <a href="/mein-blitzwatch#blitzwatch">'
+            "Blitzwatch — so funktioniert’s</a>.",
             (
                 _cmd(
                     f"{p}wx",
-                    "Wettervorhersage für deinen Standort (Open-Meteo).",
+                    "Wettervorhersage (Open-Meteo). Optional Ort/Coords/Grid; ohne GPS: Positionsanfrage. "
+                    "Beispiele: !wx Friedberg · !wx 50.34 8.76 · !wx JO40AA",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "use_meteo_wxApi", True),
+                ),
+                _cmd(
+                    f"{p}wx?",
+                    "Kurzhilfe zu !wx (inkl. Ort/Koordinaten).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True),
                 ),
                 _cmd(
                     f"{p}metar",
-                    "METAR des nächsten Flugplatzes zu deinem Standort.",
+                    "METAR des nächsten Flugplatzes zu deinem Standort (ohne ICAO: GPS bzw. Positionsanfrage).",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "metar_enabled", True),
                 ),
@@ -242,28 +251,53 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}uv",
-                    "UV-Index heute und morgen für deinen Standort (Open-Meteo).",
+                    "UV-Index. Optional Ort/Coords; ohne GPS: Positionsanfrage. "
+                    "Beispiele: !uv Friedberg · !uv 50.34 8.76",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}regen",
-                    "Stündlicher Regen für die nächsten Stunden (Open-Meteo).",
+                    "Stündlicher Regen. Optional Ort/Coords; ohne GPS: Positionsanfrage.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
                     f"{p}blitz",
-                    "Live-Blitze im Umkreis (DMI EU; optional Blitzortung.org) plus kurze Gewitter-Vorhersage.",
+                    "Live-Blitze + Gewitter-Vorhersage. Optional Ort/Coords; ohne GPS: Positionsanfrage.",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and getattr(st, "use_meteo_wxApi", True)
                     and getattr(st, "wx_extra_commands", True),
                 ),
                 _cmd(
+                    f"{p}blitzwatch",
+                    "Status: Warnung AN/AUS, Home und Zusatzorte. Einstellen: !blitzwatch?",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch?",
+                    "Hilfe zum Einstellen (Home-Radius, Ort, Zusatzorte).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch on · off",
+                    "Warnung für deine Node ein- bzw. ausschalten.",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
+                    f"{p}blitzwatch web · set",
+                    "Nur per DM: 5-stelligen Code für /mein-blitzwatch (Menü Blitzwatch).",
+                    enabled=lambda: getattr(st, "location_enabled", False)
+                    and getattr(st, "blitz_watch_enabled", True),
+                ),
+                _cmd(
                     f"{p}warning",
-                    "Aktive Warnungen für den Kreis deiner GPS-Position.",
+                    "Aktive NINA-Warnungen. Optional: !warning Friedberg · !warning 50.34 8.76 · !warning JO40AA",
                     enabled=lambda: getattr(st, "enableDEalerts", False),
                 ),
                 _cmd(
@@ -274,6 +308,7 @@ def _sections() -> List[CommandSection]:
             ),
             section_enabled=lambda: getattr(st, "location_enabled", False)
             or getattr(st, "enableDEalerts", False),
+            intro_html=True,
         ),
         CommandSection(
             "Repeater & Himmel",
@@ -282,18 +317,18 @@ def _sections() -> List[CommandSection]:
             (
                 CommandEntry(
                     f"{p}rlist",
-                    "Repeater in der Nähe deines Standorts.",
+                    "Repeater in der Nähe. Optional: !rlist Friedberg · !rlist 50.34 8.76 · !rlist JO40AA",
                     enabled=lambda: getattr(st, "location_enabled", False)
                     and bool(getattr(st, "repeater_lookup", False)),
                 ),
                 CommandEntry(
                     f"{p}sun",
-                    "Sonnenauf-/untergang.",
+                    "Sonnenauf-/untergang. Optional: !sun Frankfurt · !sun 50.34 8.76 · !sun JO40AA",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False),
                 ),
                 CommandEntry(
                     f"{p}moon",
-                    "Mondphase.",
+                    "Mondphase. Optional: !moon Frankfurt · !moon 50.34 8.76 · !moon JO40AA",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False),
                 ),
                 CommandEntry(
@@ -308,7 +343,7 @@ def _sections() -> List[CommandSection]:
                 ),
                 CommandEntry(
                     f"{p}satpass",
-                    "Nächster Satellitenüberflug (N2YO-API-Key nötig).",
+                    "Satellitenüberflug. Optional Ort/Grid: !satpass Frankfurt · !satpass JO40AA · !satpass 25544 Frankfurt",
                     enabled=lambda: getattr(st, "solar_conditions_enabled", False)
                     and bool(getattr(st, "n2yoAPIKey", "")),
                 ),
@@ -333,6 +368,17 @@ def _sections() -> List[CommandSection]:
                 _cmd(
                     f"{p}bbspost @Empfänger #Text",
                     "Private BBS-DM an eine Node (Empfänger: Kurzname, Dezimal-ID oder !hex).",
+                ),
+                _cmd(
+                    f"{p}bbspost ack @Empfänger #Text",
+                    "BBS-DM mit Nutzer-Lesebestätigung (Empfänger antwortet mit ack <id>). "
+                    "Nur wenn bbsDmUserAckEnabled=True.",
+                    enabled=lambda: getattr(st, "bbs_dm_user_ack_enabled", False),
+                ),
+                _cmd(
+                    f"{p}ack <id>",
+                    "Lesebestätigung für eine ACK-pflichtige BBS-DM (getrennt von Mesh-/Node-ACK).",
+                    enabled=lambda: getattr(st, "bbs_dm_user_ack_enabled", False),
                 ),
                 _cmd(
                     f"{p}bbsread #Nr",
@@ -626,6 +672,116 @@ def _render_entry_row(entry: CommandEntry) -> str:
     return f"<tr><td class=\"cmd-help-cmd\"><code>{cmd}</code></td><td>{desc}{ex}</td></tr>"
 
 
+def _blitzwatch_enabled() -> bool:
+    try:
+        return bool(getattr(st, "location_enabled", False)) and bool(
+            getattr(st, "blitz_watch_enabled", True)
+        )
+    except Exception:
+        return False
+
+
+def render_blitzwatch_guide() -> str:
+    """Ausführliche Nutzerhilfe (für /mein-blitzwatch; nur wenn Blitzwatch aktiv)."""
+    if not _blitzwatch_enabled():
+        return ""
+    p = html_escape(_prefix())
+    return f"""
+<div class="portal-card p-4 mt-4 mb-2" id="blitzwatch">
+  <h2 class="h4 section-title mb-3">
+    <i class="bi bi-lightning-charge text-success me-2"></i>Blitzwatch — so funktioniert’s
+  </h2>
+  <p class="text-muted mb-3">
+    <strong>Blitzwatch</strong> warnt dich automatisch, wenn Live-Blitze in der Nähe eines
+    überwachten Standorts einschlagen. Anders als <code>{p}blitz</code> (einmalige Abfrage)
+    läuft die Überwachung im Hintergrund. Standardmäßig ist sie für deine Node
+    <strong>an</strong> (Opt-out mit <code>{p}blitzwatch off</code>).
+  </p>
+
+  <h3 class="h6 text-success mt-3 mb-2">Was wird überwacht?</h3>
+  <ul class="text-muted small mb-3">
+    <li>
+      <strong>Home</strong> — dein eigener Standort: standardmäßig die
+      <strong>frische GPS-Position</strong> deiner Node (≤ 24 h alt), oder ein
+      <strong>fester Ort</strong>, den du setzt.
+    </li>
+    <li>
+      <strong>Bis zu 3 Zusatzorte</strong> — z. B. Relais, Antennenstandorte oder Equipment,
+      unabhängig von deinem aktuellen GPS.
+    </li>
+    <li>
+      Jeder Punkt hat einen <strong>eigenen Radius</strong> (typisch 1–10 km) und einen
+      <strong>eigenen Cooldown</strong> (ca. 60 Min.), damit eine Warnung am Home die
+      Anlagen-Orte nicht blockiert.
+    </li>
+  </ul>
+
+  <h3 class="h6 text-success mt-3 mb-2">Standortangaben</h3>
+  <p class="text-muted small mb-2">
+    Wie bei Wetter und <code>{p}blitz</code> akzeptiert Blitzwatch:
+  </p>
+  <ul class="text-muted small mb-3">
+    <li>Ortsname — z. B. <code>Friedberg</code>, <code>Frankfurt</code></li>
+    <li>Koordinaten — z. B. <code>50.34 8.76</code></li>
+    <li>Maidenhead-Grid — z. B. <code>JO40</code> oder <code>JO40AA</code></li>
+  </ul>
+
+  <h3 class="h6 text-success mt-3 mb-2">Steuerung (Mesh-Befehle)</h3>
+  <p class="text-muted small mb-2">
+    <code>{p}blitzwatch</code> zeigt den Status.
+    <code>{p}blitzwatch?</code> listet die Einstell-Befehle.
+  </p>
+  <div class="table-responsive mb-3">
+    <table class="table table-sm table-hover cmd-help-table mb-0">
+      <thead><tr><th>Gruppe</th><th>Beispiele</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Ein / Aus</td>
+          <td><code>{p}blitzwatch on</code> · <code>{p}blitzwatch off</code></td>
+        </tr>
+        <tr>
+          <td>Home</td>
+          <td>
+            <code>{p}blitzwatch 8km</code> — Radius (1–10 km)<br>
+            <code>{p}blitzwatch home Friedberg</code> — fester Ort (auch Coords/Grid)<br>
+            <code>{p}blitzwatch home gps</code> — wieder Node-GPS
+          </td>
+        </tr>
+        <tr>
+          <td>Zusatzorte (max. 3)</td>
+          <td>
+            <code>{p}blitzwatch add Kassel</code> · <code>add 5km JO40AA</code><br>
+            <code>{p}blitzwatch del 1</code> — Slot löschen<br>
+            <code>{p}blitzwatch 1 5km</code> — Radius für Slot 1<br>
+            <code>{p}blitzwatch list</code> — Standorte
+          </td>
+        </tr>
+        <tr>
+          <td>Web</td>
+          <td>
+            <code>{p}blitzwatch web</code> · <code>{p}blitzwatch set</code> —
+            nur als <strong>DM</strong>: 5-stelliger Code,
+            15&nbsp;Minuten, einmalig. Eingabe oben auf dieser Seite.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="h6 text-success mt-3 mb-2">Warnungen</h3>
+  <ul class="text-muted small mb-0">
+    <li>Bei Treffer erhältst du eine <strong>Direktnachricht (DM)</strong> vom Bot
+      (z. B. „von dir“ oder „bei &lt;Ortsname&gt;“).</li>
+    <li>Zusätzlich erscheint meist eine kurze <strong>Kanalmeldung</strong>
+      (Kurzname + Distanz; bei Zusatzorten mit Label).</li>
+    <li>Details live nachschlagen: <code>{p}blitz</code> (optional mit Ort).</li>
+    <li>Ohne frisches GPS und ohne Fix/Zusatzorte kann Home nicht warnen —
+      Zusatzorte funktionieren trotzdem.</li>
+  </ul>
+</div>
+"""
+
+
 def render_commands_page_body() -> str:
     """HTML body (inside portal wrapper) for /befehle."""
     p = html_escape(_prefix())
@@ -633,11 +789,15 @@ def render_commands_page_body() -> str:
     explicit = getattr(st, "explicitCmd", True)
     if bang and explicit:
         usage = (
-            "Sende Befehle mit <strong>!</strong> am Anfang, z. B. <code>!ping</code>. "
-            "Nur Zeilen, die mit einem bekannten Befehl beginnen, werden verarbeitet."
+            "Im <strong>Kanal</strong> Befehle mit <strong>!</strong> am Anfang, z. B. <code>!ping</code>. "
+            "Per <strong>DM</strong> reicht der Befehl als erstes Wort auch ohne <code>!</code> "
+            "(z. B. <code>ping</code>). "
+            "Nur Nachrichten, die mit einem bekannten Befehl beginnen, werden verarbeitet."
         )
     elif bang:
-        usage = "Befehle mit <strong>!</strong>, z. B. <code>!cmd</code>."
+        usage = (
+            "Im Kanal mit <strong>!</strong>, per DM auch ohne — z. B. <code>!cmd</code> / <code>cmd</code>."
+        )
     else:
         usage = "Befehle ohne Ausrufezeichen, z. B. <code>ping</code> (je nach Bot-Konfiguration)."
 
@@ -646,7 +806,9 @@ def render_commands_page_body() -> str:
   <h1 class="h3 section-title mb-3">
     <i class="bi bi-terminal text-success me-2"></i>Mesh-Befehle
   </h1>
-  <p class="text-muted mb-0">{usage}</p>
+  <p class="text-muted mb-0">{usage}
+    Mehr zum Bot: <a href="https://github.com/chrishaef/Hessenbot" target="_blank" rel="noopener noreferrer"><i class="bi bi-github"></i> GitHub</a>.
+  </p>
 </div>
 """
 
@@ -665,7 +827,10 @@ def render_commands_page_body() -> str:
         icon = html_escape(section.icon)
         sec_intro = ""
         if section.intro:
-            sec_intro = f'<p class="text-muted small mb-3">{html_escape(section.intro)}</p>'
+            intro_body = (
+                section.intro if section.intro_html else html_escape(section.intro)
+            )
+            sec_intro = f'<p class="text-muted small mb-3">{intro_body}</p>'
         btn_cls = "" if expanded else " collapsed"
         show_cls = " show" if expanded else ""
         parts.append(
