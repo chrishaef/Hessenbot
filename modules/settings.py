@@ -67,82 +67,82 @@ if config.sections() == []:
     print(f"System: Error reading config file: {config_file} is empty or does not exist.")
     config['interface'] = {'type': 'serial', 'port': "/dev/ttyACM0", 'hostname': '', 'mac': ''}
     config['general'] = {'respond_by_dm_only': 'True', 'defaultChannel': '0', 'motd': MOTD, 'welcome_message': WELCOME_MSG, 'zuluTime': 'False'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
     print (f"System: Config file created, check {config_file} or review the config.template")
 
 if 'sentry' not in config:
     config['sentry'] = {'SentryEnabled': 'False', 'SentryChannel': '2', 'SentryHoldoff': '9', 'sentryIgnoreList': '', 'SentryRadius': '100'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'location' not in config:
     config['location'] = {'enabled': 'True', 'lat': '48.50', 'lon': '-123.0', 'fuzzConfigLocation': 'True',}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'bbs' not in config:
     config['bbs'] = {'enabled': 'False', 'bbsdb': 'data/bbsdb.pkl', 'bbs_ban_list': '', 'bbs_admin_list': ''}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'polls' not in config:
     config['polls'] = {'enabled': 'True', 'max_options': '8', 'allow_revote': 'True'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'repeater' not in config:
     config['repeater'] = {'enabled': 'False', 'repeater_channels': ''}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'radioMon' not in config:
     config['radioMon'] = {'enabled': 'False', 'rigControlServerAddress': 'localhost:4532', 'sigWatchBrodcastCh': '2', 'signalDetectionThreshold': '-10', 'signalHoldTime': '10', 'signalCooldown': '5', 'signalCycleLimit': '5'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'messagingSettings' not in config:
     config['messagingSettings'] = {'responseDelay': '0.7', 'splitDelay': '0', 'MESSAGE_CHUNK_SIZE': '160'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'fileMon' not in config:
     config['fileMon'] = {'enabled': 'False', 'file_path': 'alert.txt', 'broadcastCh': '2'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'scheduler' not in config:
     config['scheduler'] = {'enabled': 'False'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'motdBroadcast' not in config:
     config['motdBroadcast'] = {
         'enabled': 'False', 'interface': '1', 'channel': '2',
         'mode': 'day', 'interval': '1', 'time': '09:00',
     }
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'newsBroadcast' not in config:
     config['newsBroadcast'] = {
         'enabled': 'False', 'interface': '1', 'channel': '2',
         'mode': 'hour', 'interval': '6', 'time': '',
     }
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'channelTest' not in config:
     config['channelTest'] = {'enabled': 'False', 'channels': '', 'modes': ''}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'emergencyHandler' not in config:
     config['emergencyHandler'] = {'enabled': 'False', 'alert_channel': '2', 'alert_interface': '1', 'email': ''}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'smtp' not in config:
     config['smtp'] = {'sysopEmails': '', 'enableSMTP': 'False', 'enableImap': 'False'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'checklist' not in config:
     config['checklist'] = {'enabled': 'False', 'checklist_db': 'data/checklist.db'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'qrz' not in config:
     config['qrz'] = {'enabled': 'False', 'qrz_db': 'data/qrz.db', 'qrz_hello_string': 'send CMD or DM me for more info.'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'inventory' not in config:
     config['inventory'] = {'enabled': 'False', 'inventory_db': 'data/inventory.db', 'disable_penny': 'False'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'webAdmin' not in config:
     config['webAdmin'] = {
@@ -166,11 +166,11 @@ if 'webAdmin' not in config:
         'api_token_hash': '',
         'api_token': '',
     }
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 elif 'publicUrl' not in config['webAdmin']:
     # Bestehende Installationen: Feld für !blitzwatch set / Admin-Einstellungen nachziehen
     config['webAdmin']['publicUrl'] = ''
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 _IMPRESSUM_KEYS = (
     'impressumOperator',
@@ -187,19 +187,19 @@ if 'webAdmin' in config:
             config['webAdmin'][_k] = ''
             _imp_added = True
     if _imp_added:
-        config.write(open(config_file, 'w'))
+        config.write(open(config_file, 'w', encoding='utf-8'))
 
 if 'webAdmin' in config:
     # Service-API: Enable-Flag + Token-Hash; Legacy-Klartext einmalig migrieren
     from modules.service_api import migrate_plaintext_token_if_needed
 
     if migrate_plaintext_token_if_needed(config):
-        config.write(open(config_file, 'w'))
+        config.write(open(config_file, 'w', encoding='utf-8'))
 
 
 if 'location' not in config:
     config['location'] = {'locations_db': 'data/locations.db', 'public_location_admin_manage': 'False', 'delete_public_locations_admins_only': 'False'}
-    config.write(open(config_file, 'w'))
+    config.write(open(config_file, 'w', encoding='utf-8'))
 
 # interface1 settings
 interface1_type = config['interface'].get('type', 'serial')
