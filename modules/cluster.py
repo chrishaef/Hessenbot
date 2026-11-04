@@ -630,6 +630,7 @@ def _do_push_offline_delta() -> None:
         from modules.cluster_store import (
             push_outbox,
             _sync_bbs,
+            _sync_bbs_dm,
             _sync_locations,
             _sync_checklist,
             _sync_inventory,
@@ -638,7 +639,7 @@ def _do_push_offline_delta() -> None:
         if pushed:
             logger.info(f"Cluster: pushed {pushed} outbox entry/entries to master")
         # Immediate bridge cycle — don't wait for the 60 s timer
-        for fn in (_sync_bbs, _sync_locations, _sync_checklist, _sync_inventory):
+        for fn in (_sync_bbs, _sync_bbs_dm, _sync_locations, _sync_checklist, _sync_inventory):
             try:
                 fn()
             except Exception as e:
@@ -653,9 +654,11 @@ def _do_push_offline_delta() -> None:
 # ---------------------------------------------------------------------------
 
 def _auth_headers() -> Dict[str, str]:
+    # Unified auth: the cluster API uses the same Service-API token model
+    # (modules.service_api — hash/env token, audit log) as /api/v1/*.
     headers: Dict[str, str] = {}
     if config.api_token:
-        headers["X-Cluster-Token"] = config.api_token
+        headers["Authorization"] = f"Bearer {config.api_token}"
     return headers
 
 

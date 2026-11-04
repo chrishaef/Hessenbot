@@ -158,6 +158,14 @@ docker compose -f docker-compose.master.yml restart hessenbot
 
 ---
 
+## 4a. Replizierte Daten
+
+CouchDB repliziert zwischen Master und Slaves: `hessenbot_bbs` (BBS-Posts),
+`hessenbot_bbs_dm` (BBS-DM-Queue **inkl. Lesebestätigungs-Status**, Issue #9 —
+wartende DMs und ACK-Zustände überleben so einen Failover), `hessenbot_locations`,
+`hessenbot_checklist`, `hessenbot_inventory`. Die Slave-Registry und der
+Key-Store bleiben master-lokal bzw. gefiltert.
+
 ## 5. CouchDB — Netzwerk-Zugang für Slaves
 
 Slaves benötigen HTTPS-Zugang zur CouchDB des Masters auf Port 5984 (oder Custom-Port).
@@ -265,5 +273,9 @@ docker compose -f docker-compose.master.yml start hessenbot
 - `.env.master` und `.env.slave` **niemals ins Git** — in `.gitignore` eintragen
 - CouchDB-Port **nicht öffentlich** exponieren — Reverse-Proxy mit TLS verwenden
 - API-Token mit `openssl rand -hex 32` generieren
+- Cluster-API-Auth nutzt das **Service-API-Modell** (`modules/service_api`):
+  Slaves senden `Authorization: Bearer <HESSENBOT_API_TOKEN>`, der Master prüft
+  konstant-zeitlich gegen Env-Token oder gespeicherten Hash; alle Zugriffe
+  erscheinen im API-Audit-Log (Web-Admin → Tab „API")
 - Master-Private-Key mit einem starken Secret verschlüsseln (zukünftige Erweiterung)
 - Slave-CouchDB-Passwörter individuell pro Standort wählen

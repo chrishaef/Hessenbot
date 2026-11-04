@@ -13,6 +13,7 @@ In MASTER/SLAVE mode:
 CouchDB databases
 -----------------
   hessenbot_bbs         — BBS messages (replicated)
+  hessenbot_bbs_dm      — BBS direct-message queue incl. ACK state (replicated)
   hessenbot_locations   — Saved map locations (replicated)
   hessenbot_checklist   — Checklist data (replicated)
   hessenbot_inventory   — Inventory / POS data (replicated)
@@ -22,6 +23,7 @@ CouchDB databases
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pickle
@@ -163,6 +165,7 @@ _sync_thread: Optional[threading.Thread] = None
 
 _DBS = [
     "hessenbot_bbs",
+    "hessenbot_bbs_dm",
     "hessenbot_locations",
     "hessenbot_checklist",
     "hessenbot_inventory",
@@ -305,6 +308,7 @@ def setup_slave_replication(
     if replicate_dbs is None:
         replicate_dbs = [
             "hessenbot_bbs",
+            "hessenbot_bbs_dm",
             "hessenbot_locations",
             "hessenbot_checklist",
             "hessenbot_inventory",
@@ -363,6 +367,7 @@ def _sync_bridge_loop() -> None:
     while True:
         try:
             _sync_bbs()
+            _sync_bbs_dm()
             _sync_locations()
             _sync_checklist()
             _sync_inventory()
@@ -416,6 +421,142 @@ def _sync_bbs() -> None:
                         pickle.dump(local_posts, f)
     except Exception as e:
         logger.debug(f"ClusterStore: BBS sync error: {e}")
+
+
+# DM queue sync (hessenbot_bbs_dm) — replicates the bbsdm.pkl state machine
+# (Issue #9 / PR #10) so queued DMs and ACK progress survive a failover.
+#
+# Works directly on modules.bbstools' in-memory queue under its RLock instead
+# of the pkl file, so the bot sees pulled entries immediately.
+
+_DM_TERMINAL_STATES = ("acked", "expired", "failed", "delivered", "closed")
+_DM_STATE_RANK = {
+    "queued": 0,
+    "delivering": 1,
+    "awaiting_user_ack": 2,
+    "acked": 3,
+    "expired": 3,
+    "failed": 3,
+    "delivered": 3,
+    "closed": 3,
+}
+# DM-queue keys seen locally in the previous bridge round; a key that
+# disappears between rounds was closed locally (delivered/acked/expired).
+_dm_seen_keys: set = set()
+
+
+def _dm_key(entry: Dict) -> str:
+    """Stable cluster-wide identity for a DM entry.
+
+    ACK mails carry a random msg_id; plain DMs are keyed by content hash.
+    """
+    mid = str(entry.get("msg_id") or "")
+    if mid:
+        return f"id_{mid}"
+    base = (
+        f"{entry.get('to')}|{entry.get('from')}|{entry.get('body')}|"
+        f"{entry.get('created_at')}"
+    )
+    return "h_" + hashlib.sha1(base.encode("utf-8", "replace")).hexdigest()[:20]
+
+
+def _dm_sync_fields(entry: Dict) -> Dict:
+    """The replicated subset of a DM entry (no _id/_rev, JSON-safe)."""
+    return {
+        k: entry.get(k)
+        for k in (
+            "to", "body", "from", "require_user_ack", "state", "created_at",
+            "last_attempt_at", "attempt_count", "mesh_acked", "user_acked",
+            "msg_id", "notify_sender", "notified_unknown_target",
+        )
+    }
+
+
+def _sync_bbs_dm() -> None:
+    """Push local DM queue + ACK state → CouchDB; pull remote queued DMs."""
+    global _dm_seen_keys
+    try:
+        import modules.bbstools as bbs
+
+        client = _get_client()
+        remote = {
+            d.get("dm_key"): d
+            for d in client.all_docs("hessenbot_bbs_dm")
+            if d.get("dm_key")
+        }
+
+        with bbs._bbs_dm_lock:
+            local_by_key = {
+                _dm_key(e): dict(e)
+                for idx, e in enumerate(bbs.bbs_dm)
+                if isinstance(e, dict) and not bbs.is_placeholder_dm(e, idx)
+            }
+
+        # Push: new entries, and state that advanced locally
+        for key, entry in local_by_key.items():
+            state = str(entry.get("state") or "queued")
+            doc = remote.get(key)
+            if doc is None:
+                payload = _dm_sync_fields(entry)
+                payload["dm_key"] = key
+                payload["origin_node"] = _my_node_id()
+                client.put("hessenbot_bbs_dm", f"dm_{key}", payload)
+            else:
+                remote_state = str(doc.get("state") or "queued")
+                advanced = (
+                    _DM_STATE_RANK.get(state, 0) > _DM_STATE_RANK.get(remote_state, 0)
+                    or bool(entry.get("mesh_acked")) and not doc.get("mesh_acked")
+                    or int(entry.get("attempt_count") or 0) > int(doc.get("attempt_count") or 0)
+                )
+                if advanced:
+                    updated = dict(doc)
+                    updated.update(_dm_sync_fields(entry))
+                    client.put("hessenbot_bbs_dm", doc.get("_id", f"dm_{key}"), updated)
+
+        # Entries gone from the local queue since last round were closed
+        # here (delivered/acked/expired) — close them cluster-wide so no
+        # other node re-delivers them.
+        for key in _dm_seen_keys - set(local_by_key):
+            doc = remote.get(key)
+            if doc and str(doc.get("state") or "") not in _DM_TERMINAL_STATES:
+                updated = dict(doc)
+                updated["state"] = "closed"
+                updated["closed_by"] = _my_node_id()
+                client.put("hessenbot_bbs_dm", doc.get("_id", f"dm_{key}"), updated)
+
+        # Pull: open remote DMs this node has never held
+        pulled = 0
+        incoming = [
+            d for k, d in remote.items()
+            if k not in local_by_key
+            and k not in _dm_seen_keys
+            and str(d.get("state") or "queued") not in _DM_TERMINAL_STATES
+        ]
+        if incoming:
+            with bbs._bbs_dm_lock:
+                present = {
+                    _dm_key(e)
+                    for idx, e in enumerate(bbs.bbs_dm)
+                    if isinstance(e, dict) and not bbs.is_placeholder_dm(e, idx)
+                }
+                for doc in incoming:
+                    if doc.get("dm_key") in present:
+                        continue
+                    entry = bbs.migrate_dm_entry(_dm_sync_fields(doc))
+                    # A DELIVERING snapshot from a crashed peer must retry here
+                    if str(entry.get("state")) == "delivering":
+                        entry["state"] = "queued"
+                    entry["mesh_request_id"] = None
+                    bbs.bbs_dm.append(entry)
+                    pulled += 1
+                if pulled:
+                    bbs.save_bbsdm()
+        if pulled:
+            logger.info(f"ClusterStore: bbs_dm: pulled {pulled} remote DM(s)")
+
+        _dm_seen_keys = set(local_by_key)
+    except Exception as e:
+        logger.debug(f"ClusterStore: bbs_dm sync error: {e}")
 
 
 def _sync_locations() -> None:

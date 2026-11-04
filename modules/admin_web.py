@@ -3109,26 +3109,44 @@ def create_app(
         """
 
         if role == "master":
+            slave_rows = []
+            for nid, r in slaves.items():
+                nid_h = html_escape(str(nid))
+                if r.get("authorized"):
+                    actions = (
+                        f'<form action="/cluster/deauthorize" method="post">'
+                        f'<input type="hidden" name="node_id" value="{nid_h}">'
+                        f'<button class="btn-warn">Sperren</button></form>'
+                    )
+                    if not r.get("master_key_transferred"):
+                        actions += (
+                            f'<form action="/cluster/transfer-key" method="post">'
+                            f'<input type="hidden" name="node_id" value="{nid_h}">'
+                            f'<button>Key senden</button></form>'
+                        )
+                else:
+                    actions = (
+                        f'<form action="/cluster/authorize" method="post">'
+                        f'<input type="hidden" name="node_id" value="{nid_h}">'
+                        f'<button>Autorisieren</button></form>'
+                    )
+                slave_rows.append(f'''
+          <tr>
+            <td>{html_escape(str(r.get('name', '—')))}</td>
+            <td><code>{nid_h}</code></td>
+            <td>{'✅' if r.get('authorized') else '❌'}</td>
+            <td>{html_escape(str(r.get('mode', '?')))}</td>
+            <td>{html_escape(str(r.get('_last_seen_str', '—')))}</td>
+            <td>{'✅' if r.get('master_key_transferred') else '—'}</td>
+            <td>{actions}</td>
+          </tr>''')
             html += f"""
         <h2>Slaves ({len(slaves)})</h2>
         <table>
           <tr><th>Name</th><th>Node-ID</th><th>Autorisiert</th>
               <th>Modus</th><th>Zuletzt gesehen</th>
               <th>Key transferiert</th><th>Aktionen</th></tr>
-        {"".join(f'''
-          <tr>
-            <td>{r.get('name','—')}</td>
-            <td><code>{nid}</code></td>
-            <td>{'✅' if r.get('authorized') else '❌'}</td>
-            <td>{r.get('mode','?')}</td>
-            <td>{r.get('_last_seen_str','—')}</td>
-            <td>{'✅' if r.get('master_key_transferred') else '—'}</td>
-            <td>
-              {"" if r.get('authorized') else f'<form action="/cluster/authorize" method="post"><input type="hidden" name="node_id" value="{nid}"><button>Autorisieren</button></form>'}
-              {"" if not r.get('authorized') else f'<form action="/cluster/deauthorize" method="post"><input type="hidden" name="node_id" value="{nid}"><button class=\\'btn-warn\\'>Sperren</button></form>'}
-              {f'<form action="/cluster/transfer-key" method="post"><input type="hidden" name="node_id" value="{nid}"><button>Key senden</button></form>' if r.get('authorized') and not r.get('master_key_transferred') else ''}
-            </td>
-          </tr>''' for nid, r in slaves.items())}
+        {"".join(slave_rows)}
         </table>
 
         <h2>Slave hinzufügen</h2>
@@ -3219,9 +3237,15 @@ def create_app(
     def cluster_ping():
         """Heartbeat endpoint — slaves poll this. No login required (token-checked)."""
         import modules.settings as st
-        token = request.headers.get("X-Cluster-Token", "")
-        if st.cluster_api_token and token != st.cluster_api_token:
-            return {"error": "unauthorized"}, 403
+        from modules import service_api as sapi
+        _, err = _service_api_authorize()
+        if err is not None:
+            resp, code, err_code = err
+            sapi.log_request(
+                endpoint="/cluster/ping", method="GET", status=code,
+                client_ip=_service_api_client_ip(), error=err_code,
+            )
+            return resp, code
 
         # Report MQTT status (from settings — the MQTT interface connection state)
         mqtt_ok = True
@@ -3242,18 +3266,35 @@ def create_app(
     @app.route("/cluster/sync/push", methods=["POST"])
     def cluster_sync_push():
         """Master receives offline-delta push from a slave."""
-        import modules.settings as st
-        token = request.headers.get("X-Cluster-Token", "")
-        if st.cluster_api_token and token != st.cluster_api_token:
-            return {"error": "unauthorized"}, 403
+        from modules import service_api as sapi
+        _, err = _service_api_authorize()
+        if err is not None:
+            resp, code, err_code = err
+            sapi.log_request(
+                endpoint="/cluster/sync/push", method="POST", status=code,
+                client_ip=_service_api_client_ip(), error=err_code,
+            )
+            return resp, code
 
         entry = request.get_json(silent=True) or {}
         db_name = entry.get("db", "")
         operation = entry.get("operation", "upsert")
         doc = entry.get("doc", {})
 
+        # Slaves may only push into the replicated data DBs — never into
+        # the slave registry or key store.
+        allowed_dbs = (
+            "hessenbot_bbs", "hessenbot_bbs_dm", "hessenbot_locations",
+            "hessenbot_checklist", "hessenbot_inventory",
+        )
         if not db_name or not doc:
             return {"error": "invalid payload"}, 400
+        if db_name not in allowed_dbs:
+            sapi.log_request(
+                endpoint="/cluster/sync/push", method="POST", status=403,
+                client_ip=_service_api_client_ip(), error="db_not_allowed",
+            )
+            return {"error": "db not allowed"}, 403
 
         try:
             from modules.cluster_store import _get_client
@@ -3264,6 +3305,11 @@ def create_app(
             else:
                 doc_id = doc.get("_id") or client.post(db_name, doc)
                 ok = bool(doc_id)
+            sapi.log_request(
+                endpoint="/cluster/sync/push", method="POST",
+                status=200 if ok else 500,
+                client_ip=_service_api_client_ip(),
+            )
             return {"ok": ok}
         except Exception as e:
             logger.error(f"Cluster: sync push error: {e}")
@@ -3315,8 +3361,11 @@ def start_admin_web_background():
     from modules import service_api as sapi
 
     env_api = os.environ.get("HESSENBOT_API_TOKEN", "").strip()
+    # Cluster mode implies the token API: slaves authenticate heartbeat and
+    # sync pushes with the same HESSENBOT_API_TOKEN via the Service-API model.
     sapi.configure(
-        enabled=bool(getattr(my_settings, "web_admin_api_enabled", False)),
+        enabled=bool(getattr(my_settings, "web_admin_api_enabled", False))
+        or bool(getattr(my_settings, "cluster_enabled", False)),
         token_hash=getattr(my_settings, "web_admin_api_token_hash", "") or "",
         env_token=env_api,
         log_dir=log_d,
