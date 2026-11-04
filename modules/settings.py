@@ -493,6 +493,11 @@ try:
     bbs_link_enabled = config['bbs'].getboolean('bbslink_enabled', False)
     bbs_link_whitelist = config['bbs'].get('bbslink_whitelist', '').split(',')
     bbsAPI_enabled = config['bbs'].getboolean('bbsAPI_enabled', False)
+    bbs_dm_user_ack_enabled = config['bbs'].getboolean('bbsDmUserAckEnabled', False)
+    bbs_dm_ack_retry_seconds = config['bbs'].getint('bbsDmAckRetrySeconds', 900)
+    bbs_dm_ack_max_attempts = config['bbs'].getint('bbsDmAckMaxAttempts', 5)
+    bbs_dm_ack_expire_seconds = config['bbs'].getint('bbsDmAckExpireSeconds', 7200)
+    bbs_dm_notify_sender = config['bbs'].getboolean('bbsDmNotifySender', True)
 
     # Umfragen
     polls_enabled = config['polls'].getboolean('enabled', True)

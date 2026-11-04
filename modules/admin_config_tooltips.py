@@ -106,6 +106,11 @@ BEHAVIOR: Dict[TooltipKey, str] = {
     ("bbs", "bbslink_enabled"): "True: BBS-Sync mit anderen Knoten (bbslink).",
     ("bbs", "bbslink_whitelist"): "Nur diese Knoten dürfen bbslink; leer = alle erlaubt.",
     ("bbs", "bbsAPI_enabled"): "True: Externe Skripte dürfen BBS per API ansprechen.",
+    ("bbs", "bbsDmUserAckEnabled"): "True: bbspost ack @… verlangt Nutzer-Lesebestätigung (ack <id>). False: ACK-Pfad deaktiviert.",
+    ("bbs", "bbsDmAckRetrySeconds"): "Sekunden bis erneuter Zustellversuch ohne Nutzer-ACK (Default 900 = 15 min).",
+    ("bbs", "bbsDmAckMaxAttempts"): "Maximale Zustellversuche für ACK-pflichtige BBS-DMs (Default 5).",
+    ("bbs", "bbsDmAckExpireSeconds"): "Nach so vielen Sekunden ohne Nutzer-ACK gilt die DM als abgelaufen (Default 7200 = 2 h).",
+    ("bbs", "bbsDmNotifySender"): "True: Absender erhält Status-DMs (eingereiht, Versuch, Node-Empfang, Nutzer-ACK, Ablauf).",
     # ── polls ──
     ("polls", "enabled"): "True: Umfragen mit !poll im Mesh; Ergebnis im Admin unter Umfragen.",
     ("polls", "max_options"): "Maximal so viele Antwortoptionen pro Umfrage.",

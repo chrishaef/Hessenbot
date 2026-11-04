@@ -6,6 +6,7 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Added
 
+- **BBS-DM Lesebestätigung** (Issue #9): `bbspost ack @Empfänger #Text` verlangt Nutzer-ACK per `ack <id>`; Mesh-/Node-Empfang (`wantAckOnDm`) und Nutzer-Bestätigung getrennt; Absender-Status-DMs; Config `bbsDmUserAckEnabled`, Retry/Max/Expire, Admin-Spalten + Checkbox
 - **Service-API**: `POST /api/v1/dm` / `GET /api/v1/whoami` für externe Dienste (z. B. MQTT-Webadmin Watchcat); Admin-Tab **API** (Enable, Key einmalig erzeugen, Doku, Request-Log); Token als SHA-256-Hash (`api_token_hash`), Schalter `api_enabled`, optional Env `HESSENBOT_API_TOKEN`; Rate-Limit 30/min; Audit in `logs/service_api.log`
 
 

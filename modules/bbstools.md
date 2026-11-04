@@ -42,8 +42,7 @@ bbspost $Subject #Message
 ## 1.2 Direct Mail (DM) Messages
 - **DMs are private messages** sent from one node to another.
 - Stored separately from public posts in `data/bbsdm.pkl`.
-- Each DM entry typically includes:  
-  `[id, toNode, message, fromNode, timestamp, threadID, replytoID]`
+- Queue entries are dict records (legacy `[toNode, message, fromNode]` triples are migrated on load).
 - You can inject DMs directly for automation using the `script/injectDM.py` tool.
 
 ### DM Delivery
@@ -53,7 +52,21 @@ bbspost $Subject #Message
   bbspost @USER #Message
   ```
 - When a DM is posted, it is added to the DM database.
-- When the bot detects the recipient node on the network, it delivers the DM and then removes it from local storage.
+- First delivery attempt runs once the target is in NodeDB (or when a packet from that node is seen).
+- Normal DMs are removed after send (unchanged).
+
+### User read receipt (optional)
+
+Requires `[bbs] bbsDmUserAckEnabled = True`.
+
+```sh
+bbspost ack @USER #Important message
+```
+
+- Recipient mail includes `Bitte bestätigen: ack <id>`.
+- Reply `ack <id>` (or bare `ack` if exactly one pending ACK-mail) closes the item and notifies the sender.
+- Mesh/`wantAckOnDm` is reported separately as **Node-Empfang**; user `ack` is **Nutzer bestätigt**.
+- Retries / expire: `bbsDmAckRetrySeconds` (900), `bbsDmAckMaxAttempts` (5), `bbsDmAckExpireSeconds` (7200).
 
 ---
 
@@ -65,6 +78,8 @@ bbspost $Subject #Message
 | `bbslist`    | List messages                                 |
 | `bbsread`    | Read a message by ID                          |
 | `bbspost`    | Post a message or DM                          |
+| `bbspost ack @… #…` | DM with user read receipt              |
+| `ack <id>`   | Confirm a user-ACK DM (not `bbsack`)          |
 | `bbsdelete`  | Delete a message                              |
 | `bbsinfo`    | BBS stats (sysop)                             |
 | `bbslink`    | Link messages between BBS systems             |
@@ -197,8 +212,10 @@ bbsAPI_enabled = True
 | `bbs_read_message()`    | Read a message by ID                      | `bbs_read_message(messageID)`                      |
 | `bbs_delete_message()`  | Delete a message (admin/owner only)       | `bbs_delete_message(messageID, fromNode)`          |
 | `bbs_list_messages()`   | List all message subjects                 | `bbs_list_messages()`                              |
-| `bbs_post_dm()`         | Post a direct message                     | `bbs_post_dm(toNode, message, fromNode)`           |
+| `bbs_post_dm()`         | Post a direct message                     | `bbs_post_dm(toNode, message, fromNode, require_user_ack=False)` |
 | `bbs_check_dm()`        | Check for DMs for a node                  | `bbs_check_dm(toNode)`                             |
+| `bbs_try_deliver_for_node()` | Deliver next eligible DM             | `bbs_try_deliver_for_node(toNode, deviceID, ch)`   |
+| `bbs_handle_user_ack()` | Recipient user-ACK                        | `bbs_handle_user_ack(fromNode, msg_id)`            |
 | `bbs_delete_dm()`       | Delete a DM after reading                 | `bbs_delete_dm(toNode, message)`                   |
 | `get_bbs_stats()`       | Get stats on BBS and DMs                  | `get_bbs_stats()`                                  |
 

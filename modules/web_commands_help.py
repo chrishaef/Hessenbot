@@ -73,7 +73,8 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}ack",
-                    "Alias für ping.",
+                    "Alias für ping. Bei wartender BBS-DM mit Lesebestätigung: Nutzer-ACK "
+                    "(nacktes ack nur wenn genau eine Mail wartet; sonst ack <id>).",
                     enabled=lambda: getattr(st, "ping_enabled", True),
                 ),
                 _cmd(
@@ -367,6 +368,17 @@ def _sections() -> List[CommandSection]:
                 _cmd(
                     f"{p}bbspost @Empfänger #Text",
                     "Private BBS-DM an eine Node (Empfänger: Kurzname, Dezimal-ID oder !hex).",
+                ),
+                _cmd(
+                    f"{p}bbspost ack @Empfänger #Text",
+                    "BBS-DM mit Nutzer-Lesebestätigung (Empfänger antwortet mit ack <id>). "
+                    "Nur wenn bbsDmUserAckEnabled=True.",
+                    enabled=lambda: getattr(st, "bbs_dm_user_ack_enabled", False),
+                ),
+                _cmd(
+                    f"{p}ack <id>",
+                    "Lesebestätigung für eine ACK-pflichtige BBS-DM (getrennt von Mesh-/Node-ACK).",
+                    enabled=lambda: getattr(st, "bbs_dm_user_ack_enabled", False),
                 ),
                 _cmd(
                     f"{p}bbsread #Nr",

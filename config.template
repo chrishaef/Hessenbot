@@ -204,6 +204,16 @@ bbslink_enabled = False
 bbslink_whitelist =
 # enable API script access (increases disk i/o)
 bbsAPI_enabled = True
+# BBS-DM Nutzer-Lesebestätigung (bbspost ack @… #… / ack <id>)
+bbsDmUserAckEnabled = False
+# Retry-Intervall in Sekunden ohne Nutzer-ACK (Default 15 min)
+bbsDmAckRetrySeconds = 900
+# Max. Zustellversuche für ACK-pflichtige DMs
+bbsDmAckMaxAttempts = 5
+# Ablauf nach Sekunden ohne Nutzer-ACK (Default 2 h)
+bbsDmAckExpireSeconds = 7200
+# Status-DMs an Absender bei Queue/Versuch/Node-ACK/Nutzer-ACK/Ablauf
+bbsDmNotifySender = True
 
 [polls]
 # Einfache Umfragen: !poll im Mesh, Verwaltung im Admin-Backend (/umfragen)

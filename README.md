@@ -164,7 +164,7 @@ cp config.template config.ini
 ### Kernfunktionen (aus meshing-around, beibehalten)
 
 - Keyword-Responder, Notfall-Stichwörter (112, …)
-- **BBS** (Posten, Lesen, DM, Link zwischen Bots)
+- **BBS** (Posten, Lesen, DM, Link zwischen Bots; optional DM-Lesebestätigung `bbspost ack` / `ack <id>`)
 - **LLM** (Ollama / OpenWebUI, optional)
 - **Solar / HF** (`!solar`, `!hfcond`, `!sun`, `!moon`, `!howtall`)
 - Scheduler, File-Monitor (`!readnews`), Sentry-Nähe, QRZ-Begrüßung, Inventar/Checklist (optional)
@@ -181,7 +181,8 @@ cp config.template config.ini
 | `!trace` / `!trace MHH` | Traceroute zu dir bzw. Ziel-Station (Ergebnis per DM, Warteschlange) |
 | `!trace?` | Kurzhilfe zu `!trace` |
 | `test` (ohne `!`) | Nur auf aktivierten Kanälen (Channel-Test): Antwort wie `!test`, direkt im Kanal |
-| `!ack` | Wie Ping, Keyword ACK |
+| `!ack` | Wie Ping; bei wartender ACK-DM: Nutzer-Lesebestätigung (`ack <id>`) |
+| `!bbspost ack @Node #Text` | BBS-DM mit Lesebestätigung (Config `bbsDmUserAckEnabled`) |
 | `!warning` / `!warning Fulda` | NINA/Katwarn für deinen Standort oder angegebenen Ort |
 | `!dealert` | Warnungen für `myRegionalKeysDE` |
 | `!wx` / `!wx Fulda` / `!wx JO40AA` | Wetter (Open-Meteo); ohne Ort: Node-GPS bzw. Positionsanfrage |
