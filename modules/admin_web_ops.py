@@ -19,6 +19,13 @@ def _system_mod():
     return system_mod
 
 
+def _write_st_config(st) -> None:
+    """Persist st.config with canonical key case (see admin_config.write_config_file)."""
+    from modules.admin_config import write_config_file
+
+    write_config_file(st.config, st.config_file)
+
+
 def iter_radio_interfaces() -> List[int]:
     """1..9 interface indices that are enabled and have a live object."""
     sm = _system_mod()
@@ -317,8 +324,7 @@ def save_motd_to_config(motd: str) -> None:
     if "general" not in st.config:
         st.config["general"] = {}
     st.config["general"]["motd"] = text
-    with open(st.config_file, "w", encoding="utf-8") as fh:
-        st.config.write(fh)
+    _write_st_config(st)
     st.MOTD = text
 
 
@@ -702,8 +708,7 @@ def _save_broadcast_section(
     sec["mode"] = mode.strip().lower()
     sec["interval"] = interval.strip()
     sec["time"] = sched_time.strip()
-    with open(st.config_file, "w", encoding="utf-8") as fh:
-        st.config.write(fh)
+    _write_st_config(st)
 
     setattr(st, f"{prefix}_enabled", enabled)
     setattr(st, f"{prefix}_interface", iface)
@@ -736,8 +741,7 @@ def save_scheduler_to_config(
     sec["value"] = value.strip()
     sec["interval"] = interval.strip()
     sec["time"] = sched_time.strip()
-    with open(st.config_file, "w", encoding="utf-8") as fh:
-        st.config.write(fh)
+    _write_st_config(st)
 
     st.scheduler_enabled = enabled
     st.schedulerInterface = iface
@@ -883,8 +887,7 @@ def save_channel_test_to_config(
     st.config["channelTest"]["enabled"] = "True" if enabled else "False"
     st.config["channelTest"]["channels"] = ",".join(clean)
     st.config["channelTest"]["modes"] = modes_s
-    with open(st.config_file, "w", encoding="utf-8") as fh:
-        st.config.write(fh)
+    _write_st_config(st)
 
     st.channel_test_enabled = enabled
     st.channel_test_channels = clean
@@ -942,8 +945,7 @@ def save_rate_limit_settings_to_config(
     sec["cmdRateLimitNotifyOnce"] = "True" if notify_once else "False"
     sec["cmdExpensiveCooldownSec"] = str(expensive_cooldown)
     sec["cmdExpensiveCommands"] = ",".join(seen)
-    with open(st.config_file, "w", encoding="utf-8") as fh:
-        st.config.write(fh)
+    _write_st_config(st)
 
     return reload_runtime_settings()
 
@@ -1300,8 +1302,7 @@ def save_ban_list(node_ids: List[str]) -> List[str]:
     if "bbs" not in st.config:
         st.config["bbs"] = {}
     st.config["bbs"]["bbs_ban_list"] = ",".join(cleaned)
-    with open(st.config_file, "w", encoding="utf-8") as fh:
-        st.config.write(fh)
+    _write_st_config(st)
 
     return cleaned
 
@@ -1335,8 +1336,7 @@ def save_mesh_admin_list(node_ids: List[str]) -> List[str]:
     if "bbs" not in st.config:
         st.config["bbs"] = {}
     st.config["bbs"]["bbs_admin_list"] = ",".join(cleaned)
-    with open(st.config_file, "w", encoding="utf-8") as fh:
-        st.config.write(fh)
+    _write_st_config(st)
 
     return cleaned
 
@@ -1358,7 +1358,9 @@ _CONFIG_ATTR_ALIASES = {
     "bbsDmAckMaxAttempts": "bbs_dm_ack_max_attempts",
     "bbsDmAckExpireSeconds": "bbs_dm_ack_expire_seconds",
     "bbsDmNotifySender": "bbs_dm_notify_sender",
+    "blitzWatchEnabled": "blitz_watch_enabled",
 }
+_CONFIG_ATTR_ALIASES_LOWER = {k.lower(): v for k, v in _CONFIG_ATTR_ALIASES.items()}
 
 
 def _patch_settings_from_config(st) -> None:
@@ -1366,7 +1368,9 @@ def _patch_settings_from_config(st) -> None:
     st.config.read(st.config_file, encoding="utf-8")
     for section in st.config.sections():
         for key in st.config[section]:
-            attr = _CONFIG_ATTR_ALIASES.get(key, key)
+            attr = _CONFIG_ATTR_ALIASES.get(key) or _CONFIG_ATTR_ALIASES_LOWER.get(
+                key.lower(), key
+            )
             if not hasattr(st, attr):
                 continue
             cur = getattr(st, attr)

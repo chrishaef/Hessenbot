@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import html
+import os
 import re
-from typing import List, Optional, Tuple
+from configparser import ConfigParser
+from typing import Dict, List, Optional, Tuple
 
 from modules.admin_config_tooltips import field_tooltip
 
@@ -123,6 +125,9 @@ SETTINGS_SKIP_KEYS = frozenset(
 
 _BOOL_RE = re.compile(r"^(true|false|yes|no)$", re.I)
 
+_PASSWORD_KEYS_LOWER = frozenset(k.lower() for k in PASSWORD_KEYS)
+_SETTINGS_SKIP_LOWER = frozenset((s, k.lower()) for s, k in SETTINGS_SKIP_KEYS)
+
 
 def field_name(section: str, key: str) -> str:
     return f"cfg__{section}__{key}"
@@ -139,6 +144,82 @@ def parse_field_name(name: str) -> Optional[Tuple[str, str]]:
 
 def is_bool_value(value: str) -> bool:
     return bool(_BOOL_RE.match((value or "").strip()))
+
+
+def is_password_key(key: str) -> bool:
+    return key in PASSWORD_KEYS or key.lower() in _PASSWORD_KEYS_LOWER
+
+
+def is_settings_skip_key(section: str, key: str) -> bool:
+    return (section, key) in SETTINGS_SKIP_KEYS or (
+        section,
+        key.lower(),
+    ) in _SETTINGS_SKIP_LOWER
+
+
+def find_existing_option(section_proxy, key: str) -> Optional[str]:
+    """Return the stored option name matching key case-insensitively, if any."""
+    if key in section_proxy:
+        return key
+    key_l = key.lower()
+    for existing in section_proxy:
+        if existing.lower() == key_l:
+            return existing
+    return None
+
+
+def _template_path(config_file: str) -> str:
+    base = os.path.dirname(os.path.abspath(config_file)) or "."
+    candidate = os.path.join(base, "config.template")
+    if os.path.isfile(candidate):
+        return candidate
+    # Fallback when cwd ≠ bot root (tests / alternate layouts).
+    here = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "config.template"))
+    return here if os.path.isfile(here) else candidate
+
+
+def canonical_option_case_map(config_file: str) -> Dict[str, Dict[str, str]]:
+    """section → {lowercase_key: CanonicalCase} from config.template (+ live file)."""
+    out: Dict[str, Dict[str, str]] = {}
+
+    def _ingest(path: str, *, overwrite: bool) -> None:
+        if not path or not os.path.isfile(path):
+            return
+        parser = ConfigParser()
+        parser.optionxform = str  # type: ignore[method-assign]
+        parser.read(path, encoding="utf-8")
+        for section in parser.sections():
+            bucket = out.setdefault(section, {})
+            for key in parser[section]:
+                low = key.lower()
+                if overwrite or low not in bucket:
+                    bucket[low] = key
+
+    # Live file seeds unknown/custom keys; template overwrites with camelCase.
+    _ingest(config_file, overwrite=False)
+    _ingest(_template_path(config_file), overwrite=True)
+    return out
+
+
+def write_config_file(config, config_file: str) -> None:
+    """Write config.ini preserving canonical key case from template/live file.
+
+    Default ConfigParser.optionxform lowercases options on read; a raw
+    ``config.write()`` would permanently flatten camelCase keys (and drop
+    comments). This helper restores template casing on write while keeping
+    every in-memory section/key (including keys absent from the admin form).
+    """
+    canon = canonical_option_case_map(config_file)
+    out = ConfigParser()
+    out.optionxform = str  # type: ignore[method-assign]
+    for section in config.sections():
+        out[section] = {}
+        section_canon = canon.get(section, {})
+        for key in config[section]:
+            out_key = section_canon.get(key.lower(), key)
+            out[section][out_key] = config[section][key]
+    with open(config_file, "w", encoding="utf-8") as fh:
+        out.write(fh)
 
 
 def ordered_sections(config) -> List[str]:
@@ -163,7 +244,13 @@ def section_title(section: str) -> str:
 
 
 def field_label(section: str, key: str) -> str:
-    return FIELD_LABELS.get((section, key), key)
+    if (section, key) in FIELD_LABELS:
+        return FIELD_LABELS[(section, key)]
+    key_l = key.lower()
+    for (sec, opt), label in FIELD_LABELS.items():
+        if sec == section and opt.lower() == key_l:
+            return label
+    return key
 
 
 def _tooltip_attr(section: str, key: str) -> str:
@@ -229,7 +316,7 @@ def build_settings_form_html(config) -> str:
         )
 
         for key in config[section]:
-            if (section, key) in SETTINGS_SKIP_KEYS:
+            if is_settings_skip_key(section, key):
                 continue
             raw = config[section][key]
             fname = field_name(section, key)
@@ -242,7 +329,7 @@ def build_settings_form_html(config) -> str:
                 f"</label>"
             )
 
-            if key in PASSWORD_KEYS:
+            if is_password_key(key):
                 inp = (
                     f'<input type="password" class="form-control form-control-sm" '
                     f'name="{html.escape(fname)}" autocomplete="new-password" '
@@ -284,19 +371,31 @@ def build_settings_form_html(config) -> str:
 
 
 def apply_form_to_config(config, form, *, config_file: str) -> None:
-    """POST-Formular in config.ini schreiben (Passwort-Felder leer = unverändert)."""
+    """Merge submitted cfg__* fields into config.ini; keep all non-form keys.
+
+    Only keys present in the POST update existing options (matched
+    case-insensitively so ``cfg__location__blitzwatchenabled`` updates
+    ``blitzWatchEnabled``). Keys absent from the form are left untouched —
+    the save must not rebuild the INI from form fields alone. Password
+    fields left blank stay unchanged. The file is rewritten with canonical
+    camelCase from ``config.template`` where known.
+    """
     for name, value in form.items():
         parsed = parse_field_name(name)
         if not parsed:
             continue
         section, key = parsed
-        if (section, key) in SETTINGS_SKIP_KEYS:
+        if is_settings_skip_key(section, key):
             continue
         if section not in config:
             config[section] = {}
-        if key in PASSWORD_KEYS and not (value or "").strip():
+        if is_password_key(key) and not (value or "").strip():
             continue
-        config[section][key] = (value or "").strip()
+        existing = find_existing_option(config[section], key)
+        dest_key = existing if existing is not None else key
+        new_val = (value or "").strip()
+        if existing is not None and config[section][existing] == new_val:
+            continue
+        config[section][dest_key] = new_val
 
-    with open(config_file, "w", encoding="utf-8") as fh:
-        config.write(fh)
+    write_config_file(config, config_file)
