@@ -520,21 +520,27 @@ def handle_wx_extra(message_from_id, deviceID, cmd: str, message=""):
 
 def handleNews(message_from_id, deviceID, message, isDM):
     """!readnews handler. Reads logs/news (optionally a {source}_news.txt file)."""
-    from modules.filemon import read_news
+    from modules.filemon import parse_readnews_source, read_news
 
+    # auto_response only strips "!" for command matching, not for the message body;
+    # parse_readnews_source strips leading "!" so "!readnews" does not become source "!".
+    parsed = parse_readnews_source(message)
     news = ''
-    if "?" in message.lower():
+    if parsed == "?":
         return "returns the news. Add a source e.g. 📰readnews mesh"
-    elif "readnews" in message.lower():
-        source = message.lower().replace("readnews", "").strip()
-        if source:
+
+    cmd = (message or "").strip()
+    if cmd.startswith("!"):
+        cmd = cmd[1:].lstrip()
+    if "readnews" in cmd.lower():
+        if parsed:
             # if news source is provided pass that to read_news()
             if my_settings.news_block_mode:
-                news = read_news(source=source, news_block_mode=True)
+                news = read_news(source=parsed, news_block_mode=True)
             elif my_settings.news_random_line_only:
-                news = read_news(source=source, random_line_only=True)
+                news = read_news(source=parsed, random_line_only=True)
             else:
-                news = read_news(source=source)
+                news = read_news(source=parsed)
         else:
             # no source provided, use news.txt
             if my_settings.news_block_mode:

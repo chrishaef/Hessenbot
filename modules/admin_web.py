@@ -632,6 +632,11 @@ def create_app(
                 flash(f"Speichern fehlgeschlagen: {e!s}", "error")
                 return redirect(url_for("edit_news"))
             flash("News und Versandzeit gespeichert.", "success")
+            if enabled:
+                flash(
+                    "Zeitplan ist aktiv und greift sofort (kein Bot-Neustart nötig), solange der Bot läuft.",
+                    "info",
+                )
             return redirect(url_for("edit_news"))
 
         if os.path.isfile(pfad):
@@ -664,6 +669,7 @@ def create_app(
             + """
   <button type="submit" class="btn btn-success w-100">Speichern</button>
 </form>
+  <p class="small text-muted mt-3">Text in der News-Datei; Versandzeit in <code>[newsBroadcast]</code> (wie MOTD unter <code>[motdBroadcast]</code>).</p>
 """,
             title="News",
             active_tab="news",
