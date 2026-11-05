@@ -382,7 +382,14 @@ def create_app(
             data = collect_dashboard(log_dir)
             body = render_dashboard_page(data)
         except Exception as e:
-            body = f'<p class="alert alert-danger">Dashboard: {html_escape(str(e))}</p>'
+            # Prefer Type: msg so KeyError(0) is not shown as bare "Dashboard: 0".
+            from modules.log import logger
+
+            logger.exception("System: Public dashboard render failed")
+            detail = f"{type(e).__name__}: {e}"
+            body = (
+                f'<p class="alert alert-danger">Dashboard: {html_escape(detail)}</p>'
+            )
         return (
             portal_shell_start(
                 title="Statistik – Hessenbot",
