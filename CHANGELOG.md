@@ -24,6 +24,7 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Fixed
 
+- **ACP Einstellungen**: Speichern schrieb `config.ini` per `ConfigParser.write()` und flattente dabei alle Keys auf Kleinbuchstaben; Formular-POST aktualisiert jetzt nur übermittelte `cfg__*`-Felder (übrige Keys bleiben), Schreibweg stellt camelCase aus `config.template` wieder her
 - **Öffentliches Dashboard**: Crash „Dashboard: 0“ nach BBS-DM mit Lesebestätigung — Queue-Zeilen sind seit Issue #9 Dicts; Render griff noch per `row[0]`/`row[2]` zu (`KeyError(0)`). Nutzt jetzt `dm_to`/`dm_from`, isoliert BBS-DM-Fehler vom Rest der Seite
 - **Blitzwatch**: `dictionary changed size during iteration` im Poll-Zyklus — Snapshot von `iface.nodes` vor dem Walk (MQTT kann Nodes parallel hinzufügen)
 - **`!trace`**: ROUTING_APP-NAKs (z. B. mit `route_request`) nicht mehr als `RouteDiscovery` parsen — verhindert `Trace fehlgeschlagen: Error parsing message with type 'meshtastic.protobuf.RouteDiscovery'`; klarere DE-Hinweise bei Routing-Fehler / unlesbarer Antwort

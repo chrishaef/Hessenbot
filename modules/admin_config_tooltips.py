@@ -356,8 +356,15 @@ def field_tooltip(section: str, key: str) -> str:
     sk: TooltipKey = (section, key)
     if sk in BEHAVIOR:
         return BEHAVIOR[sk]
+    key_l = key.lower()
+    for (sec, opt), tip in BEHAVIOR.items():
+        if sec == section and opt.lower() == key_l:
+            return tip
     if key == "enabled" and section in _SECTION_ENABLED:
         return _SECTION_ENABLED[section]
     if key in _KEY_BEHAVIOR and key not in {"enabled", "interface", "channel"}:
         return _KEY_BEHAVIOR[key]
+    for opt, tip in _KEY_BEHAVIOR.items():
+        if opt.lower() == key_l and opt not in {"enabled", "interface", "channel"}:
+            return tip
     return _infer_behavior(section, key)

@@ -2748,8 +2748,9 @@ def create_app(
                     wrote = True
             if wrote:
                 try:
-                    with open(st.config_file, "w", encoding="utf-8") as fh:
-                        st.config.write(fh)
+                    from modules.admin_config import write_config_file
+
+                    write_config_file(st.config, st.config_file)
                 except OSError:
                     pass
             if not hasattr(st, "web_admin_public_url"):
