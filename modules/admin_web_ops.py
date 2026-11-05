@@ -350,20 +350,26 @@ def parse_broadcast_schedule_form(form) -> Tuple[bool, int, int, str, str, str]:
     return enabled, iface, channel, mode, interval, sched_time
 
 
+def split_schedule_times(sched_time: str) -> list[str]:
+    """Split a comma-separated time list ("06:00, 18:00") into clean parts."""
+    return [t.strip() for t in str(sched_time or "").split(",") if t.strip()]
+
+
 def validate_broadcast_schedule(mode: str, interval: str, sched_time: str) -> Optional[str]:
     mode = (mode or "").strip().lower()
-    if mode in _TIME_REQUIRED_MODES and not sched_time:
-        return "Bitte eine Uhrzeit (HH:MM) angeben."
+    times = split_schedule_times(sched_time)
+    if mode in _TIME_REQUIRED_MODES and not times:
+        return "Bitte eine Uhrzeit (HH:MM) angeben — mehrere mit Komma: 06:00, 18:00."
     if mode in _INTERVAL_MODES:
         try:
             if int(interval or "0") < 1:
                 return "Intervall muss mindestens 1 sein."
         except ValueError:
             return "Intervall muss eine Zahl sein."
-    if sched_time and len(sched_time) >= 5:
-        parts = sched_time.split(":")
+    for tim in times:
+        parts = tim.split(":")
         if len(parts) != 2:
-            return "Uhrzeit im Format HH:MM (z. B. 09:30)."
+            return "Uhrzeit im Format HH:MM (z. B. 09:30) — mehrere mit Komma trennen."
         try:
             h, m = int(parts[0]), int(parts[1])
             if not (0 <= h <= 23 and 0 <= m <= 59):
@@ -453,10 +459,31 @@ def _schedule_ui_block(
     time_name: str,
     time_value: str,
     heading: str = "Wann und wie oft?",
+    allow_multi_time: bool = False,
 ) -> str:
-    """Shared adaptive interval/time controls (MOTD/News/Scheduler)."""
+    """Shared adaptive interval/time controls (MOTD/News/Scheduler).
+
+    allow_multi_time renders the time field as text so several comma-separated
+    times ("06:00, 18:00") can be entered (one job per time).
+    """
     ivl = html.escape(str(interval_value or "1"))
     tim = html.escape(str(time_value or ""))
+    if allow_multi_time:
+        time_input = (
+            f'<input type="text" class="form-control" style="max-width: 16rem" '
+            f'name="{html.escape(time_name)}" id="sched-time-{html.escape(time_name)}" '
+            f'data-schedule-time value="{tim}" placeholder="06:00, 18:00" '
+            f'pattern="\\s*([01]?\\d|2[0-3]):[0-5]\\d(\\s*,\\s*([01]?\\d|2[0-3]):[0-5]\\d)*\\s*" '
+            f'title="HH:MM, mehrere Uhrzeiten mit Komma (z. B. 06:00, 18:00)">'
+        )
+        time_hint = "HH:MM — mehrere Versandzeiten mit Komma trennen (z. B. 06:00, 18:00)."
+    else:
+        time_input = (
+            f'<input type="time" class="form-control" style="max-width: 12rem" '
+            f'name="{html.escape(time_name)}" id="sched-time-{html.escape(time_name)}" '
+            f'data-schedule-time value="{tim}" title="Format HH:MM">'
+        )
+        time_hint = "Nur bei tages- oder uhrzeitbasierten Plänen nötig."
     return f"""
 <div class="schedule-ui border rounded p-3 mb-3" data-schedule-ui>
   <h3 class="h6 mb-3">{html.escape(heading)}</h3>
@@ -475,11 +502,8 @@ def _schedule_ui_block(
   </div>
   <div class="mt-3" data-schedule-time-row>
     <label class="form-label" for="sched-time-{html.escape(time_name)}">Uhrzeit</label>
-    <input type="time" class="form-control" style="max-width: 12rem"
-           name="{html.escape(time_name)}" id="sched-time-{html.escape(time_name)}"
-           data-schedule-time value="{tim}"
-           title="Format HH:MM">
-    <div class="form-text">Nur bei tages- oder uhrzeitbasierten Plänen nötig.</div>
+    {time_input}
+    <div class="form-text">{html.escape(time_hint)}</div>
   </div>
   <p class="schedule-ui-summary alert alert-secondary small py-2 px-3 mb-0 mt-3"
      data-schedule-summary role="status">…</p>
@@ -518,14 +542,15 @@ def broadcast_schedule_form_html(
         )
     opts.append("</optgroup></select>")
 
-    # Normalize HH:MM for type=time (needs HH:MM)
-    tim = (sched_time or "").strip()
-    if tim and len(tim) >= 4 and ":" in tim:
+    # Normalize each comma-separated time to HH:MM
+    norm = []
+    for tim in split_schedule_times(sched_time):
         parts = tim.split(":")
         try:
-            tim = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
-        except ValueError:
-            pass
+            norm.append(f"{int(parts[0]):02d}:{int(parts[1]):02d}")
+        except (ValueError, IndexError):
+            norm.append(tim)
+    tim = ", ".join(norm)
 
     schedule_block = _schedule_ui_block(
         mode_name="bc_mode",
@@ -534,6 +559,7 @@ def broadcast_schedule_form_html(
         interval_value=str(interval or "1"),
         time_name="bc_time",
         time_value=tim,
+        allow_multi_time=True,
     )
     sec = html.escape(config_section)
     iface_sel = iface_select_html("bc_interface", iface, element_id="bc_interface")

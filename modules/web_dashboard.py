@@ -241,7 +241,8 @@ def _format_message_line(entry: Dict[str, Any]) -> str:
     if entry.get("kind") == "dm":
         suffix = " · DM"
     elif entry.get("kind") == "channel" and entry.get("channel") is not None:
-        suffix = f" · {entry.get('channel_label') or f'Kanal {entry['channel']}'}"
+        label = entry.get("channel_label") or f"Kanal {entry['channel']}"
+        suffix = f" · {label}"
 
 
     return f"{t} · {direction}: {peer}{suffix}"
@@ -1524,14 +1525,12 @@ def collect_host_snapshot(*, include_cpu: bool = True) -> Dict[str, Any]:
                 )
 
             out["uptime"] = run("uptime -p") or "—"
-            out["memory"] = (
-                f"{run('free -m | awk \'/Mem:/ {print $7}\'')} / "
-                f"{run('free -m | awk \'/Mem:/ {print $2}\'')} MB frei"
-            )
-            out["disk"] = (
-                f"{run('df -h / | awk \'NR==2 {print $4}\'')} frei von "
-                f"{run('df -h / | awk \'NR==2 {print $2}\'')}"
-            )
+            mem_free = run("free -m | awk '/Mem:/ {print $7}'")
+            mem_total = run("free -m | awk '/Mem:/ {print $2}'")
+            out["memory"] = f"{mem_free} / {mem_total} MB frei"
+            disk_free = run("df -h / | awk 'NR==2 {print $4}'")
+            disk_total = run("df -h / | awk 'NR==2 {print $2}'")
+            out["disk"] = f"{disk_free} frei von {disk_total}"
         except Exception:
             pass
     if include_cpu:

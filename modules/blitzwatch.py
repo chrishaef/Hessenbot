@@ -687,7 +687,8 @@ def format_status(node_id: int, *, has_fresh_gps: bool) -> str:
         lines.append(f"Warnung für deine Node: {'AN' if node_on else 'AUS'}")
 
     if prefs["home_mode"] == HOME_MODE_FIXED and prefs["home_lat"] is not None:
-        home_s = f"Fix {prefs['home_label'] or f'{prefs['home_lat']:.2f}, {prefs['home_lon']:.2f}'}"
+        coords = f"{prefs['home_lat']:.2f}, {prefs['home_lon']:.2f}"
+        home_s = f"Fix {prefs['home_label'] or coords}"
     elif has_fresh_gps:
         home_s = "GPS (≤24h)"
     else:
