@@ -281,6 +281,74 @@ class BbsDmAckTests(unittest.TestCase):
             any("Node-Empfang bestätigt" in str(c) for c in self._notify_mock.call_args_list)
         )
 
+    def test_dashboard_renders_dict_and_legacy_dm_queue(self):
+        """Public dashboard must not KeyError(0) on Issue #9 dict queue rows."""
+        from modules.web_dashboard import (
+            _render_bbs_dm_queue_html,
+            render_dashboard_page,
+        )
+
+        ack_row = {
+            "to": 0xABCDEF01,
+            "body": "Hallo mit Lesebestätigung",
+            "from": 0,
+            "require_user_ack": True,
+            "state": self.bbs.DM_STATE_AWAITING_USER_ACK,
+            "msg_id": "a1b2",
+            "placeholder": False,
+        }
+        legacy_row = [0x11112222, "legacy body", 0x33334444]
+        html = _render_bbs_dm_queue_html(
+            [ack_row, legacy_row],
+            [{"from_id": "9", "to_id": "8", "time": "2026-11-05T12:00:00"}],
+            [],
+            enabled=True,
+        )
+        self.assertIn("dash-dm-item", html)
+        self.assertIn("warte auf ACK", html)
+
+        # Reproduce the old bug: indexing a dict with [0] raises KeyError(0)
+        # whose str() is literally "0" → red box "Dashboard: 0".
+        with self.assertRaises(KeyError) as ctx:
+            _ = ack_row[0]
+        self.assertEqual(str(ctx.exception), "0")
+
+        page = render_dashboard_page(
+            {
+                "log": {
+                    "total_messages": 0,
+                    "command_counts": {},
+                    "unique_users": [],
+                    "command_timestamps": [],
+                    "recent_messages": [],
+                    "hourly_activity": {},
+                    "bbs_dm_delivered": [],
+                    "bbs_dm_queued": [],
+                    "node_rx_counts_by_id": {},
+                    "node_rx_counts_24h_by_id": {},
+                },
+                "runtime": {
+                    "motd": "ok",
+                    "bbs_enabled": True,
+                    "bbs_public_count": 0,
+                    "bbs_public_messages": [],
+                    "bbs_dm_count": 2,
+                    "bbs_dm_queue": [ack_row, legacy_row],
+                    "mesh_leaderboard": {},
+                    "node_summary": [],
+                    "node_tables": [],
+                    "mesh_nodes_total": 0,
+                    "interfaces_active": 0,
+                },
+                "want_ack_on_dm": False,
+                "dm_delivery_24h": None,
+                "log_dir": "logs",
+                "generated_at": "2026-11-05 12:00:00",
+            }
+        )
+        self.assertNotIn("Dashboard:", page)
+        self.assertIn("dash-dm-item", page)
+
 
 if __name__ == "__main__":
     unittest.main()

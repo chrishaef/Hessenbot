@@ -742,9 +742,12 @@ def _render_bbs_public_html(messages: List[List[Any]], *, enabled: bool) -> str:
     )
 
 
-def _load_bbs_dm_queue() -> List[List[Any]]:
-    """Pending BBS DMs (without internal placeholder row 0)."""
-    rows: List[List[Any]] = []
+def _load_bbs_dm_queue() -> List[Any]:
+    """Pending BBS DMs (without internal placeholder row 0).
+
+    Entries are dicts after Issue #9 migrate; legacy list triples still load.
+    """
+    rows: List[Any] = []
     try:
         import modules.bbstools as bbs
 
@@ -763,7 +766,19 @@ def _load_bbs_dm_queue() -> List[List[Any]]:
                     rows = loaded
             except Exception:
                 pass
-    return rows[1:] if len(rows) > 1 else []
+    if not rows:
+        return []
+    try:
+        from modules.bbstools import is_placeholder_dm
+
+        out: List[Any] = []
+        for idx, row in enumerate(rows):
+            if idx == 0 or is_placeholder_dm(row, idx):
+                continue
+            out.append(row)
+        return out
+    except Exception:
+        return rows[1:] if len(rows) > 1 else []
 
 
 def _format_dm_timestamp(iso_time: str) -> str:
@@ -804,9 +819,36 @@ def _lookup_dm_sent_time(
 
 
 def _bbs_dm_status_badge(status: str) -> str:
-    if status == "delivered":
+    if status in ("delivered", "acked"):
         return '<span class="badge text-bg-success dash-dm-badge">zugestellt</span>'
+    if status == "awaiting_user_ack":
+        return (
+            '<span class="badge text-bg-info dash-dm-badge">warte auf ACK</span>'
+        )
+    if status in ("expired", "failed"):
+        return (
+            f'<span class="badge text-bg-secondary dash-dm-badge">'
+            f'{html_escape(status)}</span>'
+        )
     return '<span class="badge text-bg-warning text-dark dash-dm-badge">wartend</span>'
+
+
+def _bbs_dm_row_ids(row: Any) -> tuple[Any, Any]:
+    """Extract (from_id, to_id) from dict or legacy [to, body, from] list."""
+    from modules.bbstools import dm_from, dm_to
+
+    return dm_from(row), dm_to(row)
+
+
+def _bbs_dm_row_status(row: Any) -> str:
+    if isinstance(row, dict):
+        st = str(row.get("state") or "queued")
+        if st in ("acked",):
+            return "acked"
+        if st in ("awaiting_user_ack", "expired", "failed", "delivering"):
+            return st
+        return "waiting"
+    return "waiting"
 
 
 def _render_bbs_dm_item_html(
@@ -821,7 +863,9 @@ def _render_bbs_dm_item_html(
     an = html_escape(_bbs_dm_party_label(to_id))
     sent_disp = html_escape(_format_dm_timestamp(sent))
     recv_disp = html_escape(_format_dm_timestamp(received))
-    state_cls = "delivered" if status == "delivered" else "waiting"
+    state_cls = (
+        "delivered" if status in ("delivered", "acked") else "waiting"
+    )
     return (
         f'<li class="dash-dm-item dash-dm-item--{state_cls}">'
         '<TAG class="dash-dm-body">'
@@ -842,46 +886,53 @@ def _render_bbs_dm_item_html(
 
 
 def _render_bbs_dm_queue_html(
-    queue: List[List[Any]],
+    queue: List[Any],
     delivered: List[Dict[str, Any]],
     queued_log: List[Dict[str, Any]],
     *,
     enabled: bool,
 ) -> str:
+    """Render pending + delivered BBS DMs. Tolerates dict and list queue rows."""
     if not enabled:
         return '<p class="text-muted small mb-0">Mesh-BBS ist deaktiviert.</p>'
     items: List[str] = []
     for row in reversed(queue[-25:]):
-        to_id = row[0] if len(row) > 0 else 0
-        from_id = row[2] if len(row) > 2 else 0
-        sent = _lookup_dm_sent_time(queued_log, from_id, to_id)
-        items.append(
-            _render_bbs_dm_item_html(
-                from_id=from_id,
-                to_id=to_id,
-                sent=sent,
-                received="",
-                status="waiting",
+        try:
+            from_id, to_id = _bbs_dm_row_ids(row)
+            sent = _lookup_dm_sent_time(queued_log, from_id, to_id)
+            items.append(
+                _render_bbs_dm_item_html(
+                    from_id=from_id,
+                    to_id=to_id,
+                    sent=sent,
+                    received="",
+                    status=_bbs_dm_row_status(row),
+                )
             )
-        )
+        except Exception:
+            # Never let one bad queue row blank the whole public dashboard.
+            continue
     for entry in reversed(delivered[-15:]):
-        to_id = entry.get("to_id") or ""
-        from_id = entry.get("from_id") or ""
-        received = str(entry.get("time") or "")
-        if not to_id and entry.get("to"):
-            to_id = str(entry.get("to"))
-        sent = _lookup_dm_sent_time(
-            queued_log, from_id, to_id, before=received
-        )
-        items.append(
-            _render_bbs_dm_item_html(
-                from_id=from_id or "—",
-                to_id=to_id or "—",
-                sent=sent,
-                received=received,
-                status="delivered",
+        try:
+            to_id = entry.get("to_id") or ""
+            from_id = entry.get("from_id") or ""
+            received = str(entry.get("time") or "")
+            if not to_id and entry.get("to"):
+                to_id = str(entry.get("to"))
+            sent = _lookup_dm_sent_time(
+                queued_log, from_id, to_id, before=received
             )
-        )
+            items.append(
+                _render_bbs_dm_item_html(
+                    from_id=from_id or "—",
+                    to_id=to_id or "—",
+                    sent=sent,
+                    received=received,
+                    status="delivered",
+                )
+            )
+        except Exception:
+            continue
     if not items:
         return '<p class="text-muted small mb-0">Keine BBS-DMs.</p>'
     return (
@@ -1933,12 +1984,20 @@ def render_dashboard_page(data: Dict[str, Any]) -> str:
     bbs_dm_queue = rt.get("bbs_dm_queue") or []
     bbs_dm_delivered = log.get("bbs_dm_delivered") or []
     dm_count = len(bbs_dm_queue)
-    bbs_dm_html = _render_bbs_dm_queue_html(
-        bbs_dm_queue,
-        bbs_dm_delivered,
-        log.get("bbs_dm_queued") or [],
-        enabled=bool(rt.get("bbs_enabled")),
-    )
+    try:
+        bbs_dm_html = _render_bbs_dm_queue_html(
+            bbs_dm_queue,
+            bbs_dm_delivered,
+            log.get("bbs_dm_queued") or [],
+            enabled=bool(rt.get("bbs_enabled")),
+        )
+    except Exception as e:
+        # Isolate BBS-DM render failures (e.g. unexpected queue shape) so the
+        # rest of the public dashboard (NodeDB / Blitzwatch / charts) still loads.
+        bbs_dm_html = (
+            '<p class="alert alert-warning mb-0">BBS-DMs konnten nicht geladen '
+            f"werden ({html_escape(type(e).__name__)}).</p>"
+        )
     msg_ch = _dashboard_messages_channel()
     msg_ch_heading = _dashboard_messages_heading(msg_ch)
     toplist_html = _render_toplist_html(log, channel=msg_ch, log_dir=data.get("log_dir"))
