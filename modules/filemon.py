@@ -61,6 +61,25 @@ def read_file(file_monitor_file_path, random_line_only=False, news_block_mode=Fa
         logger.warning(f"FileMon: Error reading file: {file_monitor_file_path}")
         return None
 
+def parse_readnews_source(message: str):
+    """Parse optional news source from a readnews command message.
+
+    Strips a leading ``!`` so ``!readnews`` / ``!readnews mesh`` match the bare
+    forms. Returns ``None`` for the default news file, or a source name for
+    ``{source}_news.txt``. Returns ``"?"`` when the message asks for help.
+    """
+    msg = (message or "").strip()
+    if msg.startswith("!"):
+        msg = msg[1:].lstrip()
+    msg_lower = msg.lower()
+    if "?" in msg_lower:
+        return "?"
+    if "readnews" not in msg_lower:
+        return None
+    source = msg_lower.replace("readnews", "", 1).strip()
+    return source or None
+
+
 def read_news(source=None, random_line_only=False, news_block_mode=False):
     # Reads the news file. If a source is provided, reads {source}_news.txt.
     if source:

@@ -24,6 +24,8 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Fixed
 
+- **`!readnews`**: Führendes `!` wird vor der Quellen-Auswertung entfernt — sonst wurde `!` als Quellenname gelesen (`data/!_news.txt`) und fälschlich „No news for you!“ geliefert (DM und Kanal)
+- **News-Versand (ACP)**: Zeitplan-Hinweise/`config.template`/Tooltips an MOTD-Versand angeglichen (inkl. mehrerer Uhrzeiten)
 - **ACP Einstellungen**: Speichern schrieb `config.ini` per `ConfigParser.write()` und flattente dabei alle Keys auf Kleinbuchstaben; Formular-POST aktualisiert jetzt nur übermittelte `cfg__*`-Felder (übrige Keys bleiben), Schreibweg stellt camelCase aus `config.template` wieder her
 - **Öffentliches Dashboard**: Crash „Dashboard: 0“ nach BBS-DM mit Lesebestätigung — Queue-Zeilen sind seit Issue #9 Dicts; Render griff noch per `row[0]`/`row[2]` zu (`KeyError(0)`). Nutzt jetzt `dm_to`/`dm_from`, isoliert BBS-DM-Fehler vom Rest der Seite
 - **Blitzwatch**: `dictionary changed size during iteration` im Poll-Zyklus — Snapshot von `iface.nodes` vor dem Walk (MQTT kann Nodes parallel hinzufügen)

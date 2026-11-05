@@ -364,16 +364,20 @@ channel = 2
 mode = day
 # interval: bei hour/min = Stunden/Minuten; bei day = alle N Tage (1 = täglich)
 interval = 1
-# time = HH:MM bei day und Wochentagen (mode mon…sun)
+# time = HH:MM bei day und Wochentagen (mode mon…sun); mehrere Zeiten kommagetrennt (z. B. 06:00, 18:00)
 time = 09:00
 
-# Automatischer News-Versand aus news.txt (Web-Admin → News)
+# Automatischer News-Versand aus news.txt (Web-Admin → News; unabhängig vom Scheduler oben)
+# Gleiche Zeitplan-Felder wie [motdBroadcast] (Wann/wie oft im ACP unter News).
 [newsBroadcast]
 enabled = False
 interface = 1
 channel = 2
+# mode: day, hour, min, mon, tue, wed, thu, fri, sat, sun
 mode = hour
+# interval: bei hour/min = Stunden/Minuten; bei day = alle N Tage (1 = täglich)
 interval = 6
+# time = HH:MM bei day und Wochentagen (mode mon…sun); mehrere Zeiten kommagetrennt (z. B. 06:00, 18:00)
 time =
 
 [radioMon]
