@@ -556,7 +556,7 @@ def create_app(
 {path_line}
 {hint_html}
 <form method="post">
-  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{ inhalt }}</textarea>
+  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{{{ inhalt }}}}</textarea>
   <button type="submit" class="btn btn-success">Speichern</button>
 </form>
 """,
@@ -651,7 +651,7 @@ def create_app(
 <p class="text-muted small mb-3">News-Text für <code>!readnews</code> und automatischen Versand.</p>
 <form method="post">
   <h2 class="h5 mb-3">News-Text</h2>
-  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{ inhalt }}</textarea>
+  <textarea name="text" rows="22" class="form-control font-monospace mb-3">{{{{ inhalt }}}}</textarea>
 """
             + bc_form
             + """

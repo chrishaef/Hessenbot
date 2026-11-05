@@ -183,6 +183,21 @@ def setup_scheduler(
     return True
 
 
+def _normalized_schedule_times(sched_time: str) -> list:
+    """"06:00, 18:00" → ["06:00", "18:00"]; pads hours/minutes to two digits."""
+    out = []
+    for raw in str(sched_time or "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        parts = raw.split(":")
+        try:
+            out.append(f"{int(parts[0]):02d}:{int(parts[1]):02d}")
+        except (ValueError, IndexError):
+            logger.warning(f"System: Zeitplan — Uhrzeit {raw!r} ungültig, übersprungen")
+    return out
+
+
 def register_recurring_broadcast(
     *,
     mode: str,
@@ -193,37 +208,36 @@ def register_recurring_broadcast(
     job_fn,
     log_label: str,
 ) -> None:
-    """Register one timed send job (day/hour/min/weekdays). job_fn is called with no arguments."""
+    """Register timed send jobs (day/hour/min/weekdays). job_fn is called with no arguments.
+
+    Time-based modes accept several comma-separated times ("06:00, 18:00") and
+    register one job per time.
+    """
     mode = (mode or "day").lower().strip()
-    sched_time = (sched_time or "").strip()
+    times = _normalized_schedule_times(sched_time)
     interval_int = safe_int(interval, 1, type="interval")
     if interval_int < 1:
         interval_int = 1
     interface = safe_int(interface, 1, type="interface")
     channel = safe_int(channel, 0, type="channel")
 
+    weekday_attr = {
+        "mon": "monday", "tue": "tuesday", "wed": "wednesday", "thu": "thursday",
+        "fri": "friday", "sat": "saturday", "sun": "sunday",
+    }
+
     if mode == "day":
-        if sched_time:
-            if interval_int == 1:
-                schedule.every().day.at(sched_time).do(job_fn)
-            else:
-                schedule.every(interval_int).days.at(sched_time).do(job_fn)
+        if times:
+            for tim in times:
+                if interval_int == 1:
+                    schedule.every().day.at(tim).do(job_fn)
+                else:
+                    schedule.every(interval_int).days.at(tim).do(job_fn)
         else:
             schedule.every(interval_int).days.do(job_fn)
-    elif mode == "mon" and sched_time:
-        schedule.every().monday.at(sched_time).do(job_fn)
-    elif mode == "tue" and sched_time:
-        schedule.every().tuesday.at(sched_time).do(job_fn)
-    elif mode == "wed" and sched_time:
-        schedule.every().wednesday.at(sched_time).do(job_fn)
-    elif mode == "thu" and sched_time:
-        schedule.every().thursday.at(sched_time).do(job_fn)
-    elif mode == "fri" and sched_time:
-        schedule.every().friday.at(sched_time).do(job_fn)
-    elif mode == "sat" and sched_time:
-        schedule.every().saturday.at(sched_time).do(job_fn)
-    elif mode == "sun" and sched_time:
-        schedule.every().sunday.at(sched_time).do(job_fn)
+    elif mode in weekday_attr and times:
+        for tim in times:
+            getattr(schedule.every(), weekday_attr[mode]).at(tim).do(job_fn)
     elif mode == "hour":
         schedule.every(interval_int).hours.do(job_fn)
     elif mode == "min":
@@ -234,7 +248,7 @@ def register_recurring_broadcast(
         )
         return
     logger.debug(
-        f"System: {log_label} — mode={mode} interval={interval_int} time={sched_time!r} "
+        f"System: {log_label} — mode={mode} interval={interval_int} times={times!r} "
         f"IF={interface} CH={channel}"
     )
 
