@@ -167,6 +167,18 @@ def _sections() -> List[FaqSection]:
                     ),
                 ),
                 FaqEntry(
+                    "Lesebestätigung für wichtige BBS-DMs (ack)",
+                    (
+                        "Mit <code>!bbspost ack @Empfänger #Text</code> verlangst du eine "
+                        "<strong>Nutzer-Lesebestätigung</strong> (nicht dasselbe wie Mesh-/Node-ACK). "
+                        "Der Empfänger bestätigt per DM mit <code>ack &lt;id&gt;</code> "
+                        "(oder nacktem <code>ack</code>, wenn nur eine Mail wartet). "
+                        "Du erhältst Status-DMs zu Einreihung, Zustellung, Node-Empfang und Nutzer-ACK. "
+                        "Liste unter <a href=\"/befehle\">Befehle</a>; aktiv nur wenn der Betreiber "
+                        "<code>bbsDmUserAckEnabled</code> einschaltet."
+                    ),
+                ),
+                FaqEntry(
                     "Öffentlicher BBS-Beitrag nur auf einem Bot sichtbar",
                     (
                         "Öffentliche Beiträge liegen auf dem jeweiligen Bot. "

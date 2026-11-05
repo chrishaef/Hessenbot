@@ -127,14 +127,14 @@ def save_bbsdb():
         logger.error(f"System: Error saving bbsdb: {e}")
 
 def bbs_help():
-    # help message
+    # help message (ACK-Zeilen immer listen — wie /befehle; Laufzeit prüft bbsDmUserAckEnabled)
     return (
         "BBS-Befehle:\n"
         "bbslist — Liste\n"
         "bbspost $Betreff #Text\n"
         "bbspost @Knoten #Text (DM)\n"
         "bbspost ack @Knoten #Text (DM+Lesebestätigung)\n"
-        "ack <id> — Lesebestätigung\n"
+        "ack / ack <id> — Nutzer-Lesebestätigung\n"
         "bbsread # — lesen\n"
         "bbsdelete # — löschen\n"
         "cmd? — Hilfe"

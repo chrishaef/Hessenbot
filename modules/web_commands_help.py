@@ -356,7 +356,9 @@ def _sections() -> List[CommandSection]:
             "bi-inboxes",
             (
                 "Öffentliches BBS (bbsdb) und private BBS-DMs (bbsdm, Store-and-Forward). "
-                "DMs werden zugestellt, sobald die Ziel-Node wieder im Mesh aktiv ist (Präfix „Mail:“)."
+                "DMs werden zugestellt, sobald die Ziel-Node wieder im Mesh aktiv ist (Präfix „Mail:“). "
+                "Optional: Nutzer-Lesebestätigung per bbspost ack … / ack <id> "
+                "(getrennt von Mesh-/Node-ACK; Config bbsDmUserAckEnabled)."
             ),
             (
                 _cmd(f"{p}bbshelp", "Kurzliste aller BBS-Befehle (auch im Mesh)."),
@@ -371,14 +373,19 @@ def _sections() -> List[CommandSection]:
                 ),
                 _cmd(
                     f"{p}bbspost ack @Empfänger #Text",
-                    "BBS-DM mit Nutzer-Lesebestätigung (Empfänger antwortet mit ack <id>). "
-                    "Nur wenn bbsDmUserAckEnabled=True.",
-                    enabled=lambda: getattr(st, "bbs_dm_user_ack_enabled", False),
+                    "BBS-DM mit Nutzer-Lesebestätigung: Absender erhält Status (eingereiht, "
+                    "Zustellversuch, Node-Empfang, Nutzer-ACK/Retry/Ablauf); Empfänger bestätigt "
+                    "mit ack / ack <id>. Aktiv nur bei bbsDmUserAckEnabled=True.",
                 ),
                 _cmd(
                     f"{p}ack <id>",
-                    "Lesebestätigung für eine ACK-pflichtige BBS-DM (getrennt von Mesh-/Node-ACK).",
-                    enabled=lambda: getattr(st, "bbs_dm_user_ack_enabled", False),
+                    "Empfänger: Lesebestätigung für eine ACK-pflichtige BBS-DM "
+                    "(getrennt von Mesh-/Node-ACK; nicht bbsack).",
+                ),
+                _cmd(
+                    f"{p}ack",
+                    "Empfänger: nackte Lesebestätigung nur wenn genau eine ACK-Mail wartet; "
+                    "sonst ack <id> angeben. Ohne wartende Mail: Alias für ping.",
                 ),
                 _cmd(
                     f"{p}bbsread #Nr",
