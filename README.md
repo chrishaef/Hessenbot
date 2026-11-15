@@ -1,6 +1,6 @@
 # Hessenbot
 
-**Hessenbot** ist ein Meshtastic-Autoresponder für [Meshhessen](https://meshhessen.de) — ein Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
+**Hessenbot** ist ein Meshtastic-Autoresponder für [Meshhessen](https://meshhessen.de) — ein mittlerweile weit entfernter Fork von [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) (`main`).
 
 Der Bot antwortet auf Mesh-Befehle (meist mit `!` am Anfang, per DM), bietet BBS, Wetter, Blitz/Unwetter, NINA/Katwarn-Warnungen, Traceroute, DM-Zustellüberwachung, ein Web-Dashboard und Werkzeuge für Netz und Community. Der Fokus liegt auf **EU/DE** und dem Flask-Portal unter `static/portal/`.
 
@@ -272,7 +272,7 @@ touch .checkall && python3 modules/test_bot.py
 
 ## Lizenz & Haftung
 
-**Lizenz:** [GNU GPL v3](LICENSE) (wie Upstream meshing-around).
+**Lizenz:** [GNU GPL v3](LICENSE).
 
 Meshtastic® ist eine eingetragene Marke von Meshtastic LLC. Die Meshtastic-Softwarekomponenten stehen unter verschiedenen Lizenzen — siehe GitHub. **Keine Gewährleistung — Nutzung auf eigenes Risiko.**
 
@@ -282,10 +282,7 @@ Sicherheitsmeldungen: siehe [SECURITY.md](SECURITY.md).
 
 ### Inspiration
 
-- [MeshLink](https://github.com/Murturtle/MeshLink)
-- [Meshtastic Python Examples](https://github.com/pdxlocations/meshtastic-Python-Examples)
-- [Meshtastic Matrix Relay](https://github.com/geoffwhittington/meshtastic-matrix-relay)
+
 
 ### Tools
 
-- [Node Slurper](https://github.com/SpudGunMan/node-slurper) (Node-Backup)
