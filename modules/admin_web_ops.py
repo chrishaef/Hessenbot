@@ -1679,15 +1679,18 @@ def _coords_changed(current: Dict[str, Any], lat: float, lon: float, alt_m: Opti
     return int(cur_alt) != int(alt_m)
 
 
-# lora.tx_power: no hard cap in Hessenbot (hardware/firmware limit applies); above the EU-safe level the admin must confirm.
+# lora.tx_power: Hessenbot adds no cap of its own (the firmware limits to the region maximum unless HAM mode is on).
+# Values above the EU-safe level and 0 (= firmware uses the region maximum, not "off") need an explicit confirmation.
 TX_POWER_EU_SAFE_DBM = 14
 TX_POWER_MAX_DBM = 30
 
 TX_POWER_WARNING_TEXT = (
-    f"Werte über {TX_POWER_EU_SAFE_DBM} dBm können die EU-868-Grenzwerte überschreiten "
+    f"Werte über {TX_POWER_EU_SAFE_DBM} dBm sowie 0 (= die Firmware nimmt das Regions-Maximum, EU_868: 27 dBm; "
+    "0 bedeutet nicht „aus“) können die EU-868-Grenzwerte überschreiten "
     "(je nach Teilband 14 bzw. 27 dBm ERP, 1–10 % Duty Cycle). Mit einem PA-Modul (z. B. RAK13302, "
     "SKY66122, ca. +13 dB) liegt die Leistung an der Antenne deutlich über dem Einstellwert. "
-    "Du bist selbst für die Einhaltung der Vorschriften verantwortlich; es wird nichts still begrenzt."
+    "Die Firmware begrenzt den Wert ohne HAM-Modus selbst auf das Regionslimit (EU_868: ca. 27 dBm); Hessenbot setzt "
+    "keinen eigenen Cap und kürzt deinen Wert nicht. Du bist selbst für die Einhaltung der Vorschriften verantwortlich."
 )
 
 
@@ -1706,10 +1709,10 @@ def plan_tx_power_change(
         except ValueError:
             return None, "Sendeleistung: bitte eine ganze Zahl (dBm) oder „max“ eingeben."
     if not 0 <= value <= TX_POWER_MAX_DBM:
-        return None, f"Sendeleistung: Wert zwischen 0 und {TX_POWER_MAX_DBM} dBm (0 = Firmware-Standard)."
+        return None, f"Sendeleistung: Wert zwischen 0 und {TX_POWER_MAX_DBM} dBm (0 = Regions-Maximum der Firmware)."
     if value == int(current):
         return None, None
-    if value > TX_POWER_EU_SAFE_DBM and not confirmed:
+    if (value == 0 or value > TX_POWER_EU_SAFE_DBM) and not confirmed:
         return None, (
             f"Sendeleistung {value} dBm nicht gespeichert: Bitte die Warnung bestätigen. {TX_POWER_WARNING_TEXT}"
         )
@@ -2317,8 +2320,8 @@ def build_node_settings_html(
       <input class="form-control" type="number" id="ns-txpower" name="tx_power"
              min="0" max="{TX_POWER_MAX_DBM}" step="1" required value="{settings["lora_tx_power"]}"
              data-eu-safe="{TX_POWER_EU_SAFE_DBM}">
-      <div class="form-text">Aktuell {settings["lora_tx_power"]} dBm. {TX_POWER_MAX_DBM} = Volllast, 0 = Firmware-Standard.
-        Kein harter Cap.</div>
+      <div class="form-text">Aktuell {settings["lora_tx_power"]} dBm. {TX_POWER_MAX_DBM} = Volllast, <strong>0 = Regions-Maximum der Firmware (nicht „aus“)</strong>.
+        Kein eigener Cap; die Firmware begrenzt ohne HAM-Modus auf das Regionslimit.</div>
     </div>
     <div class="col-md-9">
       <div class="alert alert-danger small mb-2">
@@ -2327,8 +2330,8 @@ def build_node_settings_html(
       <div class="form-check">
         <input class="form-check-input" type="checkbox" id="ns-txpower-confirm" name="tx_power_confirm" value="1">
         <label class="form-check-label" for="ns-txpower-confirm">
-          Ich habe die Warnung gelesen und setze eine Sendeleistung über {TX_POWER_EU_SAFE_DBM} dBm bewusst
-          (nötig bei jedem geänderten Wert über {TX_POWER_EU_SAFE_DBM} dBm).</label>
+          Ich habe die Warnung gelesen und setze eine Sendeleistung über {TX_POWER_EU_SAFE_DBM} dBm bzw. 0 (Regions-Maximum) bewusst
+          (nötig bei jedem geänderten Wert über {TX_POWER_EU_SAFE_DBM} dBm und bei 0).</label>
       </div>
     </div>
   </div>

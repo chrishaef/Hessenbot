@@ -70,8 +70,9 @@ Optionen:
   --confirm-hardware      RAK6421 + RAK13302 (Slot 1) ohne HAT-EEPROM-Treffer bestaetigen (fuer --yes)
   --antenna yes|no        Antenne bestaetigt (Default: no -> TX aus)
   --antenna-gain DBI      Antennengewinn (Default 3; nur fuer die Leistungswarnung)
-  --tx-power DBM|max      lora.tx_power 1-30 dBm (Default 14); max = Volllast. Kein harter Cap.
-  --accept-tx-power       Werte ueber 14 dBm (moegliche Ueberschreitung der EU-868-Grenzwerte) bestaetigen (fuer --yes)
+  --tx-power DBM|max      lora.tx_power 0-30 dBm (Default 14); max = Volllast; 0 = Regions-Maximum der Firmware (nicht aus!).
+                          Kein eigener Cap des Installers; die Firmware begrenzt ohne HAM-Modus auf das Regionslimit.
+  --accept-tx-power       Werte ueber 14 dBm und 0 (= Regions-Maximum; moegliche Ueberschreitung der EU-868-Grenzwerte) bestaetigen (fuer --yes)
   -h, --help
 EOF
 }

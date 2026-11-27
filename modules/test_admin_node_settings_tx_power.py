@@ -24,7 +24,9 @@ from modules import admin_web_ops as ops
         (14, "22", True, (22, None)),
         (14, "30", True, (30, None)),
         (14, "max", True, (30, None)),
-        (14, "0", False, (0, None)),
+        (14, "0", True, (0, None)),
+        (0, "0", False, (None, None)),
+        (0, "10", False, (10, None)),
         (30, "14", False, (14, None)),
         (30, "20", True, (20, None)),
     ],
@@ -33,7 +35,7 @@ def test_plan_tx_power_change_accepts_valid_values(current, raw, confirmed, expe
     assert ops.plan_tx_power_change(current, raw, confirmed) == expected
 
 
-@pytest.mark.parametrize("current,raw", [(14, "15"), (14, "22"), (14, "30"), (14, "max"), (30, "20")])
+@pytest.mark.parametrize("current,raw", [(14, "15"), (14, "22"), (14, "30"), (14, "max"), (30, "20"), (14, "0"), (30, "0")])
 def test_plan_tx_power_change_requires_confirmation_above_eu_safe(current, raw):
     value, err = ops.plan_tx_power_change(current, raw, False)
     assert value is None
@@ -126,6 +128,16 @@ def test_apply_high_tx_power_with_confirmation_is_not_clamped(monkeypatch):
     assert "30 dBm" in msg
 
 
+def test_apply_tx_power_zero_is_region_max_and_needs_confirmation(monkeypatch):
+    node = _FakeNode(14)
+    ok, msg = _apply(monkeypatch, node, _form(tx_power="0"))
+    assert not ok and "bestätigen" in msg and "Regions-Maximum" in msg
+    assert node.localConfig.lora.tx_power == 14 and node.written == []
+    ok, msg = _apply(monkeypatch, node, _form(tx_power="0", tx_power_confirm="1"))
+    assert ok, msg
+    assert node.localConfig.lora.tx_power == 0 and node.written == ["lora"]
+
+
 def test_apply_lowering_tx_power_needs_no_confirmation(monkeypatch):
     node = _FakeNode(27)
     ok, msg = _apply(monkeypatch, node, _form(tx_power="14"))
@@ -157,3 +169,4 @@ def test_node_settings_form_shows_tx_power_field_and_warning():
     assert 'name="tx_power"' in out and 'value="22"' in out and 'max="30"' in out
     assert 'name="tx_power_confirm"' in out
     assert "EU-868" in out and "RAK13302" in out
+    assert "Regions-Maximum" in out and "HAM-Modus" in out

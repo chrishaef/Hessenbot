@@ -189,7 +189,7 @@ ask_antenna() {
     ask_tx_power
 }
 
-# normalize_tx_power RAW -> integer dBm on stdout (1..RADIO_TX_POWER_MAX); "max"/"full" = RADIO_TX_POWER_MAX, ""/"auto" = default
+# normalize_tx_power RAW -> integer dBm on stdout (0..RADIO_TX_POWER_MAX; 0 = firmware picks the region maximum); "max"/"full" = RADIO_TX_POWER_MAX, ""/"auto" = default
 normalize_tx_power() {
     local raw="${1,,}"
     case "$raw" in
@@ -197,23 +197,33 @@ normalize_tx_power() {
         max | full | voll) echo "$RADIO_TX_POWER_MAX" ;;
         *)
             [[ "$raw" =~ ^[0-9]+$ ]] || return 1
-            ((10#$raw >= 1 && 10#$raw <= RADIO_TX_POWER_MAX)) || return 1
+            ((10#$raw <= RADIO_TX_POWER_MAX)) || return 1
             echo "$((10#$raw))"
             ;;
     esac
 }
 
-tx_power_needs_ack() { (($1 > RADIO_TX_POWER_EU_SAFE)); }
+# 0 is not "off": the firmware then uses the region maximum (EU_868: 27 dBm), so it needs the same confirmation as high values
+tx_power_needs_ack() { (($1 == 0 || $1 > RADIO_TX_POWER_EU_SAFE)); }
 
 warn_tx_power_high() {
     local power="$1" eirp
     eirp="$(awk -v p="$power" -v g="${ANTENNA_GAIN:-0}" 'BEGIN { printf "%.1f", p + g }')"
-    warn "tx_power ${power} dBm liegt ueber ${RADIO_TX_POWER_EU_SAFE} dBm. Das kann die EU-868-Grenzwerte (je nach Teilband 14 bzw. 27 dBm ERP, 1-10 % Duty Cycle) ueberschreiten."
-    warn "Die RAK13302 verstaerkt zusaetzlich (SKY66122, ca. +13 dB, ueber DIO2): die Leistung an der Antenne liegt deutlich ueber dem Einstellwert. Bereits ${power} dBm + ${ANTENNA_GAIN:-0} dBi Antenne = ${eirp} dBm EIRP vor der PA-Verstaerkung."
-    warn "Du bist selbst fuer die Einhaltung der Vorschriften verantwortlich. Der Installer begrenzt den Wert nicht."
+    if ((power == 0)); then
+        warn "tx_power 0 bedeutet NICHT 'aus': die Firmware nimmt das Regions-Maximum (EU_868: 27 dBm). Das kann die EU-868-Grenzwerte (je nach Teilband 14 bzw. 27 dBm ERP, 1-10 % Duty Cycle) ueberschreiten."
+    else
+        warn "tx_power ${power} dBm liegt ueber ${RADIO_TX_POWER_EU_SAFE} dBm. Das kann die EU-868-Grenzwerte (je nach Teilband 14 bzw. 27 dBm ERP, 1-10 % Duty Cycle) ueberschreiten."
+        warn "Die Firmware begrenzt den Wert ohne HAM-Modus selbst auf das Regionslimit (EU_868: ca. 27 dBm); der Installer setzt keinen eigenen Cap und kuerzt deinen Wert nicht."
+    fi
+    if ((power == 0)); then
+        warn "Die RAK13302 verstaerkt zusaetzlich (SKY66122, ca. +13 dB, ueber DIO2): an der Antenne liegt deutlich mehr an als das Regions-Maximum der Firmware."
+    else
+        warn "Die RAK13302 verstaerkt zusaetzlich (SKY66122, ca. +13 dB, ueber DIO2): die Leistung an der Antenne liegt deutlich ueber dem Einstellwert. Bereits ${power} dBm + ${ANTENNA_GAIN:-0} dBi Antenne = ${eirp} dBm EIRP vor der PA-Verstaerkung."
+    fi
+    warn "Du bist selbst fuer die Einhaltung der Vorschriften verantwortlich."
 }
 
-# ask_tx_power: choose lora.tx_power (1..RADIO_TX_POWER_MAX, "max" = full power); values above the EU-safe level need a confirmation
+# ask_tx_power: choose lora.tx_power (0..RADIO_TX_POWER_MAX, "max" = full power, 0 = region maximum); values above the EU-safe level need a confirmation
 ask_tx_power() {
     local power interactive=1
     [[ -z "$TX_POWER_REQ" ]] || TX_POWER="$TX_POWER_REQ"
@@ -221,12 +231,12 @@ ask_tx_power() {
     while true; do
         if [[ -z "$TX_POWER" && "$interactive" == "1" && "$ANTENNA_OK" == "1" ]]; then
             tty_print ""
-            tty_print "Sendeleistung (lora.tx_power, ${RADIO_TX_POWER_EU_SAFE} dBm = Empfehlung; 'max' = Volllast ${RADIO_TX_POWER_MAX} dBm, ohne Begrenzung durch den Installer)"
-            ask "tx_power in dBm (1-${RADIO_TX_POWER_MAX} oder max)" "$RADIO_TX_POWER_DEFAULT"
+            tty_print "Sendeleistung (lora.tx_power, ${RADIO_TX_POWER_EU_SAFE} dBm = Empfehlung; 'max' = Volllast ${RADIO_TX_POWER_MAX} dBm, 0 = Regions-Maximum der Firmware; der Installer kuerzt nichts, die Firmware begrenzt ohne HAM-Modus auf das Regionslimit)"
+            ask "tx_power in dBm (0-${RADIO_TX_POWER_MAX} oder max)" "$RADIO_TX_POWER_DEFAULT"
             TX_POWER="$REPLY_VALUE"
         fi
         power="$(normalize_tx_power "$TX_POWER")" || {
-            [[ "$interactive" == "1" && -z "$TX_POWER_REQ" ]] || die "Ungueltige tx_power '$TX_POWER' (1-${RADIO_TX_POWER_MAX} dBm oder max)."
+            [[ "$interactive" == "1" && -z "$TX_POWER_REQ" ]] || die "Ungueltige tx_power '$TX_POWER' (0-${RADIO_TX_POWER_MAX} dBm oder max)."
             warn "Ungueltige Eingabe: $TX_POWER"
             TX_POWER=""
             continue
@@ -245,7 +255,7 @@ ask_tx_power() {
     done
     tx_power_needs_ack "$TX_POWER" && TX_POWER_ACK="$TX_POWER" || TX_POWER_ACK=""
     if [[ "$ANTENNA_OK" == "1" ]]; then
-        log "tx_power = ${TX_POWER} dBm (kein harter Limit-Cap; EU_868: Grenzwerte und Duty Cycle beachten)."
+        log "tx_power = ${TX_POWER} dBm (Installer ohne eigenen Cap; Firmware begrenzt ohne HAM-Modus auf das Regionslimit; EU_868: Grenzwerte und Duty Cycle beachten)."
     fi
 }
 
@@ -332,7 +342,7 @@ print_summary() {
     log "Standort:        ${LAT}, ${LON}"
     log "GPS/UART:        nicht Teil dieser Version (UART bleibt aus)"
     log "Web-Admin:       $([[ "$WEB_ADMIN" == "1" ]] && echo "ja, Bind ${WEB_BIND}, Passwort in /etc/hessenbot/env (0600)" || echo nein)"
-    log "TX:              $([[ "$ANTENNA_OK" == "1" ]] && echo "an, ${TX_POWER} dBm$(tx_power_needs_ack "$TX_POWER" && echo " (UEBER EU-Empfehlung, bestaetigt)")" || echo "AUS bis Antenne bestaetigt")"
+    log "TX:              $([[ "$ANTENNA_OK" == "1" ]] && echo "an, ${TX_POWER} dBm$(tx_power_needs_ack "$TX_POWER" && echo " (ueber EU-Empfehlung bzw. Regions-Maximum, bestaetigt)")" || echo "AUS bis Antenne bestaetigt")"
     log "meshtasticd:     OBS ${MESHTASTICD_CHANNEL} ($(obs_distro)), nativ per apt"
     log "config.ini:      $([[ -f "$HB_DIR/config.ini" ]] && echo "vorhanden (Backup), " || echo "neu aus config.template, ")setzt interface.type=tcp, interface.hostname=localhost, interface2.enabled=False,"
     log "                 location.lat/lon, webAdmin.enabled$([[ "$WEB_ADMIN" == "1" ]] && echo "/host"), Bot-Kanal-Keys (ignoreChannels, ignoreDefaultChannel, messagesChannel)"

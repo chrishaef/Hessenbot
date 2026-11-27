@@ -137,7 +137,7 @@ def test_state_roundtrip_keeps_special_characters(tmp_path: Path):
 
 @pytest.mark.parametrize(
     "raw,expected",
-    [("", "14"), ("auto", "14"), ("1", "1"), ("14", "14"), ("22", "22"), ("30", "30"), ("max", "30"), ("FULL", "30"), ("07", "7")],
+    [("", "14"), ("auto", "14"), ("0", "0"), ("1", "1"), ("14", "14"), ("22", "22"), ("30", "30"), ("max", "30"), ("FULL", "30"), ("07", "7")],
 )
 def test_normalize_tx_power_accepts_full_power(tmp_path: Path, raw: str, expected: str):
     r = run_wizard_lib(f"normalize_tx_power '{raw}'", tmp_path)
@@ -145,7 +145,7 @@ def test_normalize_tx_power_accepts_full_power(tmp_path: Path, raw: str, expecte
     assert r.stdout.strip() == expected
 
 
-@pytest.mark.parametrize("raw", ["0", "31", "-3", "abc", "14.5"])
+@pytest.mark.parametrize("raw", ["31", "-3", "abc", "14.5"])
 def test_normalize_tx_power_rejects_out_of_range(tmp_path: Path, raw: str):
     assert run_wizard_lib(f"normalize_tx_power '{raw}'", tmp_path).returncode != 0
 
@@ -181,6 +181,51 @@ def test_high_tx_power_requires_confirmation_and_is_not_clamped(tmp_path: Path):
     )
     assert accepted.returncode == 0, accepted.stderr
     assert "TX=30 ACK=30" in accepted.stdout
+
+
+def test_tx_power_zero_means_region_max_and_needs_confirmation(tmp_path: Path):
+    blocked = run_wizard_lib("DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 ANTENNA_GAIN=3 TX_POWER_REQ=0\nask_tx_power", tmp_path)
+    assert blocked.returncode != 0
+    assert "Regions-Maximum" in blocked.stderr and "NICHT 'aus'" in blocked.stderr
+    assert "--accept-tx-power" in blocked.stderr
+    accepted = run_wizard_lib(
+        """
+        DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 ANTENNA_GAIN=3 TX_POWER_REQ=0 TX_POWER_ACCEPT=1
+        ask_tx_power
+        echo "TX=$TX_POWER ACK=$TX_POWER_ACK"
+        """,
+        tmp_path,
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert "TX=0 ACK=0" in accepted.stdout
+    # a saved confirmation for another value does not cover 0; one for exactly 0 does
+    stale = run_wizard_lib("DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 TX_POWER=0 TX_POWER_ACK=22\nask_tx_power", tmp_path)
+    assert stale.returncode != 0
+    saved = run_wizard_lib("DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 TX_POWER=0 TX_POWER_ACK=0\nask_tx_power\necho TX=$TX_POWER", tmp_path)
+    assert saved.returncode == 0, saved.stderr
+    assert "TX=0" in saved.stdout
+
+
+def test_tx_power_zero_interactive_declined_asks_again(tmp_path: Path):
+    r = run_wizard_lib(
+        """
+        DRY_RUN=0 ANTENNA_OK=1 ANTENNA_GAIN=3
+        n=0
+        ask() { n=$((n + 1)); if [[ $n -eq 1 ]]; then REPLY_VALUE=0; else REPLY_VALUE=10; fi; }
+        confirm() { return 1; }
+        ask_tx_power
+        echo "TX=$TX_POWER ACK=[$TX_POWER_ACK] asked=$n"
+        """,
+        tmp_path,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "TX=10 ACK=[] asked=2" in r.stdout
+
+
+def test_high_tx_power_warning_mentions_firmware_cap_without_ham(tmp_path: Path):
+    r = run_wizard_lib("DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 TX_POWER_REQ=30\nask_tx_power", tmp_path)
+    assert r.returncode != 0
+    assert "HAM" in r.stderr and "Regionslimit" in r.stderr
 
 
 def test_high_tx_power_interactive_confirm_yes_and_no(tmp_path: Path):
