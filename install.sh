@@ -3,20 +3,66 @@
 # to uninstall, run with --nope
 
 NOPE=0
+LEGACY=0
+ASSUME_YES=0
 cd "$(dirname "$0")"
 program_path=$(pwd)
 
 for arg in "$@"; do
-    if [[ "$arg" == "--nope" ]]; then
-        NOPE=1
-    fi
+    case "$arg" in
+        --nope) NOPE=1 ;;
+        --legacy) LEGACY=1 ;;
+        --yes|-y) ASSUME_YES=1 ;;
+    esac
 done
+
+# confirm_tty "question": reads from /dev/tty; returns 0 only for an explicit "yes"
+confirm_tty() {
+    local answer=""
+    if [[ $ASSUME_YES -eq 1 ]]; then
+        return 0
+    fi
+    if ! { : </dev/tty; } 2>/dev/null; then
+        echo "No terminal available for confirmation. Re-run with --yes to skip questions."
+        return 1
+    fi
+    printf '%s (type "yes" to continue): ' "$1" >/dev/tty
+    IFS= read -r answer </dev/tty || answer=""
+    [[ "$answer" == "yes" ]]
+}
 
 if [[ $NOPE -eq 1 ]]; then
     echo "----------------------------------------------"
     echo "Uninstalling Hessenbot ..."
     echo "----------------------------------------------"
-    
+    echo "This stops and removes the mesh_bot services, the 'meshbot' user and $program_path"
+    echo "(including config.ini and data/). meshtasticd, /etc/hessenbot and /var/lib/meshtasticd are NOT touched."
+    if ! confirm_tty "Really uninstall Hessenbot?"; then
+        echo "Aborted. Nothing was changed."
+        exit 1
+    fi
+    if ! confirm_tty "Last chance: config.ini and data/ are archived first. Continue?"; then
+        echo "Aborted. Nothing was changed."
+        exit 1
+    fi
+
+    backup_dir="/var/backups/hessenbot"
+    backup_file="$backup_dir/hessenbot-uninstall-$(date +%Y%m%d-%H%M%S).tar.gz"
+    sudo mkdir -p "$backup_dir"
+    sudo chmod 700 "$backup_dir"
+    backup_items=()
+    for item in config.ini data modules/custom_scheduler.py; do
+        [[ -e "$program_path/$item" ]] && backup_items+=("$item")
+    done
+    if [[ ${#backup_items[@]} -gt 0 ]]; then
+        if ! sudo tar czf "$backup_file" -C "$program_path" "${backup_items[@]}"; then
+            echo "Backup failed; aborting uninstall (nothing removed)."
+            exit 1
+        fi
+        sudo chmod 600 "$backup_file"
+        echo "Backup written to $backup_file"
+    fi
+
     sudo systemctl stop mesh_bot || true
     sudo systemctl disable mesh_bot || true
 
@@ -72,6 +118,24 @@ fi
 
 # install.sh — Hessenbot installer
 # Thanks for using Hessenbot!
+
+# Raspberry Pi 4 (+ RAK6421/RAK13302): hand over to the native wizard unless --legacy is given.
+pi_model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)
+if [[ $LEGACY -eq 0 ]]; then
+    echo "Hint: the one-command installer for Raspberry Pi 4 + RAK6421/RAK13302 is bootstrap.sh (see INSTALL.md)."
+    if [[ "$pi_model" == *"Raspberry Pi 4"* && "$program_path" == "/opt/Hessenbot" && -f script/install/wizard.sh ]]; then
+        echo "Raspberry Pi 4 detected - starting the new installer (use --legacy for the old flow)."
+        passthrough=()
+        for arg in "$@"; do
+            [[ "$arg" == "--legacy" ]] || passthrough+=("$arg")
+        done
+        if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+            exec bash script/install/wizard.sh "${passthrough[@]}"
+        else
+            exec sudo bash script/install/wizard.sh "${passthrough[@]}"
+        fi
+    fi
+fi
 echo "=============================================="
 echo "        Hessenbot Automated Installer         "
 echo "=============================================="
