@@ -109,30 +109,14 @@ if [[ $NEED_MESHTASTICD -eq 1 ]]; then
     if ! systemctl list-units --type=service --no-pager --all | grep meshtasticd.service; then
         die "meshtasticd.service dependency not found. to ignore this check, run with --no-meshtasticd flag."
     fi
-    MESHTASTICD_DEPENDENCY_LINES=$'\nAfter=meshtasticd.service\nRequires=meshtasticd.service'
-else
-    MESHTASTICD_DEPENDENCY_LINES=""
 fi
 
-SERVICE_FILE_CONTENT="[Unit]
-Description=MESH-BOT
-After=network.target${MESHTASTICD_DEPENDENCY_LINES}
-
-[Service]
-Type=simple
-User=$SERVICE_USER
-Group=$SERVICE_GROUP
-WorkingDirectory=$PROJECT_PATH
-ExecStart=$EXEC_START
-KillSignal=SIGINT
-Environment=REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-Environment=PYTHONUNBUFFERED=1
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+# Single source of truth for mesh_bot.service: script/install/lib/services.sh
+SERVICES_LIB="$PROJECT_PATH/script/install/lib/services.sh"
+[[ -f "$SERVICES_LIB" ]] || die "services library not found: $SERVICES_LIB"
+# shellcheck source=../script/install/lib/services.sh
+source "$SERVICES_LIB"
+SERVICE_FILE_CONTENT="$(render_mesh_bot_unit "$SERVICE_USER" "$SERVICE_GROUP" "$PROJECT_PATH" "$EXEC_START" "$NEED_MESHTASTICD" 1)
 "
 
 TARGET_SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"

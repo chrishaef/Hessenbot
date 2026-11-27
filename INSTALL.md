@@ -2,6 +2,7 @@
 
 ## Table of Contents
 
+- [Raspberry Pi + RAK6421/RAK13302 (native one-command install)](#raspberry-pi--rak6421rak13302-native-one-command-install)
 - [Manual Install](#manual-install)
 - [Docker Installation](#docker-installation)
 - [Requirements](#requirements)
@@ -22,6 +23,106 @@
   - [How to Use](#how-to-use)
   - [What it does](#what-it-does-2)
   - [Note](#note-2)
+
+---
+
+## Raspberry Pi + RAK6421/RAK13302 (native one-command install)
+
+Target: Raspberry Pi 4B, Raspberry Pi OS Lite 64-bit (Debian 13 Trixie), RAK6421 HAT with RAK13302 (1 W) in slot 1, SPI, region EU_868. No Docker.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/chrishaef/Hessenbot/main/bootstrap.sh -o /tmp/hb-bootstrap.sh
+sudo bash /tmp/hb-bootstrap.sh
+```
+
+Review the script first if you like; it is safe to pipe (`curl ... | sudo bash`) because all prompts are read from `/dev/tty`.
+
+What happens:
+
+1. `bootstrap.sh` installs git/curl, clones or fast-forwards `/opt/Hessenbot` and starts `script/install/wizard.sh`.
+2. Wizard asks: modem preset (default Europe Short Slow), node names, optional `HessenTest` channel (#2, default no), bot channels, location, web admin, antenna, antenna gain and TX power.
+3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, `dtparam=i2c_arm=on`, `dtparam=i2c_vc=on`, `dtoverlay=i2c0` for HAT EEPROM detection, and the `i2c-dev` module; UART/`disable-bt` are only needed for GPS, which is not part of this version), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
+4. Phase B: `meshtasticd` from the OBS repo (`Debian_13`), the LoRa pin config `/etc/meshtasticd/available.d/lora-hat-rak-6421-pi-hat.yaml` (see below), Python 3.13 venv, `config.ini`, node channels (#0 primary, #1 "Mesh Hessen" always, #2 optional), systemd units (`meshtasticd`, `mesh_bot`), self-test.
+
+LoRa hardware config (RAK6421 + RAK13302, Slot 1): the installer writes the config from [SMLunchen/rak6421_rpi_hat_meshtastic_1W](https://github.com/SMLunchen/rak6421_rpi_hat_meshtastic_1W) 1:1 to `/etc/meshtasticd/available.d/lora-hat-rak-6421-pi-hat.yaml` (the name meshtasticd's HAT autodetection looks for) and links it into `config.d`; the shipped copy is `script/install/radios.d/lora-hat-rak-6421-pi-hat.yaml`.
+
+```yaml
+Lora:
+  Module: sx1262
+  CS: 8
+  IRQ: 22
+  Reset: 16
+  Busy: 24
+  DIO3_TCXO_VOLTAGE: true
+  DIO2_AS_RF_SWITCH: true
+  spidev: spidev0.0
+```
+
+- `CS: 8` is required: with `spi0-0cs` there is no hardware chip select, and the stock `lora-RAK6421-13302-slot1.yaml` has CS commented out, which ends in `SX126x init result -2`. The installer therefore does not use the stock preset (an old link to it in `config.d` is moved to the backup directory).
+- Do **not** set `Enable_Pins`, `SX126X_ANT_SW` or `SX126X_MAX_POWER`: `SX126X_ANT_SW: 13` blocks the TX path (no RF output although packets are counted), `SX126X_MAX_POWER: 30` causes `init result -13` (SPI timeout).
+- TX power: meshtasticd reports about 22 dBm, which is the SX1262 chip power. The SKY66122 PA (about +13 dB) is switched via `DIO2_AS_RF_SWITCH`, no extra GPIO control is needed. The power at the antenna connector is therefore well above the configured `lora.tx_power`; observe the regional limits for your antenna.
+- `General.MACAddressSource` is written to `config.d/hessenbot.yaml` (`end0` on Raspberry Pi OS Bookworm/Trixie, `eth0` on older images) so the node id stays stable.
+- The self-test reads `SX126x init result` from the journal (0 = ok, -2 = check CS/SPI, -13 = remove `SX126X_ANT_SW`/`SX126X_MAX_POWER`).
+
+Channels and bot: the bot serves only the channels you pick, using the existing `ignoreChannels`, `ignoreDefaultChannel` and `messagesChannel` keys. If you re-run with HessenTest off and channel #2 on the node is still named `HessenTest`, the installer disables it on the node; a channel #2 with any other name is left alone.
+
+TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; the installer sets no cap of its own on `tx_power` (the firmware limits to the region maximum unless HAM mode is on). The installer reads the node back after configuring it and aborts if TX is active without a confirmed antenna; in that case it also stops `meshtasticd` automatically.
+
+**TX window on first configuration:** the firmware switches TX on when the region is set for the first time, so the installer applies the TX gate (`tx_enabled=false`) in a second pass right after the first node restart. Until then the node can transmit briefly (for example a NodeInfo broadcast). **Connect the antenna (or a 50 ohm load) to the RAK13302 before running the installer.** If you answer "Antenna: no", the wizard warns and asks for confirmation (default no; unattended: `--accept-tx-window`), and it keeps `tx_power` at 1 dBm until you release TX.
+
+**TX power (no cap of its own):** the wizard asks for `lora.tx_power` in dBm, 0 to 30, default 14; `max` selects full power (30). The installer does not clamp what you choose, but the firmware does: without HAM mode it limits the value to the region maximum (EU_868: about 27 dBm). **`0` does not mean off:** the firmware then uses the region maximum (EU_868: 27 dBm), so `0` needs the same confirmation as values above 14 dBm. Unattended: `--tx-power 22` or `--tx-power max`. Values above 14 dBm (and 0) can exceed the EU 868 limits (depending on the sub-band 14 or 27 dBm ERP, 1-10 % duty cycle), and with the RAK13302 PA (SKY66122, about +13 dB via `DIO2_AS_RF_SWITCH`) the power at the antenna is well above the setting. For such values the wizard shows this warning and requires confirmation (default no; declining asks again, nothing is clamped silently). With `--yes` it aborts unless you also pass `--accept-tx-power`. The antenna gain is only used in the warning. The confirmation is remembered for that exact value only (state file), so changing the value asks again. You are responsible for complying with local regulations.
+
+**Changing TX power later:** web admin, tab *Node Settings* (`/node-settings`), section *Sendeleistung (LoRa)*. It reads and writes `lora.tx_power` on the connected node (0-30 dBm, 30 = full power, 0 = region maximum, not off) with the same warning; any changed value above 14 dBm, and 0, needs the confirmation checkbox; lowering to 1-14 dBm or leaving the value unchanged does not.
+
+To release TX later (antenna attached; use the `tx_power` from the final notes): `sudo /opt/Hessenbot/venv/bin/meshtastic --host localhost --set lora.tx_power 14 --set lora.tx_enabled true`.
+
+Re-runs: the wizard remembers your answers (`/var/lib/hessenbot-install/state.env`, no secrets). If you decline to reuse them you are asked everything again. If a reboot-resume fails, the reason is shown at the next login (`/etc/motd.d/50-hessenbot-install`). The resume unit is not retried on every boot; start the wizard again (or `wizard.sh --resume`). The unit stays until the install succeeds; follow it with `journalctl -u hessenbot-install-resume -f`. When you reuse saved answers without an antenna and the node already has stored settings, you are asked to acknowledge that before `meshtasticd` starts (skipped once the installer has verified TX off on that node).
+
+An existing node identity (`/var/lib/meshtasticd`) must be acknowledged before `meshtasticd` is started, because its old settings may transmit.
+
+Hardware: without a RAK6421 HAT EEPROM hit the wizard asks whether the hardware is a RAK6421 + RAK13302 (default no); use `--confirm-hardware` together with `--yes`. After the install, the summary lists `config.ini` overrides the installer applied (channels, web admin). In non-interactive mode set the web admin password via `HESSENBOT_WEB_PASSWORD`; otherwise use the interactive prompt. The summary prints the node ID; request MeshHessen MQTT access with it in the MQTT web admin.
+
+Options (`sudo bash /opt/Hessenbot/script/install/wizard.sh ...`):
+
+| Flag | Meaning |
+|------|---------|
+| `--dry-run` | Print the plan, change nothing (no root needed via `bootstrap.sh --dry-run`) |
+| `--yes`, `--non-interactive` | Accept defaults / take values from flags (`--preset`, `--long-name`, `--short-name`, `--hessentest`, `--bot-channels`, `--lat`, `--lon`, `--web-admin`, `--antenna`, `--antenna-gain`, `--tx-power`) |
+| `--meshtasticd-channel beta\|alpha\|daily` | OBS repository channel for `meshtasticd` (default `beta`; the signing key fingerprint is pinned, a new key needs explicit confirmation) |
+| `--install-dir DIR` | Bot install directory (default `/opt/Hessenbot`; the wizard must run from there) |
+| `--accept-tx-power` | Unattended: confirm a `--tx-power` above 14 dBm (possible EU 868 limit violation; needed with `--yes`) |
+| `--accept-tx-window` | Unattended: accept the short TX window without antenna and start `meshtasticd` with existing node settings (needed with `--yes` and `--antenna no`) |
+| `--confirm-hardware` | Confirm RAK6421 + RAK13302 (Slot 1) without a HAT EEPROM hit (for `--yes`) |
+| `--revert` | Undo changes recorded in `/var/lib/hessenbot-install/manifest` (files are moved to `/var/backups/hessenbot/`, apt packages and node identity are kept; add `--yes` to skip the confirmation) |
+| `--resume`, `--no-reboot` | Continue after reboot / do not reboot automatically |
+| `--skip-meshtasticd`, `--skip-node-config` | Skip those steps |
+
+`bootstrap.sh --legacy` keeps the previous venv + `config.ini` behaviour. `install.sh --nope` removes the bot after a typed `yes` confirmation and a backup tarball in `/var/backups/hessenbot/`.
+
+Log: `/var/log/hessenbot-install.log` (0600, PSKs and passwords masked). Notes: `/opt/Hessenbot/install_notes.txt`.
+
+### Remote clients (Companion app, MeshHessen client, MeshMonitor) -> meshtasticd :4403
+
+**Security first.** The meshtasticd TCP API (`4403`) has **no authentication and no TLS**. Anyone who can reach the port can read and change the node (channel keys, config, factory reset, TX settings). Never forward it through your router and never expose it to the internet. Use LAN and/or Tailscale only.
+
+Facts (from the meshtasticd source):
+
+- meshtasticd already listens on `0.0.0.0:4403` (IPv4 only). There is no bind-address option, so there is nothing to "fix" in `config.yaml`; the only control is a firewall. The installer does not configure a firewall, and Raspberry Pi OS ships none, so on a fresh install `4403` is reachable from your whole LAN (and over Tailscale). The Hessenbot bot itself connects via `localhost` and is unaffected by firewall rules.
+- Optional: `General: APIPort: <1024-65535>` in `/etc/meshtasticd/config.d/*.yaml` moves the port (then use `hostname = localhost:<port>` in `config.ini`). It is not a security measure.
+- **meshtasticd serves exactly one TCP API client at a time.** A new connection force-closes the previous one. `mesh_bot` reconnects automatically (watchdog, about 20 to 35 s), so a Companion/MeshMonitor session and the bot will keep kicking each other off. The Meshtastic web UI of meshtasticd (`https://<pi>/`, port 443 by default) is a separate path and not affected by this single-client rule.
+
+Restrict the port with UFW (helper, never opens to the world):
+
+```sh
+sudo bash /opt/Hessenbot/script/install/remote-access.sh status
+sudo bash /opt/Hessenbot/script/install/remote-access.sh lan --enable          # own subnet, auto-detected (or: lan 192.168.1.0/24)
+sudo bash /opt/Hessenbot/script/install/remote-access.sh tailscale              # tailscale0 only
+sudo bash /opt/Hessenbot/script/install/remote-access.sh close                  # remove these rules again
+```
+
+`--enable` switches UFW on if it is inactive and allows SSH (22/tcp) first. With UFW active everything else incoming is denied, so also allow what you use (for example the web admin: `sudo ufw allow from 192.168.1.0/24 to any port 5000 proto tcp`). Manual equivalent: `sudo ufw allow from 192.168.1.0/24 to any port 4403 proto tcp` or `sudo ufw allow in on tailscale0 to any port 4403 proto tcp`; verify with `ss -ltn '( sport = :4403 )'` and from the client (`meshtastic --host <pi-ip> --info`).
+
+Running several clients at once: native multi-connect is not enough. Either stop the bot while you configure (`sudo systemctl stop mesh_bot`, then `start`), or put a multiplexer in front, for example the Virtual Node of MeshMonitor (MeshMonitor is the only direct client on `4403`; Companion/MeshHessen connect to MeshMonitor's virtual-node port). Virtual nodes block admin messages by default, so settings changes then go through MeshMonitor or a direct, temporary connection.
 
 ---
 
@@ -209,6 +310,16 @@ If you encounter errors related to file or directory permissions (e.g., "Permiss
   ```
 
 - If you moved the project directory, re-run the permissions script to update ownership.
+
+- Do **not** run `chown -R $USER:$USER /opt/Hessenbot` (e.g. to make `git pull` work as your login user): `mesh_bot.service` runs as the `User=` from its unit (native installer: `meshbot`) and then fails with `PermissionError` on `logs/meshbot.log` and `data/*.pkl`, and the web admin (port 5000) does not come up. Fix it by restoring the service owner:
+
+  ```sh
+  SVC_USER="$(systemctl show -p User --value mesh_bot.service)"; SVC_USER="${SVC_USER:-meshbot}"
+  sudo bash /opt/Hessenbot/etc/set-permissions.sh "$SVC_USER" /opt/Hessenbot
+  sudo systemctl restart mesh_bot.service
+  ```
+
+  For git work as your login user, use `sudo -u meshbot git -C /opt/Hessenbot pull`, or give your user group access instead of changing the owner.
 
 - For systemd service issues, check logs with:
   ```sh

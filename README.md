@@ -68,12 +68,23 @@ Weitere Credits unten unter [Credits (Upstream)](#credits-upstream).
 | Befehlsreferenz (Web) | `/befehle` am laufenden Portal |
 | FAQ | `/faq` am laufenden Portal |
 
+**Raspberry Pi 4 + RAK6421/RAK13302 (nativ, ein Befehl)** — Raspberry Pi OS Lite 64-bit (Debian 13 Trixie):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/chrishaef/Hessenbot/main/bootstrap.sh -o /tmp/hb-bootstrap.sh
+sudo bash /tmp/hb-bootstrap.sh
+```
+
+Der Assistent fragt Preset, Kanäle, Standort und Web-Admin ab, installiert `meshtasticd` und den Bot als systemd-Dienste. Senden (TX) bleibt aus, bis die Antenne bestätigt ist. Details, `--dry-run` und `--revert`: [INSTALL.md](INSTALL.md#raspberry-pi--rak6421rak13302-native-one-command-install).
+
+Manuell / andere Systeme:
+
 ```sh
 git clone https://github.com/chrishaef/Hessenbot.git
 cd Hessenbot
 cp config.template config.ini
 # config.ini anpassen (UTF-8), dann:
-./bootstrap.sh   # oder install.sh — siehe INSTALL.md
+./bootstrap.sh --legacy   # oder install.sh — siehe INSTALL.md
 ./launch.sh mesh
 ```
 

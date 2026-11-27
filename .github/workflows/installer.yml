@@ -1,0 +1,121 @@
+name: Installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - bootstrap.sh
+      - script/install/**
+      - etc/install_service.sh
+      - .github/workflows/installer.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - bootstrap.sh
+      - script/install/**
+      - etc/install_service.sh
+      - .github/workflows/installer.yml
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: |
+          shellcheck -x -P SCRIPTDIR bootstrap.sh script/install/wizard.sh \
+            script/install/lib/*.sh script/install/wait-for-port.sh script/install/remote-access.sh etc/install_service.sh
+          shellcheck -S error install.sh
+
+  dry-run:
+    name: Wizard dry-run (Debian Trixie)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Prerequisites
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3 python3-pytest
+      - uses: actions/checkout@v4
+      - name: Installer unit tests
+        run: python3 -m pytest script/install -q
+      - name: Wizard dry-run
+        run: bash script/install/wizard.sh --dry-run --yes --non-interactive
+
+  node-config-sim:
+    name: node_config.py vs. simulated meshtasticd
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 python3-venv procps iproute2
+      - uses: actions/checkout@v4
+      - name: Install meshtasticd (OBS beta, native sim build)
+        run: |
+          install -d /etc/apt/keyrings
+          curl -fsSL https://download.opensuse.org/repositories/network:/Meshtastic:/beta/Debian_13/Release.key \
+            | gpg --dearmor -o /etc/apt/keyrings/meshtastic.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/meshtastic.gpg] https://download.opensuse.org/repositories/network:/Meshtastic:/beta/Debian_13/ /" \
+            > /etc/apt/sources.list.d/meshtastic.list
+          apt-get update
+          apt-get install -y --no-install-recommends meshtasticd
+      - name: Python client
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet meshtastic
+      - name: Start simulated node
+        run: |
+          mkdir -p /tmp/simfs
+          # the node exits on its post-config reboot; systemd restarts it on a real system
+          nohup bash -c 'while true; do meshtasticd -s -d /tmp/simfs -p 4403; sleep 1; done' > /tmp/sim.log 2>&1 &
+          for i in $(seq 1 60); do
+            if /tmp/venv/bin/python -c "import socket; socket.create_connection(('127.0.0.1', 4403), 2).close()" 2>/dev/null; then
+              echo "meshtasticd sim is listening after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::meshtasticd sim did not accept connections on 127.0.0.1:4403"
+          ss -ltnp || true
+          tail -n 60 /tmp/sim.log
+          exit 1
+      - name: apply, verify, TX gate, disable channel
+        run: |
+          cat > /tmp/spec.json <<'EOF'
+          {"owner": {"long": "CI Node", "short": "CI"},
+           "lora": {"region": "EU_868", "modem_preset": "SHORT_SLOW", "tx_power": 1, "tx_enabled": false},
+           "channels": [
+             {"index": 0, "role": "PRIMARY", "name": "", "psk": "default"},
+             {"index": 1, "role": "SECONDARY", "name": "CI Chan", "psk": "Y2ktdGVzdC1rZXktY2ktdGVzdC1rZXktY2ktdGVzISE="},
+             {"index": 2, "role": "SECONDARY", "name": "HessenTest", "psk": "default"}
+           ]}
+          EOF
+          sed 's/"role": "SECONDARY", "name": "HessenTest", "psk": "default"/"role": "DISABLED", "name": "", "psk": "default", "only_if_name": "HessenTest"/' \
+            /tmp/spec.json > /tmp/spec-off.json
+          cfg="/tmp/venv/bin/python script/install/node_config.py --host 127.0.0.1"
+          $cfg info
+          $cfg apply /tmp/spec.json --force
+          sleep 15
+          rc=0; $cfg verify /tmp/spec.json || rc=$?
+          if [ "$rc" = 12 ]; then
+            echo "Firmware forced tx_enabled=true; second pass"
+            $cfg apply /tmp/spec.json --force
+            sleep 15
+            $cfg verify /tmp/spec.json
+          elif [ "$rc" != 0 ]; then
+            exit "$rc"
+          fi
+          $cfg apply /tmp/spec-off.json --force
+          sleep 15
+          $cfg verify /tmp/spec-off.json
+      - name: Simulator log
+        if: failure()
+        run: tail -n 80 /tmp/sim.log
