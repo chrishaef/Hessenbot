@@ -69,7 +69,9 @@ Optionen:
   --accept-tx-window      Kurzes Sendefenster ohne Antenne akzeptieren (Region-Erstsetzen, vorhandene Node-Prefs; fuer --yes)
   --confirm-hardware      RAK6421 + RAK13302 (Slot 1) ohne HAT-EEPROM-Treffer bestaetigen (fuer --yes)
   --antenna yes|no        Antenne bestaetigt (Default: no -> TX aus)
-  --antenna-gain DBI      Antennengewinn (Default 3)
+  --antenna-gain DBI      Antennengewinn (Default 3; nur fuer die Leistungswarnung)
+  --tx-power DBM|max      lora.tx_power 1-30 dBm (Default 14); max = Volllast. Kein harter Cap.
+  --accept-tx-power       Werte ueber 14 dBm (moegliche Ueberschreitung der EU-868-Grenzwerte) bestaetigen (fuer --yes)
   -h, --help
 EOF
 }
@@ -101,6 +103,8 @@ parse_args() {
             --web-admin) need_value "$@"; WEB_ADMIN="$2"; shift ;;
             --antenna) need_value "$@"; ANTENNA_OK="$2"; shift ;;
             --antenna-gain) need_value "$@"; ANTENNA_GAIN="$2"; shift ;;
+            --tx-power) need_value "$@"; TX_POWER_REQ="$2"; shift ;;
+            --accept-tx-power) TX_POWER_ACCEPT=1 ;;
             --install-dir) need_value "$@"; HB_DIR="$2"; HB_VENV="$2/venv"; shift ;;
             -h | --help) usage; exit 0 ;;
             *) die "Unbekannte Option: $1 (siehe --help)" ;;
@@ -194,9 +198,7 @@ resolve_answers() {
         [[ -n "$MODEM_PRESET" ]] || die "Gespeicherter Stand unvollstaendig; ohne --resume neu starten."
         ANTENNA_OK="${ANTENNA_OK:-0}"
         WEB_ADMIN="${WEB_ADMIN:-0}"
-        if [[ -n "${ANTENNA_GAIN:-}" ]]; then
-            TX_POWER="$(compute_tx_power "$ANTENNA_GAIN")"
-        fi
+        ask_tx_power
         if [[ "$RESUME" != "1" ]]; then
             ask_antenna_risks
             state_save "${STATE_VARS[@]}"

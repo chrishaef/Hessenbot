@@ -16,12 +16,15 @@ WEB_PASSWORD="${WEB_PASSWORD:-${HESSENBOT_WEB_PASSWORD:-}}"
 ANTENNA_OK="${ANTENNA_OK:-}"
 ANTENNA_GAIN="${ANTENNA_GAIN:-}"
 TX_POWER=""
+TX_POWER_REQ="${TX_POWER_REQ:-}"
+TX_POWER_ACK=""
+TX_POWER_ACCEPT="${TX_POWER_ACCEPT:-0}"
 EXISTING_NODE_ACK="${EXISTING_NODE_ACK:-}"
 TX_WINDOW_ACK="${TX_WINDOW_ACK:-}"
 NODE_GATE_VERIFIED="${NODE_GATE_VERIFIED:-}"
 HW_ACK="${HW_ACK:-0}"
 
-STATE_VARS=(MODEM_PRESET LONG_NAME SHORT_NAME HESSENTEST BOT_CHANNELS LAT LON HAS_GPS WEB_ADMIN WEB_BIND ANTENNA_OK ANTENNA_GAIN TX_POWER EXISTING_NODE_ACK TX_WINDOW_ACK NODE_GATE_VERIFIED MESHTASTICD_CHANNEL PHASE_A_DONE)
+STATE_VARS=(MODEM_PRESET LONG_NAME SHORT_NAME HESSENTEST BOT_CHANNELS LAT LON HAS_GPS WEB_ADMIN WEB_BIND ANTENNA_OK ANTENNA_GAIN TX_POWER TX_POWER_ACK EXISTING_NODE_ACK TX_WINDOW_ACK NODE_GATE_VERIFIED MESHTASTICD_CHANNEL PHASE_A_DONE)
 
 PRESET_KEYS=(SHORT_SLOW SHORT_FAST MEDIUM_SLOW MEDIUM_FAST LONG_MODERATE LONG_FAST LONG_SLOW)
 PRESET_LABELS=("Europe Short Slow (Standard, Meshhessen)" "Short Fast" "Medium Slow" "Medium Fast" "Long Moderate" "Long Fast" "Long Slow")
@@ -183,15 +186,67 @@ ask_antenna() {
         fi
     fi
     is_number "$ANTENNA_GAIN" || die "Antennengewinn muss eine Zahl sein."
-    TX_POWER="$(compute_tx_power "$ANTENNA_GAIN")"
-    if [[ "$ANTENNA_OK" == "1" ]]; then
-        log "tx_power = ${TX_POWER} dBm (${RADIO_TX_POWER_CAP} dBm Obergrenze minus ${ANTENNA_GAIN} dBi, abgerundet). EU_868: 10 % Duty Cycle beachten."
-    fi
+    ask_tx_power
 }
 
-# compute_tx_power GAIN_DBI -> integer dBm, rounded down, clamped to 1..RADIO_TX_POWER_CAP
-compute_tx_power() {
-    awk -v cap="$RADIO_TX_POWER_CAP" -v g="$1" 'BEGIN { p = cap - g; p = (p == int(p)) ? p : (p > 0 ? int(p) : int(p) - 1); if (p < 1) p = 1; if (p > cap) p = cap; print p }'
+# normalize_tx_power RAW -> integer dBm on stdout (1..RADIO_TX_POWER_MAX); "max"/"full" = RADIO_TX_POWER_MAX, ""/"auto" = default
+normalize_tx_power() {
+    local raw="${1,,}"
+    case "$raw" in
+        "" | auto) echo "$RADIO_TX_POWER_DEFAULT" ;;
+        max | full | voll) echo "$RADIO_TX_POWER_MAX" ;;
+        *)
+            [[ "$raw" =~ ^[0-9]+$ ]] || return 1
+            ((10#$raw >= 1 && 10#$raw <= RADIO_TX_POWER_MAX)) || return 1
+            echo "$((10#$raw))"
+            ;;
+    esac
+}
+
+tx_power_needs_ack() { (($1 > RADIO_TX_POWER_EU_SAFE)); }
+
+warn_tx_power_high() {
+    local power="$1" eirp
+    eirp="$(awk -v p="$power" -v g="${ANTENNA_GAIN:-0}" 'BEGIN { printf "%.1f", p + g }')"
+    warn "tx_power ${power} dBm liegt ueber ${RADIO_TX_POWER_EU_SAFE} dBm. Das kann die EU-868-Grenzwerte (je nach Teilband 14 bzw. 27 dBm ERP, 1-10 % Duty Cycle) ueberschreiten."
+    warn "Die RAK13302 verstaerkt zusaetzlich (SKY66122, ca. +13 dB, ueber DIO2): die Leistung an der Antenne liegt deutlich ueber dem Einstellwert. Bereits ${power} dBm + ${ANTENNA_GAIN:-0} dBi Antenne = ${eirp} dBm EIRP vor der PA-Verstaerkung."
+    warn "Du bist selbst fuer die Einhaltung der Vorschriften verantwortlich. Der Installer begrenzt den Wert nicht."
+}
+
+# ask_tx_power: choose lora.tx_power (1..RADIO_TX_POWER_MAX, "max" = full power); values above the EU-safe level need a confirmation
+ask_tx_power() {
+    local power interactive=1
+    [[ -z "$TX_POWER_REQ" ]] || TX_POWER="$TX_POWER_REQ"
+    if [[ "$ASSUME_YES" == "1" || "${RESUME:-0}" == "1" ]]; then interactive=0; fi
+    while true; do
+        if [[ -z "$TX_POWER" && "$interactive" == "1" && "$ANTENNA_OK" == "1" ]]; then
+            tty_print ""
+            tty_print "Sendeleistung (lora.tx_power, ${RADIO_TX_POWER_EU_SAFE} dBm = Empfehlung; 'max' = Volllast ${RADIO_TX_POWER_MAX} dBm, ohne Begrenzung durch den Installer)"
+            ask "tx_power in dBm (1-${RADIO_TX_POWER_MAX} oder max)" "$RADIO_TX_POWER_DEFAULT"
+            TX_POWER="$REPLY_VALUE"
+        fi
+        power="$(normalize_tx_power "$TX_POWER")" || {
+            [[ "$interactive" == "1" && -z "$TX_POWER_REQ" ]] || die "Ungueltige tx_power '$TX_POWER' (1-${RADIO_TX_POWER_MAX} dBm oder max)."
+            warn "Ungueltige Eingabe: $TX_POWER"
+            TX_POWER=""
+            continue
+        }
+        TX_POWER="$power"
+        if ! tx_power_needs_ack "$power" || [[ "$TX_POWER_ACK" == "$power" || "$TX_POWER_ACCEPT" == "1" ]]; then
+            break
+        fi
+        warn_tx_power_high "$power"
+        if confirm "tx_power ${power} dBm trotz Warnung verwenden?" n; then
+            break
+        fi
+        [[ "$interactive" == "1" ]] || die "tx_power ${power} dBm braucht eine Bestaetigung (--accept-tx-power)."
+        TX_POWER=""
+        TX_POWER_REQ=""
+    done
+    tx_power_needs_ack "$TX_POWER" && TX_POWER_ACK="$TX_POWER" || TX_POWER_ACK=""
+    if [[ "$ANTENNA_OK" == "1" ]]; then
+        log "tx_power = ${TX_POWER} dBm (kein harter Limit-Cap; EU_868: Grenzwerte und Duty Cycle beachten)."
+    fi
 }
 
 # existing_node_prefs -> 0 when meshtasticd already has stored settings (it may transmit as soon as it starts)
@@ -277,7 +332,7 @@ print_summary() {
     log "Standort:        ${LAT}, ${LON}"
     log "GPS/UART:        nicht Teil dieser Version (UART bleibt aus)"
     log "Web-Admin:       $([[ "$WEB_ADMIN" == "1" ]] && echo "ja, Bind ${WEB_BIND}, Passwort in /etc/hessenbot/env (0600)" || echo nein)"
-    log "TX:              $([[ "$ANTENNA_OK" == "1" ]] && echo "an, ${TX_POWER} dBm" || echo "AUS bis Antenne bestaetigt")"
+    log "TX:              $([[ "$ANTENNA_OK" == "1" ]] && echo "an, ${TX_POWER} dBm$(tx_power_needs_ack "$TX_POWER" && echo " (UEBER EU-Empfehlung, bestaetigt)")" || echo "AUS bis Antenne bestaetigt")"
     log "meshtasticd:     OBS ${MESHTASTICD_CHANNEL} ($(obs_distro)), nativ per apt"
     log "config.ini:      $([[ -f "$HB_DIR/config.ini" ]] && echo "vorhanden (Backup), " || echo "neu aus config.template, ")setzt interface.type=tcp, interface.hostname=localhost, interface2.enabled=False,"
     log "                 location.lat/lon, webAdmin.enabled$([[ "$WEB_ADMIN" == "1" ]] && echo "/host"), Bot-Kanal-Keys (ignoreChannels, ignoreDefaultChannel, messagesChannel)"

@@ -1634,6 +1634,8 @@ def fetch_local_node_settings(iface_id: int) -> Tuple[Optional[str], Optional[Di
         "lora_region": _enum_name("LoRaConfig.RegionCode", lora.region, {}),
         "lora_modem_preset": _enum_name("LoRaConfig.ModemPreset", lora.modem_preset, {}),
         "lora_channel_num": int(lora.channel_num),
+        "lora_tx_power": int(lora.tx_power),
+        "lora_tx_enabled": bool(lora.tx_enabled),
     }
 
 
@@ -1675,6 +1677,43 @@ def _coords_changed(current: Dict[str, Any], lat: float, lon: float, alt_m: Opti
     if cur_alt is None:
         return True
     return int(cur_alt) != int(alt_m)
+
+
+# lora.tx_power: no hard cap in Hessenbot (hardware/firmware limit applies); above the EU-safe level the admin must confirm.
+TX_POWER_EU_SAFE_DBM = 14
+TX_POWER_MAX_DBM = 30
+
+TX_POWER_WARNING_TEXT = (
+    f"Werte über {TX_POWER_EU_SAFE_DBM} dBm können die EU-868-Grenzwerte überschreiten "
+    "(je nach Teilband 14 bzw. 27 dBm ERP, 1–10 % Duty Cycle). Mit einem PA-Modul (z. B. RAK13302, "
+    "SKY66122, ca. +13 dB) liegt die Leistung an der Antenne deutlich über dem Einstellwert. "
+    "Du bist selbst für die Einhaltung der Vorschriften verantwortlich; es wird nichts still begrenzt."
+)
+
+
+def plan_tx_power_change(
+    current: int, raw: Optional[str], confirmed: bool
+) -> Tuple[Optional[int], Optional[str]]:
+    """Validate a requested lora.tx_power. Returns (new value or None if unchanged/not submitted, error)."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return None, None
+    if text in ("max", "full", "voll"):
+        value = TX_POWER_MAX_DBM
+    else:
+        try:
+            value = int(text)
+        except ValueError:
+            return None, "Sendeleistung: bitte eine ganze Zahl (dBm) oder „max“ eingeben."
+    if not 0 <= value <= TX_POWER_MAX_DBM:
+        return None, f"Sendeleistung: Wert zwischen 0 und {TX_POWER_MAX_DBM} dBm (0 = Firmware-Standard)."
+    if value == int(current):
+        return None, None
+    if value > TX_POWER_EU_SAFE_DBM and not confirmed:
+        return None, (
+            f"Sendeleistung {value} dBm nicht gespeichert: Bitte die Warnung bestätigen. {TX_POWER_WARNING_TEXT}"
+        )
+    return value, None
 
 
 def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
@@ -1725,6 +1764,14 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
         rebroadcast = int(form.get("rebroadcast_mode", current["rebroadcast_mode"]))
     except (TypeError, ValueError):
         return False, "Rolle oder Rebroadcast-Modus ungültig."
+
+    tx_power_new, err = plan_tx_power_change(
+        current["lora_tx_power"],
+        form.get("tx_power"),
+        (form.get("tx_power_confirm") or "").strip().lower() in ("1", "on", "yes", "true"),
+    )
+    if err:
+        return False, err
 
     changes: List[str] = []
 
@@ -1780,6 +1827,14 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
         except Exception as e:
             return False, f"Feste Position konnte nicht gesetzt werden: {e!s}"
         changes.append("Feste Position")
+
+    if tx_power_new is not None:
+        node.localConfig.lora.tx_power = tx_power_new
+        try:
+            node.writeConfig("lora")
+        except Exception as e:
+            return False, f"LoRa-Config (tx_power) konnte nicht geschrieben werden: {e!s}"
+        changes.append(f"Sendeleistung {tx_power_new} dBm")
 
     if not changes:
         return True, "Keine Änderungen."
@@ -2182,8 +2237,9 @@ def build_node_settings_html(
   </div>
   <div class="col-md-4">
     <div class="p-3 rounded border border-secondary-subtle h-100">
-      <div class="small text-muted">LoRa (nur Anzeige)</div>
-      <div class="small">{html.escape(settings["lora_region"])} · {html.escape(settings["lora_modem_preset"])} · Kanal {settings["lora_channel_num"]}</div>
+      <div class="small text-muted">LoRa (Region/Preset nur Anzeige)</div>
+      <div class="small">{html.escape(settings["lora_region"])} · {html.escape(settings["lora_modem_preset"])} · Kanal {settings["lora_channel_num"]}
+        · TX {"an" if settings["lora_tx_enabled"] else "aus"}</div>
     </div>
   </div>
 </div>
@@ -2251,6 +2307,29 @@ def build_node_settings_html(
       <input class="form-control" type="number" id="ns-pos" name="position_broadcast_secs"
              min="60" step="1" required value="{settings["position_broadcast_secs"]}">
       <div class="form-text">Sendeintervall der festen Position ins Mesh.</div>
+    </div>
+  </div>
+
+  <h5 class="mb-3">Sendeleistung (LoRa)</h5>
+  <div class="row g-3 mb-2">
+    <div class="col-md-3">
+      <label class="form-label" for="ns-txpower">tx_power (dBm, 0–{TX_POWER_MAX_DBM})</label>
+      <input class="form-control" type="number" id="ns-txpower" name="tx_power"
+             min="0" max="{TX_POWER_MAX_DBM}" step="1" required value="{settings["lora_tx_power"]}"
+             data-eu-safe="{TX_POWER_EU_SAFE_DBM}">
+      <div class="form-text">Aktuell {settings["lora_tx_power"]} dBm. {TX_POWER_MAX_DBM} = Volllast, 0 = Firmware-Standard.
+        Kein harter Cap.</div>
+    </div>
+    <div class="col-md-9">
+      <div class="alert alert-danger small mb-2">
+        <strong>Warnung:</strong> {html.escape(TX_POWER_WARNING_TEXT)}
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="ns-txpower-confirm" name="tx_power_confirm" value="1">
+        <label class="form-check-label" for="ns-txpower-confirm">
+          Ich habe die Warnung gelesen und setze eine Sendeleistung über {TX_POWER_EU_SAFE_DBM} dBm bewusst
+          (nötig bei jedem geänderten Wert über {TX_POWER_EU_SAFE_DBM} dBm).</label>
+      </div>
     </div>
   </div>
 

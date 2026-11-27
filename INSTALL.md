@@ -40,7 +40,7 @@ Review the script first if you like; it is safe to pipe (`curl ... | sudo bash`)
 What happens:
 
 1. `bootstrap.sh` installs git/curl, clones or fast-forwards `/opt/Hessenbot` and starts `script/install/wizard.sh`.
-2. Wizard asks: modem preset (default Europe Short Slow), node names, optional `HessenTest` channel (#2, default no), bot channels, location, web admin, antenna and gain.
+2. Wizard asks: modem preset (default Europe Short Slow), node names, optional `HessenTest` channel (#2, default no), bot channels, location, web admin, antenna, antenna gain and TX power.
 3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, `dtparam=i2c_arm=on`, `dtparam=i2c_vc=on`, `dtoverlay=i2c0` for HAT EEPROM detection, and the `i2c-dev` module; UART/`disable-bt` are only needed for GPS, which is not part of this version), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
 4. Phase B: `meshtasticd` from the OBS repo (`Debian_13`), the LoRa pin config `/etc/meshtasticd/available.d/lora-hat-rak-6421-pi-hat.yaml` (see below), Python 3.13 venv, `config.ini`, node channels (#0 primary, #1 "Mesh Hessen" always, #2 optional), systemd units (`meshtasticd`, `mesh_bot`), self-test.
 
@@ -66,11 +66,15 @@ Lora:
 
 Channels and bot: the bot serves only the channels you pick, using the existing `ignoreChannels`, `ignoreDefaultChannel` and `messagesChannel` keys. If you re-run with HessenTest off and channel #2 on the node is still named `HessenTest`, the installer disables it on the node; a channel #2 with any other name is left alone.
 
-TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; `tx_power` = 27 dBm minus antenna gain (rounded down). The installer reads the node back after configuring it and aborts if TX is active without a confirmed antenna; in that case it also stops `meshtasticd` automatically.
+TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; the installer does not cap `tx_power`. The installer reads the node back after configuring it and aborts if TX is active without a confirmed antenna; in that case it also stops `meshtasticd` automatically.
 
 **TX window on first configuration:** the firmware switches TX on when the region is set for the first time, so the installer applies the TX gate (`tx_enabled=false`) in a second pass right after the first node restart. Until then the node can transmit briefly (for example a NodeInfo broadcast). **Connect the antenna (or a 50 ohm load) to the RAK13302 before running the installer.** If you answer "Antenna: no", the wizard warns and asks for confirmation (default no; unattended: `--accept-tx-window`), and it keeps `tx_power` at 1 dBm until you release TX.
 
-To release TX later (antenna attached; use the `tx_power` from the final notes, 27 dBm minus antenna gain): `sudo /opt/Hessenbot/venv/bin/meshtastic --host localhost --set lora.tx_power 24 --set lora.tx_enabled true`.
+**TX power (no hard cap):** the wizard asks for `lora.tx_power` in dBm, 1 to 30, default 14; `max` selects full power (30; the firmware limits it to what the hardware supports). Unattended: `--tx-power 22` or `--tx-power max`. Values above 14 dBm can exceed the EU 868 limits (depending on the sub-band 14 or 27 dBm ERP, 1-10 % duty cycle), and with the RAK13302 PA (SKY66122, about +13 dB via `DIO2_AS_RF_SWITCH`) the power at the antenna is well above the setting. For such values the wizard shows this warning and requires confirmation (default no; declining asks again, nothing is clamped silently). With `--yes` it aborts unless you also pass `--accept-tx-power`. The antenna gain is only used in the warning. The confirmation is remembered for that exact value only (state file), so changing the value asks again. You are responsible for complying with local regulations.
+
+**Changing TX power later:** web admin, tab *Node Settings* (`/node-settings`), section *Sendeleistung (LoRa)*. It reads and writes `lora.tx_power` on the connected node (0-30 dBm, 30 = full power, 0 = firmware default) with the same warning; raising or keeping a value above 14 dBm that you change needs the confirmation checkbox, lowering to 14 or less does not.
+
+To release TX later (antenna attached; use the `tx_power` from the final notes): `sudo /opt/Hessenbot/venv/bin/meshtastic --host localhost --set lora.tx_power 14 --set lora.tx_enabled true`.
 
 Re-runs: the wizard remembers your answers (`/var/lib/hessenbot-install/state.env`, no secrets). If you decline to reuse them you are asked everything again. If a reboot-resume fails, the reason is shown at the next login (`/etc/motd.d/50-hessenbot-install`). The resume unit is not retried on every boot; start the wizard again (or `wizard.sh --resume`). The unit stays until the install succeeds; follow it with `journalctl -u hessenbot-install-resume -f`. When you reuse saved answers without an antenna and the node already has stored settings, you are asked to acknowledge that before `meshtasticd` starts (skipped once the installer has verified TX off on that node).
 
@@ -83,9 +87,10 @@ Options (`sudo bash /opt/Hessenbot/script/install/wizard.sh ...`):
 | Flag | Meaning |
 |------|---------|
 | `--dry-run` | Print the plan, change nothing (no root needed via `bootstrap.sh --dry-run`) |
-| `--yes`, `--non-interactive` | Accept defaults / take values from flags (`--preset`, `--long-name`, `--short-name`, `--hessentest`, `--bot-channels`, `--lat`, `--lon`, `--web-admin`, `--antenna`, `--antenna-gain`) |
+| `--yes`, `--non-interactive` | Accept defaults / take values from flags (`--preset`, `--long-name`, `--short-name`, `--hessentest`, `--bot-channels`, `--lat`, `--lon`, `--web-admin`, `--antenna`, `--antenna-gain`, `--tx-power`) |
 | `--meshtasticd-channel beta\|alpha\|daily` | OBS repository channel for `meshtasticd` (default `beta`; the signing key fingerprint is pinned, a new key needs explicit confirmation) |
 | `--install-dir DIR` | Bot install directory (default `/opt/Hessenbot`; the wizard must run from there) |
+| `--accept-tx-power` | Unattended: confirm a `--tx-power` above 14 dBm (possible EU 868 limit violation; needed with `--yes`) |
 | `--accept-tx-window` | Unattended: accept the short TX window without antenna and start `meshtasticd` with existing node settings (needed with `--yes` and `--antenna no`) |
 | `--confirm-hardware` | Confirm RAK6421 + RAK13302 (Slot 1) without a HAT EEPROM hit (for `--yes`) |
 | `--revert` | Undo changes recorded in `/var/lib/hessenbot-install/manifest` (files are moved to `/var/backups/hessenbot/`, apt packages and node identity are kept; add `--yes` to skip the confirmation) |

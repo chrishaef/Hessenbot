@@ -46,6 +46,7 @@ SAVED = dict(
     ANTENNA_OK="1",
     ANTENNA_GAIN="3",
     TX_POWER="24",
+    TX_POWER_ACK="24",
     WEB_ADMIN="0",
     HAS_GPS="0",
     BOT_CHANNELS="1",
@@ -89,12 +90,12 @@ def test_rerun_accepted_reuse_loads_state_and_flags_win(tmp_path: Path):
         confirm() { return 0; }
         ask_all() { echo "ask_all must not run"; exit 9; }
         resolve_answers
-        echo "REUSE=$REUSE PHASE_A_DONE=$PHASE_A_DONE PRESET=$MODEM_PRESET GAIN=$ANTENNA_GAIN TX=$TX_POWER CH=$MESHTASTICD_CHANNEL"
+        echo "REUSE=$REUSE PHASE_A_DONE=$PHASE_A_DONE PRESET=$MODEM_PRESET GAIN=$ANTENNA_GAIN TX=$TX_POWER ACK=$TX_POWER_ACK CH=$MESHTASTICD_CHANNEL"
         """,
         tmp_path,
     )
     assert r.returncode == 0, r.stderr
-    assert "REUSE=1 PHASE_A_DONE=1 PRESET=LONG_FAST GAIN=5.5 TX=21 CH=beta" in r.stdout
+    assert "REUSE=1 PHASE_A_DONE=1 PRESET=LONG_FAST GAIN=5.5 TX=24 ACK=24 CH=beta" in r.stdout
 
 
 def test_resume_uses_state_without_prompting_and_requires_state(tmp_path: Path):
@@ -131,14 +132,100 @@ def test_state_roundtrip_keeps_special_characters(tmp_path: Path):
     assert r.stdout.strip() == "Node 'A' & Co|SHORT_SLOW"
 
 
-# --- N1: tx power rounds down ----------------------------------------------------------------
+# --- TX power: no hard cap, warning + confirmation above the EU-safe level --------------------------------
 
 
-@pytest.mark.parametrize("gain,expected", [("5.5", "21"), ("3", "24"), ("2.15", "24"), ("0", "27"), ("-2", "27"), ("40", "1")])
-def test_tx_power_rounds_down_and_clamps(tmp_path: Path, gain: str, expected: str):
-    r = run_wizard_lib(f"compute_tx_power {gain}", tmp_path)
+@pytest.mark.parametrize(
+    "raw,expected",
+    [("", "14"), ("auto", "14"), ("1", "1"), ("14", "14"), ("22", "22"), ("30", "30"), ("max", "30"), ("FULL", "30"), ("07", "7")],
+)
+def test_normalize_tx_power_accepts_full_power(tmp_path: Path, raw: str, expected: str):
+    r = run_wizard_lib(f"normalize_tx_power '{raw}'", tmp_path)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == expected
+
+
+@pytest.mark.parametrize("raw", ["0", "31", "-3", "abc", "14.5"])
+def test_normalize_tx_power_rejects_out_of_range(tmp_path: Path, raw: str):
+    assert run_wizard_lib(f"normalize_tx_power '{raw}'", tmp_path).returncode != 0
+
+
+def test_tx_power_default_is_safe_and_needs_no_confirmation(tmp_path: Path):
+    r = run_wizard_lib(
+        """
+        DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 ANTENNA_GAIN=3
+        ask_tx_power
+        echo "TX=$TX_POWER ACK=[$TX_POWER_ACK]"
+        """,
+        tmp_path,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "TX=14 ACK=[]" in r.stdout
+    assert "WARNUNG" not in r.stderr
+
+
+def test_high_tx_power_requires_confirmation_and_is_not_clamped(tmp_path: Path):
+    blocked = run_wizard_lib(
+        "DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 ANTENNA_GAIN=3 TX_POWER_REQ=max\nask_tx_power", tmp_path
+    )
+    assert blocked.returncode != 0
+    assert "WARNUNG" in blocked.stderr and "EU-868" in blocked.stderr and "SKY66122" in blocked.stderr
+    assert "--accept-tx-power" in blocked.stderr
+    accepted = run_wizard_lib(
+        """
+        DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 ANTENNA_GAIN=3 TX_POWER_REQ=max TX_POWER_ACCEPT=1
+        ask_tx_power
+        echo "TX=$TX_POWER ACK=$TX_POWER_ACK"
+        """,
+        tmp_path,
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert "TX=30 ACK=30" in accepted.stdout
+
+
+def test_high_tx_power_interactive_confirm_yes_and_no(tmp_path: Path):
+    yes = run_wizard_lib(
+        """
+        DRY_RUN=0 ANTENNA_OK=1 ANTENNA_GAIN=3
+        ask() { REPLY_VALUE=27; }
+        confirm() { echo "CONFIRM: $1" >&2; return 0; }
+        ask_tx_power
+        echo "TX=$TX_POWER ACK=$TX_POWER_ACK"
+        """,
+        tmp_path,
+    )
+    assert yes.returncode == 0, yes.stderr
+    assert "TX=27 ACK=27" in yes.stdout and "CONFIRM:" in yes.stderr
+    # declining re-asks (no silent clamp): the second answer is 14
+    no = run_wizard_lib(
+        """
+        DRY_RUN=0 ANTENNA_OK=1 ANTENNA_GAIN=3
+        n=0
+        ask() { n=$((n + 1)); if [[ $n -eq 1 ]]; then REPLY_VALUE=30; else REPLY_VALUE=14; fi; }
+        confirm() { return 1; }
+        ask_tx_power
+        echo "TX=$TX_POWER ACK=[$TX_POWER_ACK] asked=$n"
+        """,
+        tmp_path,
+    )
+    assert no.returncode == 0, no.stderr
+    assert "TX=14 ACK=[] asked=2" in no.stdout
+
+
+def test_tx_power_ack_is_bound_to_the_confirmed_value(tmp_path: Path):
+    ok = run_wizard_lib(
+        'DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 TX_POWER=22 TX_POWER_ACK=22\nask_tx_power\necho "TX=$TX_POWER"', tmp_path
+    )
+    assert ok.returncode == 0, ok.stderr
+    assert "TX=22" in ok.stdout
+    stale = run_wizard_lib("DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=1 TX_POWER=30 TX_POWER_ACK=22\nask_tx_power", tmp_path)
+    assert stale.returncode != 0 and "--accept-tx-power" in stale.stderr
+
+
+def test_tx_power_flags_parse(tmp_path: Path):
+    r = run_wizard_lib('parse_args --tx-power max --accept-tx-power\necho "$TX_POWER_REQ$TX_POWER_ACCEPT"', tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "max1"
 
 
 # --- I1: apt options / conffile -------------------------------------------------------------------
