@@ -311,6 +311,16 @@ If you encounter errors related to file or directory permissions (e.g., "Permiss
 
 - If you moved the project directory, re-run the permissions script to update ownership.
 
+- Do **not** run `chown -R $USER:$USER /opt/Hessenbot` (e.g. to make `git pull` work as your login user): `mesh_bot.service` runs as the `User=` from its unit (native installer: `meshbot`) and then fails with `PermissionError` on `logs/meshbot.log` and `data/*.pkl`, and the web admin (port 5000) does not come up. Fix it by restoring the service owner:
+
+  ```sh
+  SVC_USER="$(systemctl show -p User --value mesh_bot.service)"; SVC_USER="${SVC_USER:-meshbot}"
+  sudo bash /opt/Hessenbot/etc/set-permissions.sh "$SVC_USER" /opt/Hessenbot
+  sudo systemctl restart mesh_bot.service
+  ```
+
+  For git work as your login user, use `sudo -u meshbot git -C /opt/Hessenbot pull`, or give your user group access instead of changing the owner.
+
 - For systemd service issues, check logs with:
   ```sh
   sudo journalctl -u mesh_bot.service
