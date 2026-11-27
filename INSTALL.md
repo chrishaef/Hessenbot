@@ -41,8 +41,28 @@ What happens:
 
 1. `bootstrap.sh` installs git/curl, clones or fast-forwards `/opt/Hessenbot` and starts `script/install/wizard.sh`.
 2. Wizard asks: modem preset (default Europe Short Slow), node names, optional `HessenTest` channel (#2, default no), bot channels, location, web admin, antenna and gain.
-3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, I2C and the `i2c-dev` module; GPS is not part of this version), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
-4. Phase B: `meshtasticd` from the OBS repo (`Debian_13`), preset `lora-RAK6421-13302-slot1.yaml`, Python 3.13 venv, `config.ini`, node channels (#0 primary, #1 "Mesh Hessen" always, #2 optional), systemd units (`meshtasticd`, `mesh_bot`), self-test.
+3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, `dtparam=i2c_arm=on`, `dtparam=i2c_vc=on`, `dtoverlay=i2c0` for HAT EEPROM detection, and the `i2c-dev` module; UART/`disable-bt` are only needed for GPS, which is not part of this version), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
+4. Phase B: `meshtasticd` from the OBS repo (`Debian_13`), the LoRa pin config `/etc/meshtasticd/available.d/lora-hat-rak-6421-pi-hat.yaml` (see below), Python 3.13 venv, `config.ini`, node channels (#0 primary, #1 "Mesh Hessen" always, #2 optional), systemd units (`meshtasticd`, `mesh_bot`), self-test.
+
+LoRa hardware config (RAK6421 + RAK13302, Slot 1): the installer writes the config from [SMLunchen/rak6421_rpi_hat_meshtastic_1W](https://github.com/SMLunchen/rak6421_rpi_hat_meshtastic_1W) 1:1 to `/etc/meshtasticd/available.d/lora-hat-rak-6421-pi-hat.yaml` (the name meshtasticd's HAT autodetection looks for) and links it into `config.d`; the shipped copy is `script/install/radios.d/lora-hat-rak-6421-pi-hat.yaml`.
+
+```yaml
+Lora:
+  Module: sx1262
+  CS: 8
+  IRQ: 22
+  Reset: 16
+  Busy: 24
+  DIO3_TCXO_VOLTAGE: true
+  DIO2_AS_RF_SWITCH: true
+  spidev: spidev0.0
+```
+
+- `CS: 8` is required: with `spi0-0cs` there is no hardware chip select, and the stock `lora-RAK6421-13302-slot1.yaml` has CS commented out, which ends in `SX126x init result -2`. The installer therefore does not use the stock preset (an old link to it in `config.d` is moved to the backup directory).
+- Do **not** set `Enable_Pins`, `SX126X_ANT_SW` or `SX126X_MAX_POWER`: `SX126X_ANT_SW: 13` blocks the TX path (no RF output although packets are counted), `SX126X_MAX_POWER: 30` causes `init result -13` (SPI timeout).
+- TX power: meshtasticd reports about 22 dBm, which is the SX1262 chip power. The SKY66122 PA (about +13 dB) is switched via `DIO2_AS_RF_SWITCH`, no extra GPIO control is needed. The power at the antenna connector is therefore well above the configured `lora.tx_power`; observe the regional limits for your antenna.
+- `General.MACAddressSource` is written to `config.d/hessenbot.yaml` (`end0` on Raspberry Pi OS Bookworm/Trixie, `eth0` on older images) so the node id stays stable.
+- The self-test reads `SX126x init result` from the journal (0 = ok, -2 = check CS/SPI, -13 = remove `SX126X_ANT_SW`/`SX126X_MAX_POWER`).
 
 Channels and bot: the bot serves only the channels you pick, using the existing `ignoreChannels`, `ignoreDefaultChannel` and `messagesChannel` keys. If you re-run with HessenTest off and channel #2 on the node is still named `HessenTest`, the installer disables it on the node; a channel #2 with any other name is left alone.
 

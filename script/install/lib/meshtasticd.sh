@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Hessenbot installer: meshtasticd from the OBS repository (native apt), RAK6421/RAK13302 slot 1 preset.
+# Hessenbot installer: meshtasticd from the OBS repository (native apt), RAK6421/RAK13302 slot 1 LoRa config (SMLunchen).
 # shellcheck shell=bash disable=SC2034,SC2015,SC2153
 
 MESHTASTICD_CHANNEL="${MESHTASTICD_CHANNEL:-}"
 # Fingerprint of the OBS project key (network:Meshtastic), checked via HTTPS on first use.
 OBS_KEY_FPR="${OBS_KEY_FPR:-426AA6B0285C2096B70D9FC2528423A469A77D9A}"
 RADIO_PROFILE="rak6421-13302-slot1"
-RADIO_PRESET_FILE="lora-RAK6421-13302-slot1.yaml"
+RADIO_PRESET_FILE="${RADIO_PRESET_FILE:-lora-hat-rak-6421-pi-hat.yaml}"
 MESHTASTICD_ETC="${MESHTASTICD_ETC:-/etc/meshtasticd}"
 
 install_base_packages() {
@@ -106,19 +106,40 @@ install_meshtasticd_package() {
     manifest_add "APT	meshtasticd"
 }
 
-# ensure_general_config: MACAddressSource eth0 (stable id source on a Pi 4). Written as its own config.d
-# file so the packaged conffile config.yaml stays untouched (no dpkg conffile prompt on upgrades).
+# mac_source_iface: Ethernet interface for General.MACAddressSource (Pi OS Bookworm/Trixie: end0; older images: eth0)
+mac_source_iface() {
+    local net="${HB_NET_DIR:-/sys/class/net}"
+    if [[ -e "$net/end0" ]]; then
+        echo end0
+    elif [[ -e "$net/eth0" ]]; then
+        echo eth0
+    else
+        echo end0
+    fi
+}
+
+# ensure_general_config: General.MACAddressSource (stable node id source on a Pi 4; SMLunchen uses end0). Written as its
+# own config.d file so the packaged conffile config.yaml stays untouched (no dpkg conffile prompt on upgrades).
 ensure_general_config() {
-    local cfg="$MESHTASTICD_ETC/config.yaml" target="$MESHTASTICD_ETC/config.d/hessenbot.yaml"
+    local cfg="$MESHTASTICD_ETC/config.yaml" target="$MESHTASTICD_ETC/config.d/hessenbot.yaml" iface
     if [[ -f "$cfg" ]] && grep -qE '^[[:space:]]+MACAddress(Source)?:' "$cfg"; then
         log "config.yaml: MACAddress/MACAddressSource bereits gesetzt."
         return 0
     fi
-    log "meshtasticd: setze General.MACAddressSource: eth0 ($target)"
+    iface="$(mac_source_iface)"
+    log "meshtasticd: setze General.MACAddressSource: $iface ($target)"
     write_file "$target" 644 root:root <<EOF
 General:
-  MACAddressSource: eth0
+  MACAddressSource: $iface
 EOF
+}
+
+# install_radio_config: write the shipped pin config to available.d (HAT autoconf name); no Enable_Pins, SX126X_ANT_SW
+# or SX126X_MAX_POWER (they break TX / cause init result -2 or -13).
+install_radio_config() {
+    local src="$INSTALL_LIB_DIR/../radios.d/$RADIO_PRESET_FILE" avail="$MESHTASTICD_ETC/available.d/$RADIO_PRESET_FILE"
+    [[ -f "$src" ]] || die "LoRa-Konfiguration $src fehlt im Installer."
+    write_file "$avail" 644 root:root <"$src"
 }
 
 link_radio_preset() {
@@ -126,13 +147,11 @@ link_radio_preset() {
     local confd="$MESHTASTICD_ETC/config.d" link f dest
     link="$confd/$RADIO_PRESET_FILE"
 
-    if [[ ! -f "$avail" ]]; then
-        if [[ "$DRY_RUN" == "1" ]]; then
-            warn "[dry-run] $avail existiert (noch) nicht; waere nach der Paketinstallation erforderlich."
-            return 0
-        fi
-        die "Preset $avail fehlt. Installierte meshtasticd-Version zu alt? (apt-cache policy meshtasticd)"
+    if [[ ! -f "$avail" && "$DRY_RUN" == "1" ]]; then
+        log "[dry-run] $avail wuerde in config.d verlinkt."
+        return 0
     fi
+    [[ -f "$avail" ]] || die "LoRa-Konfiguration $avail fehlt."
 
     run mkdir -p "$confd"
     if [[ -d "$confd" ]]; then
@@ -192,6 +211,7 @@ configure_meshtasticd() {
     CURRENT_PHASE="phase-b"
     step "meshtasticd: Radio-Profil ($RADIO_PROFILE)"
     ensure_general_config
+    install_radio_config
     link_radio_preset
     start_meshtasticd || die "meshtasticd startet nicht (SPI/Preset pruefen: journalctl -u meshtasticd)."
 }

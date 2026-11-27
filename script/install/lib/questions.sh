@@ -281,7 +281,7 @@ print_summary() {
     log "meshtasticd:     OBS ${MESHTASTICD_CHANNEL} ($(obs_distro)), nativ per apt"
     log "config.ini:      $([[ -f "$HB_DIR/config.ini" ]] && echo "vorhanden (Backup), " || echo "neu aus config.template, ")setzt interface.type=tcp, interface.hostname=localhost, interface2.enabled=False,"
     log "                 location.lat/lon, webAdmin.enabled$([[ "$WEB_ADMIN" == "1" ]] && echo "/host"), Bot-Kanal-Keys (ignoreChannels, ignoreDefaultChannel, messagesChannel)"
-    log "Aenderungen:     $(boot_config_path) (SPI/I2C), apt-Quelle+Schluessel, /etc/meshtasticd/config.d, /opt/Hessenbot (venv, config.ini),"
+    log "Aenderungen:     $(boot_config_path) (SPI/I2C), apt-Quelle+Schluessel, /etc/meshtasticd/available.d + config.d (LoRa-Pins), /opt/Hessenbot (venv, config.ini),"
     log "                 Benutzer ${HB_USER}, /etc/systemd/system (mesh_bot, Reporting-Timer), /etc/hessenbot/env"
     log "Backups/Manifest: ${HB_BACKUP_DIR}, ${HB_MANIFEST} (Rueckbau: wizard.sh --revert)"
 }

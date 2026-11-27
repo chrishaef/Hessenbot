@@ -228,7 +228,7 @@ def test_boot_config_block_is_idempotent(tmp_path: Path):
     one = (tmp_path / "one").read_text()
     assert one == (tmp_path / "two").read_text()
     assert one.count("# >>> hessenbot") == 1
-    for line in ("dtparam=spi=on", "dtoverlay=spi0-0cs", "dtparam=i2c_arm=on"):
+    for line in ("dtparam=spi=on", "dtoverlay=spi0-0cs", "dtparam=i2c_arm=on", "dtparam=i2c_vc=on", "dtoverlay=i2c0"):
         assert line in one
     assert "enable_uart" not in one
     assert "enable_uart=1" in (tmp_path / "gps").read_text()

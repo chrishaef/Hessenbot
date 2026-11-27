@@ -1,0 +1,15 @@
+Lora:
+  ### RAK6421 Pi HAT mit RAK13300/RAK13302 (SX1262) in Slot 1
+  ### Quelle: https://github.com/SMLunchen/rak6421_rpi_hat_meshtastic_1W (meshtasticd-installation-rak6421.md)
+  Module: sx1262
+  CS: 8
+  IRQ: 22
+  Reset: 16
+  Busy: 24
+  DIO3_TCXO_VOLTAGE: true
+  DIO2_AS_RF_SWITCH: true
+  spidev: spidev0.0
+  ### WARNUNG: SX126X_ANT_SW und SX126X_MAX_POWER NICHT setzen!
+  ### SX126X_ANT_SW: 13 blockiert den TX-Pfad (kein RF-Output).
+  ### SX126X_MAX_POWER: 30 verursacht SPI timeout (init result -13).
+  ### Der SKY66122 PA verstaerkt automatisch via DIO2_AS_RF_SWITCH.

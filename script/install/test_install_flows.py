@@ -170,15 +170,19 @@ def test_general_config_goes_to_config_d_and_leaves_conffile_untouched(tmp_path:
     conffile = etc / "config.yaml"
     conffile.write_text("General:\n  MaxNodes: 200\n", encoding="utf-8")
     before = conffile.read_text()
-    r = run_wizard_lib("DRY_RUN=0\nensure_general_config", tmp_path, MESHTASTICD_ETC=str(etc))
+    net = tmp_path / "net"
+    net.mkdir()
+    (net / "end0").mkdir()
+    env = {"MESHTASTICD_ETC": str(etc), "HB_NET_DIR": str(net)}
+    r = run_wizard_lib("DRY_RUN=0\nensure_general_config", tmp_path, **env)
     assert r.returncode == 0, r.stderr
     assert conffile.read_text() == before
-    assert "MACAddressSource: eth0" in (etc / "config.d" / "hessenbot.yaml").read_text()
+    assert "MACAddressSource: end0" in (etc / "config.d" / "hessenbot.yaml").read_text()
 
     # already configured by the user: nothing is written
     conffile.write_text("General:\n  MACAddressSource: wlan0\n", encoding="utf-8")
     (etc / "config.d" / "hessenbot.yaml").unlink()
-    r = run_wizard_lib("DRY_RUN=0\nensure_general_config", tmp_path, MESHTASTICD_ETC=str(etc))
+    r = run_wizard_lib("DRY_RUN=0\nensure_general_config", tmp_path, **env)
     assert r.returncode == 0, r.stderr
     assert not (etc / "config.d" / "hessenbot.yaml").exists()
 
@@ -649,3 +653,114 @@ def test_dry_run_log_uses_unique_temp_file(tmp_path: Path):
     assert r.returncode == 0, r.stderr
     path = Path(r.stdout.strip())
     assert path.parent == tmp_path and path.name != "hessenbot-install-dry-run.log"
+
+
+def test_mac_source_follows_existing_ethernet_interface(tmp_path: Path):
+    def pick(*names: str) -> str:
+        net = tmp_path / ("net-" + "-".join(names or ("none",)))
+        net.mkdir()
+        for n in names:
+            (net / n).mkdir()
+        r = run_wizard_lib("mac_source_iface", tmp_path, HB_NET_DIR=str(net))
+        assert r.returncode == 0, r.stderr
+        return r.stdout.strip()
+
+    assert pick("end0", "eth0") == "end0"
+    assert pick("eth0") == "eth0"
+    assert pick() == "end0"
+
+
+# --- SMLunchen RAK6421 + RAK13302 LoRa config (1:1) ---------------------------------------------------
+
+RADIO_YAML = HERE / "radios.d" / "lora-hat-rak-6421-pi-hat.yaml"
+
+
+def _yaml_keys(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped == "Lora:":
+            continue
+        key, _, value = stripped.partition(":")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def test_shipped_radio_config_matches_smlunchen_pins_and_omits_breaking_keys():
+    keys = _yaml_keys(RADIO_YAML.read_text(encoding="utf-8"))
+    assert keys == {
+        "Module": "sx1262",
+        "CS": "8",
+        "IRQ": "22",
+        "Reset": "16",
+        "Busy": "24",
+        "DIO3_TCXO_VOLTAGE": "true",
+        "DIO2_AS_RF_SWITCH": "true",
+        "spidev": "spidev0.0",
+    }
+    for forbidden in ("Enable_Pins", "SX126X_ANT_SW", "SX126X_MAX_POWER"):
+        assert forbidden not in keys
+
+
+def test_radio_profile_uses_hat_autoconf_name_not_stock_slot1_preset(tmp_path: Path):
+    r = run_wizard_lib('echo "$RADIO_PRESET_FILE"', tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "lora-hat-rak-6421-pi-hat.yaml"
+    assert (HERE / "radios.d" / r.stdout.strip()).is_file()
+
+
+def test_radio_config_is_written_to_available_d_and_linked_replacing_stock_preset(tmp_path: Path):
+    etc = tmp_path / "etc"
+    (etc / "config.d").mkdir(parents=True)
+    (etc / "available.d").mkdir()
+    stock = etc / "available.d" / "lora-RAK6421-13302-slot1.yaml"
+    stock.write_text("Lora:\n#  CS: 8\n", encoding="utf-8")
+    (etc / "config.d" / stock.name).symlink_to(stock)
+    r = run_wizard_lib(
+        """
+        DRY_RUN=0
+        confirm() { return 0; }
+        install_radio_config
+        link_radio_preset
+        """,
+        tmp_path,
+        MESHTASTICD_ETC=str(etc),
+    )
+    assert r.returncode == 0, r.stderr
+    name = "lora-hat-rak-6421-pi-hat.yaml"
+    assert (etc / "available.d" / name).read_text() == RADIO_YAML.read_text()
+    link = etc / "config.d" / name
+    assert link.is_symlink() and link.resolve() == (etc / "available.d" / name).resolve()
+    assert not (etc / "config.d" / stock.name).exists(), "stock preset must not stay active next to ours"
+    assert stock.read_text() == "Lora:\n#  CS: 8\n"
+
+
+def test_radio_config_dry_run_writes_nothing(tmp_path: Path):
+    etc = tmp_path / "etc"
+    etc.mkdir()
+    r = run_wizard_lib("DRY_RUN=1\ninstall_radio_config\nlink_radio_preset", tmp_path, MESHTASTICD_ETC=str(etc))
+    assert r.returncode == 0, r.stderr
+    assert not any(etc.rglob("*.yaml"))
+
+
+@pytest.mark.parametrize(
+    "journal, ok, fails, needle",
+    [
+        ("SX126x init result 0\nsx1262 init success", True, 0, "init result 0"),
+        ("SX126x init result -2", False, 1, "CS: 8"),
+        ("old\nSX126x init result -13", False, 1, "SX126X_MAX_POWER"),
+        ("nothing here", True, 0, "Kein 'SX126x init result'"),
+    ],
+)
+def test_check_lora_init_reads_init_result(tmp_path: Path, journal: str, ok: bool, fails: int, needle: str):
+    r = run_wizard_lib(
+        f"""
+        RADIO_PRESET_FILE=lora-hat-rak-6421-pi-hat.yaml
+        check_lora_init $'{journal}'
+        echo "fails=$VERIFY_FAILS"
+        """,
+        tmp_path,
+    )
+    assert r.returncode == 0, r.stderr
+    assert f"fails={fails}" in r.stdout
+    assert needle in r.stderr

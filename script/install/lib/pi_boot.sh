@@ -26,7 +26,8 @@ boot_cmdline_path() {
 
 # desired_boot_block -> managed block content (without markers)
 desired_boot_block() {
-    printf '%s\n' "dtparam=spi=on" "dtoverlay=spi0-0cs" "dtparam=i2c_arm=on"
+    # spi0-0cs: no hardware CS, meshtasticd drives CS (GPIO 8) itself; i2c_vc + i2c0 expose the HAT EEPROM (autodetect)
+    printf '%s\n' "dtparam=spi=on" "dtoverlay=spi0-0cs" "dtparam=i2c_arm=on" "dtparam=i2c_vc=on" "dtoverlay=i2c0"
     if [[ "${HAS_GPS:-0}" == "1" ]]; then
         printf '%s\n' "enable_uart=1"
     fi

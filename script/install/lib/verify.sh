@@ -36,6 +36,20 @@ check_meshtasticd_groups() {
     done
 }
 
+# check_lora_init [JOURNAL_TEXT]: SX1262 init result from the meshtasticd journal (0 = ok)
+check_lora_init() {
+    local text="${1:-}" result
+    [[ -n "$text" ]] || text="$(journalctl -u meshtasticd --no-pager -n 300 2>/dev/null || true)"
+    result="$({ grep -o 'SX126x init result -\?[0-9]\+' <<<"$text" || true; } | tail -1 | awk '{print $NF}')"
+    case "$result" in
+        0) _ok "SX1262 initialisiert (init result 0)" ;;
+        -2) _bad "SX126x init result -2: SPI-Kommunikation fehlgeschlagen (CS: 8 in available.d/$RADIO_PRESET_FILE? spi0-0cs aktiv? Neustart?)" ;;
+        -13) _bad "SX126x init result -13: SPI-Timeout (SX126X_ANT_SW / SX126X_MAX_POWER aus der LoRa-Konfiguration entfernen)" ;;
+        "") _note "Kein 'SX126x init result' im Journal gefunden (journalctl -u meshtasticd -n 100)" ;;
+        *) _bad "SX126x init result $result (journalctl -u meshtasticd -n 100)" ;;
+    esac
+}
+
 selftest() {
     CURRENT_PHASE="verify"
     step "Selbsttest"
@@ -51,6 +65,8 @@ selftest() {
     else
         _bad "meshtasticd.service nicht aktiv (journalctl -u meshtasticd -n 50)"
     fi
+
+    check_lora_init
 
     if wait_for_port localhost 4403 20; then
         _ok "Port 4403 erreichbar"
