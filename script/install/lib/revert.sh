@@ -14,7 +14,7 @@ revert_install() {
         log "  $line"
     done
     log "Nicht entfernt werden: apt-Pakete (meshtasticd), /opt/Hessenbot, /var/lib/meshtasticd (Node-Identitaet) und Backups."
-    if ! confirm "Rueckbau jetzt durchfuehren?" n; then
+    if [[ "$DRY_RUN" != "1" && "$ASSUME_YES" != "1" ]] && ! confirm "Rueckbau jetzt durchfuehren?" n; then
         die "Abgebrochen."
     fi
 

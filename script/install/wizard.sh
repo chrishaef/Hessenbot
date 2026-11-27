@@ -64,8 +64,9 @@ Optionen:
   --hessentest on|off     Testkanal #2 (Default: off)
   --bot-channels LIST     Kanalindizes, die der Bot verarbeitet (Default: 1)
   --lat DEG --lon DEG     Standort
-  --gps on|off            GPS/UART (Default: off)
-  --web-admin on|off      Passwort nur per Terminal oder Env HESSENBOT_WEB_PASSWORD
+  --web-admin on|off      Passwort interaktiv (empfohlen). Nicht-interaktiv: Env HESSENBOT_WEB_PASSWORD
+                          (kurz in ps/Shell-History sichtbar - nur auf vertrauenswuerdigen Systemen)
+  --confirm-hardware      RAK6421 + RAK13302 (Slot 1) ohne HAT-EEPROM-Treffer bestaetigen (fuer --yes)
   --antenna yes|no        Antenne bestaetigt (Default: no -> TX aus)
   --antenna-gain DBI      Antennengewinn (Default 3)
   -h, --help
@@ -93,7 +94,8 @@ parse_args() {
             --bot-channels) need_value "$@"; BOT_CHANNELS="$2"; shift ;;
             --lat) need_value "$@"; LAT="$2"; shift ;;
             --lon) need_value "$@"; LON="$2"; shift ;;
-            --gps) need_value "$@"; [[ "$2" == "on" ]] && HAS_GPS=1 || HAS_GPS=0; shift ;;
+            --gps) need_value "$@"; [[ "$2" == "off" ]] || die "GPS/UART wird in dieser Version nicht eingerichtet (--gps off)."; shift ;;
+            --confirm-hardware) HW_ACK=1 ;;
             --web-admin) need_value "$@"; WEB_ADMIN="$2"; shift ;;
             --antenna) need_value "$@"; ANTENNA_OK="$2"; shift ;;
             --antenna-gain) need_value "$@"; ANTENNA_GAIN="$2"; shift ;;
@@ -114,6 +116,16 @@ phase_a() {
     state_save "${STATE_VARS[@]}"
 }
 
+# on_error_hook RC LINE [MESSAGE]: leave a visible note for the next login (resume runs unattended)
+on_error_hook() {
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    [[ "${RESUME:-0}" == "1" || -f "$HB_STATE_DIR/resume.pending" ]] || return 0
+    write_install_status "Hessenbot-Installation FEHLGESCHLAGEN in Phase '${CURRENT_PHASE}'.
+Log:       $HB_LOG_FILE
+Journal:   journalctl -u hessenbot-install-resume -n 100
+Erneut:    sudo bash $HB_DIR/script/install/wizard.sh   (Antworten werden angeboten)"
+}
+
 finish_reboot() {
     step "Neustart erforderlich (SPI/I2C aktiviert)"
     install_resume_unit "$HB_DIR/script/install/wizard.sh"
@@ -121,17 +133,21 @@ finish_reboot() {
         log "[dry-run] Neustart waere erforderlich; Installation wuerde danach automatisch fortgesetzt."
         return 1
     fi
+    write_install_status "Hessenbot-Installation laeuft nach dem Neustart weiter (Dienst hessenbot-install-resume).
+Fortschritt: journalctl -u hessenbot-install-resume -f
+Log:         $HB_LOG_FILE"
+    log "Nach dem Neustart setzt sich die Installation automatisch fort."
+    log "Fortschritt nach dem Login: journalctl -u hessenbot-install-resume -f   (Log: $HB_LOG_FILE)"
     if [[ "$NO_REBOOT" == "1" ]]; then
-        log "Bitte neu starten: sudo reboot. Die Installation wird danach automatisch fortgesetzt"
-        log "(Fortschritt: journalctl -u hessenbot-install-resume -f, Log: $HB_LOG_FILE)."
+        log "Bitte neu starten: sudo reboot"
         exit 0
     fi
-    if confirm "Jetzt neu starten? Die Installation setzt sich nach dem Boot automatisch fort." y; then
+    if confirm "Jetzt neu starten?" y; then
         sync
         systemctl reboot
         exit 0
     fi
-    log "Bitte spaeter neu starten (sudo reboot); die Installation setzt sich danach automatisch fort."
+    log "Bitte spaeter neu starten (sudo reboot)."
     exit 0
 }
 
@@ -152,7 +168,36 @@ phase_b() {
     selftest
     write_install_notes
     remove_resume_unit
+    clear_install_status
     print_summary_end
+}
+
+# resolve_answers: sets REUSE (1 = answers come from the saved state). Declining reuse starts from a clean slate.
+resolve_answers() {
+    REUSE=0
+    if [[ "$RESUME" == "1" ]]; then
+        [[ -f "$HB_STATE_FILE" ]] || die "Kein gespeicherter Installationsstand ($HB_STATE_FILE)."
+        REUSE=1
+    elif [[ "$DRY_RUN" != "1" && -n "$(state_get MODEM_PRESET)" ]]; then
+        if confirm "Gespeicherte Antworten einer frueheren Installation wiederverwenden?" y; then
+            REUSE=1
+        fi
+    fi
+
+    if [[ $REUSE -eq 1 ]]; then
+        state_load
+        [[ -n "$MODEM_PRESET" ]] || die "Gespeicherter Stand unvollstaendig; ohne --resume neu starten."
+        ANTENNA_OK="${ANTENNA_OK:-0}"
+        WEB_ADMIN="${WEB_ADMIN:-0}"
+        if [[ -n "${ANTENNA_GAIN:-}" ]]; then
+            TX_POWER="$(compute_tx_power "$ANTENNA_GAIN")"
+        fi
+    else
+        PHASE_A_DONE=0
+        ask_all
+        state_save "${STATE_VARS[@]}"
+    fi
+    : "${MESHTASTICD_CHANNEL:=beta}"
 }
 
 main() {
@@ -187,27 +232,9 @@ main() {
     detect_hardware
     load_channel_defs
 
-    local reuse=0
-    if [[ "$RESUME" == "1" ]]; then
-        state_load || die "Kein gespeicherter Installationsstand ($HB_STATE_FILE)."
-        reuse=1
-        remove_resume_unit
-        log "Setze Installation nach Neustart fort."
-    elif [[ "$DRY_RUN" != "1" ]] && state_load 2>/dev/null && [[ "${PHASE_A_DONE:-0}" == "1" ]]; then
-        if confirm "Gespeicherte Antworten einer frueheren Installation wiederverwenden?" y; then
-            reuse=1
-        fi
-    fi
-
-    if [[ $reuse -eq 0 ]]; then
-        ask_all
-    else
-        if [[ "$MODEM_PRESET" == "" ]]; then die "Gespeicherter Stand unvollstaendig; ohne --resume neu starten."; fi
-        ANTENNA_OK="${ANTENNA_OK:-0}"
-        WEB_ADMIN="${WEB_ADMIN:-0}"
-    fi
+    resolve_answers
     print_summary
-    if [[ $reuse -eq 0 ]] && ! confirm "Mit diesen Einstellungen fortfahren?" y; then
+    if [[ $REUSE -eq 0 ]] && ! confirm "Mit diesen Einstellungen fortfahren?" y; then
         die "Abgebrochen. Es wurde nichts geaendert."
     fi
 
@@ -230,4 +257,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

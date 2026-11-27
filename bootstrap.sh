@@ -60,8 +60,9 @@ ensure_tools() {
     [[ -f /etc/ssl/certs/ca-certificates.crt ]] || missing+=(ca-certificates)
     if [[ ${#missing[@]} -gt 0 ]]; then
         bs_log "Installiere: ${missing[*]}"
-        DEBIAN_FRONTEND=noninteractive apt-get update -y
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}" ca-certificates
+        local apt_opts=(-y -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+        DEBIAN_FRONTEND=noninteractive apt-get "${apt_opts[@]}" update </dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get "${apt_opts[@]}" install --no-install-recommends "${missing[@]}" ca-certificates </dev/null
     fi
 }
 

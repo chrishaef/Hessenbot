@@ -9,6 +9,33 @@ _ok() { log "  [OK]   $*"; }
 _bad() { warn "  [FAIL] $*"; VERIFY_FAILS=$((VERIFY_FAILS + 1)); }
 _note() { log "  [WARN] $*"; }
 
+# check_node_info INFO: validate `node_config.py info` output against the answers (region, TX gate)
+check_node_info() {
+    local info="$1" region tx
+    region="$(sed -n 's/^region=//p' <<<"$info")"
+    tx="$(sed -n 's/^tx_enabled=//p' <<<"$info")"
+    if [[ "$region" == "$RADIO_REGION" ]]; then
+        _ok "Region $region"
+    else
+        _bad "Region ist '$region', erwartet '$RADIO_REGION'"
+    fi
+    if [[ "${ANTENNA_OK:-0}" != "1" && "$tx" == "true" ]]; then
+        _bad "TX-GATE: tx_enabled=true, obwohl keine Antenne bestaetigt wurde! Sofort: sudo systemctl stop meshtasticd"
+    elif [[ "${ANTENNA_OK:-0}" != "1" ]]; then
+        _ok "TX-Gate: tx_enabled=false (Antenne nicht bestaetigt)"
+    fi
+}
+
+check_meshtasticd_groups() {
+    id meshtasticd >/dev/null 2>&1 || return 0
+    local g groups
+    groups=" $(id -nG meshtasticd 2>/dev/null) "
+    for g in spi gpio; do
+        getent group "$g" >/dev/null 2>&1 || continue
+        [[ "$groups" == *" $g "* ]] || _note "Benutzer meshtasticd ist nicht in Gruppe '$g' (SPI/GPIO-Zugriff pruefen, falls meshtasticd nicht startet)."
+    done
+}
+
 selftest() {
     CURRENT_PHASE="verify"
     step "Selbsttest"
@@ -31,13 +58,16 @@ selftest() {
         if info="$(node_cfg info 2>/dev/null)"; then
             NODE_ID="$(sed -n 's/^node_id=//p' <<<"$info")"
             [[ -n "$NODE_ID" ]] && _ok "Node-ID: $NODE_ID" || _bad "Node-ID leer"
-            log "      $(sed -n 's/^region=/Region: /p;s/^modem_preset=/Preset: /p;s/^tx_enabled=/TX aktiv: /p' <<<"$info" | paste -sd' ' -)"
+            log "      $(sed -n 's/^region=/Region: /p;s/^modem_preset=/Preset: /p;s/^tx_power=/TX-Leistung: /p;s/^tx_enabled=/TX aktiv: /p' <<<"$info" | paste -sd' ' -)"
+            check_node_info "$info"
         else
             _bad "Node-Info nicht lesbar"
         fi
     else
         _bad "Port 4403 nicht erreichbar"
     fi
+
+    check_meshtasticd_groups
 
     sleep 8
     if systemctl is-active --quiet mesh_bot.service; then
@@ -97,6 +127,8 @@ Dienste:
 TX nach Antennenanschluss freigeben (nie ohne Antenne senden!):
   $HB_VENV/bin/meshtastic --host localhost --set lora.tx_enabled true
 
+MQTT:     Zugang fuer MeshHessen mit dieser Node-ID im MQTT-Webadmin beantragen.
+
 Update:   cd $HB_DIR && sudo ./update.sh
 Revert:   sudo bash $HB_DIR/script/install/wizard.sh --revert
 Backups:  $HB_BACKUP_DIR (Node-Identitaet/Keys: vor Neuinstallation sichern!)
@@ -109,6 +141,7 @@ EOF
 print_summary_end() {
     step "Fertig"
     log "Node-ID:  ${NODE_ID:-unbekannt}"
+    log "MQTT:     MeshHessen-MQTT-Zugang mit dieser Node-ID im MQTT-Webadmin beantragen."
     if [[ "${WEB_ADMIN:-0}" == "1" ]]; then
         log "Web-Admin: siehe $HB_DIR/install_notes.txt"
     fi

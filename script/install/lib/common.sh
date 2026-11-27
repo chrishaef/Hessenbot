@@ -49,7 +49,7 @@ mask_stream() {
 
 log_init() {
     if [[ "$DRY_RUN" == "1" ]]; then
-        HB_LOG_FILE="${TMPDIR:-/tmp}/hessenbot-install-dry-run.log"
+        HB_LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/hessenbot-install-dry-run.XXXXXX.log")"
     fi
     local dir
     dir="$(dirname "$HB_LOG_FILE")"
@@ -72,6 +72,9 @@ warn() { _emit WARN "WARNUNG: $*"; }
 step() { _emit INFO ""; _emit INFO "== $* =="; }
 die() {
     _emit ERROR "FEHLER: $*"
+    if declare -F on_error_hook >/dev/null 2>&1; then
+        on_error_hook 1 "-" "$*" || true
+    fi
     exit 1
 }
 
@@ -79,6 +82,9 @@ on_error() {
     local rc=$? line="${1:-?}"
     _emit ERROR "Abbruch in Phase '$CURRENT_PHASE' (Zeile $line, Exit-Code $rc). Log: $HB_LOG_FILE"
     _emit ERROR "Der Assistent ist idempotent: nach Behebung denselben Befehl erneut ausfuehren."
+    if declare -F on_error_hook >/dev/null 2>&1; then
+        on_error_hook "$rc" "$line" || true
+    fi
     exit "$rc"
 }
 
@@ -188,12 +194,18 @@ run_quiet() {
     fi
     _emit INFO "+ $shown"
     local rc=0
-    "$@" 2>&1 | mask_stream >>"$HB_LOG_FILE" || rc=${PIPESTATUS[0]}
+    "$@" </dev/null 2>&1 | mask_stream >>"$HB_LOG_FILE" || rc=${PIPESTATUS[0]}
     if [[ $rc -ne 0 ]]; then
         warn "Befehl fehlgeschlagen (Exit $rc): $shown (Details: $HB_LOG_FILE)"
         tail -n 15 "$HB_LOG_FILE" >&2 || true
     fi
     return "$rc"
+}
+
+# apt_run ARGS...: apt-get that never prompts (conffiles keep local edits) and waits for the dpkg lock.
+APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=300)
+apt_run() {
+    DEBIAN_FRONTEND=noninteractive run_quiet apt-get "${APT_OPTS[@]}" "$@"
 }
 
 # --- manifest / backup -----------------------------------------------------
@@ -261,10 +273,30 @@ state_save() {
     )
 }
 
+# state_get VAR: value of VAR from the saved state file (empty when absent); never touches the caller's variables
+state_get() {
+    [[ -f "$HB_STATE_FILE" ]] || return 0
+    (
+        # shellcheck source=/dev/null
+        source "$HB_STATE_FILE" 2>/dev/null
+        printf '%s' "${!1-}"
+    )
+}
+
+# state_load: load saved answers. Variables already set (command-line flags) win, except
+# PHASE_A_DONE which always comes from the state file.
 state_load() {
     [[ -f "$HB_STATE_FILE" ]] || return 1
-    # shellcheck source=/dev/null
-    source "$HB_STATE_FILE"
+    local var line saved
+    while IFS= read -r line; do
+        var="${line%%=*}"
+        [[ "$var" =~ ^[A-Z][A-Z0-9_]*$ ]] || continue
+        saved="$(state_get "$var")"
+        if [[ "$var" == "PHASE_A_DONE" || -z "${!var-}" ]]; then
+            printf -v "$var" '%s' "$saved"
+        fi
+    done <"$HB_STATE_FILE"
+    return 0
 }
 
 # --- cleanup of temporary secret files -------------------------------------

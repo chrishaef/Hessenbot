@@ -41,20 +41,31 @@ What happens:
 
 1. `bootstrap.sh` installs git/curl, clones or fast-forwards `/opt/Hessenbot` and starts `script/install/wizard.sh`.
 2. Wizard asks: modem preset (default Europe Short Slow), node names, optional `HessenTest` channel (#2, default no), bot channels, location, web admin, antenna and gain.
-3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, I2C; UART only with GPS), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
+3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, I2C and the `i2c-dev` module; GPS is not part of this version), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
 4. Phase B: `meshtasticd` from the OBS repo (`Debian_13`), preset `lora-RAK6421-13302-slot1.yaml`, Python 3.13 venv, `config.ini`, node channels (#0 primary, #1 "Mesh Hessen" always, #2 optional), systemd units (`meshtasticd`, `mesh_bot`), self-test.
 
 Channels and bot: the bot serves only the channels you pick, using the existing `ignoreChannels`, `ignoreDefaultChannel` and `messagesChannel` keys.
 
-TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; `tx_power` = 27 dBm minus antenna gain.
+TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; `tx_power` = 27 dBm minus antenna gain (rounded down). The installer reads the node back after configuring it and aborts if TX is active without a confirmed antenna. Note: the firmware switches TX on when the region is set for the first time, so the installer applies the TX gate in a second pass right after the first node restart. Connect the antenna before running the installer.
+
+To release TX later (antenna attached): `sudo /opt/Hessenbot/venv/bin/meshtastic --host localhost --set lora.tx_enabled true`.
+
+Re-runs: the wizard remembers your answers (`/var/lib/hessenbot-install/state.env`, no secrets). If you decline to reuse them you are asked everything again. If a reboot-resume fails, the reason is shown at the next login (`/etc/motd.d/50-hessenbot-install`) and the resume unit stays until the install succeeds; follow it with `journalctl -u hessenbot-install-resume -f`.
+
+An existing node identity (`/var/lib/meshtasticd`) must be acknowledged before `meshtasticd` is started, because its old settings may transmit.
+
+Hardware: without a RAK6421 HAT EEPROM hit the wizard asks whether the hardware is a RAK6421 + RAK13302 (default no); use `--confirm-hardware` together with `--yes`. After the install, the summary lists `config.ini` overrides the installer applied (channels, web admin). In non-interactive mode set the web admin password via `HESSENBOT_WEB_PASSWORD`; otherwise use the interactive prompt. The summary prints the node ID; request MeshHessen MQTT access with it in the MQTT web admin.
 
 Options (`sudo bash /opt/Hessenbot/script/install/wizard.sh ...`):
 
 | Flag | Meaning |
 |------|---------|
 | `--dry-run` | Print the plan, change nothing (no root needed via `bootstrap.sh --dry-run`) |
-| `--yes`, `--non-interactive` | Accept defaults / take values from flags (`--preset`, `--long-name`, `--short-name`, `--hessentest`, `--bot-channels`, `--lat`, `--lon`, `--gps`, `--web-admin`, `--antenna`, `--antenna-gain`) |
-| `--revert` | Undo changes recorded in `/var/lib/hessenbot-install/manifest` (files are moved to `/var/backups/hessenbot/`, apt packages and node identity are kept) |
+| `--yes`, `--non-interactive` | Accept defaults / take values from flags (`--preset`, `--long-name`, `--short-name`, `--hessentest`, `--bot-channels`, `--lat`, `--lon`, `--web-admin`, `--antenna`, `--antenna-gain`) |
+| `--meshtasticd-channel beta\|alpha\|daily` | OBS repository channel for `meshtasticd` (default `beta`; the signing key fingerprint is pinned, a new key needs explicit confirmation) |
+| `--install-dir DIR` | Bot install directory (default `/opt/Hessenbot`; the wizard must run from there) |
+| `--confirm-hardware` | Confirm RAK6421 + RAK13302 (Slot 1) without a HAT EEPROM hit (for `--yes`) |
+| `--revert` | Undo changes recorded in `/var/lib/hessenbot-install/manifest` (files are moved to `/var/backups/hessenbot/`, apt packages and node identity are kept; add `--yes` to skip the confirmation) |
 | `--resume`, `--no-reboot` | Continue after reboot / do not reboot automatically |
 | `--skip-meshtasticd`, `--skip-node-config` | Skip those steps |
 

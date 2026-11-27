@@ -139,7 +139,7 @@ preflight() {
 
     if [[ "$PI_MODEL" != *"Raspberry Pi 4"* ]]; then
         _pf_warn "Raspberry Pi 4 nicht erkannt (Modell: '${PI_MODEL:-?}'). Getestet nur mit Pi 4B."
-        if [[ "$DRY_RUN" != "1" ]] && ! confirm "Trotzdem fortfahren?" n; then
+        if [[ "$DRY_RUN" != "1" && "${RESUME:-0}" != "1" ]] && ! confirm "Trotzdem fortfahren?" n; then
             die "Abgebrochen."
         fi
     fi
@@ -169,7 +169,8 @@ detect_hardware() {
         return 0
     fi
     log "Kein HAT-EEPROM-Treffer (das ist kein Fehler)."
-    if [[ "$DRY_RUN" != "1" ]] && ! confirm "RAK6421 + RAK13302 in Slot 1 angenommen?" y; then
-        die "Nur RAK6421 + RAK13302 (Slot 1) wird in dieser Version unterstuetzt."
+    [[ "$DRY_RUN" == "1" || "${RESUME:-0}" == "1" || "${HW_ACK:-0}" == "1" ]] && return 0
+    if ! confirm "Ist ein RAK6421 mit RAK13302 in Slot 1 verbaut (kein USB-Radio)? Der Assistent konfiguriert meshtasticd und config.ini dafuer." n; then
+        die "Nur RAK6421 + RAK13302 (Slot 1) wird in dieser Version unterstuetzt (mit --yes: --confirm-hardware)."
     fi
 }

@@ -80,11 +80,17 @@ configure_pi_boot() {
     if [[ "${HAS_GPS:-0}" == "1" ]]; then
         disable_serial_console
     fi
+    enable_i2c_dev
 
     if [[ "$REBOOT_REQUIRED" == "0" && ! -e /dev/spidev0.0 && "$DRY_RUN" != "1" ]]; then
         warn "/dev/spidev0.0 fehlt trotz Konfiguration; ein Neustart ist noetig."
         REBOOT_REQUIRED=1
     fi
+}
+
+# i2c-dev: dtparam=i2c_arm=on alone does not create /dev/i2c-1
+enable_i2c_dev() {
+    printf 'i2c-dev\n' | write_file /etc/modules-load.d/hessenbot-i2c.conf 644 root:root
 }
 
 disable_serial_console() {
@@ -105,14 +111,15 @@ disable_serial_console() {
     REBOOT_REQUIRED=1
 }
 
-install_resume_unit() {
+render_resume_unit() {
     local script="$1"
-    write_file /etc/systemd/system/hessenbot-install-resume.service 644 root:root <<EOF
+    cat <<EOF
 [Unit]
 Description=Hessenbot installer (resume after reboot)
-After=network-online.target
-Wants=network-online.target
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
 ConditionPathExists=$HB_STATE_FILE
+ConditionPathExists=$HB_STATE_DIR/resume.pending
 
 [Service]
 Type=oneshot
@@ -123,17 +130,39 @@ RemainAfterExit=no
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+
+install_resume_unit() {
+    local script="$1"
+    render_resume_unit "$script" | write_file /etc/systemd/system/hessenbot-install-resume.service 644 root:root
+    printf 'pending\n' | write_file "$HB_STATE_DIR/resume.pending" 600 root:root
     run systemctl daemon-reload
     run systemctl enable hessenbot-install-resume.service
     manifest_add "UNIT	hessenbot-install-resume.service"
 }
 
+# remove_resume_unit: only called after a successful phase B (a failed run keeps the unit for the next boot)
 remove_resume_unit() {
     if [[ -f /etc/systemd/system/hessenbot-install-resume.service ]] || [[ "$DRY_RUN" == "1" ]]; then
         run systemctl disable hessenbot-install-resume.service || true
         if [[ "$DRY_RUN" != "1" ]]; then
-            rm -f /etc/systemd/system/hessenbot-install-resume.service
+            rm -f /etc/systemd/system/hessenbot-install-resume.service "$HB_STATE_DIR/resume.pending"
             systemctl daemon-reload || true
         fi
     fi
+}
+
+HB_STATUS_FILE="${HB_STATUS_FILE:-/etc/motd.d/50-hessenbot-install}"
+
+# write_install_status TEXT: shown at the next login (pam_motd reads /etc/motd.d)
+write_install_status() {
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    mkdir -p "$(dirname "$HB_STATUS_FILE")" 2>/dev/null || return 0
+    printf '\n%s\n\n' "$1" >"$HB_STATUS_FILE" 2>/dev/null || return 0
+    chmod 644 "$HB_STATUS_FILE" 2>/dev/null || true
+}
+
+clear_install_status() {
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    rm -f "$HB_STATUS_FILE"
 }

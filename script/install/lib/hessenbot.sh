@@ -9,10 +9,14 @@ HB_USER="${HB_USER:-meshbot}"
 ensure_service_user() {
     if id "$HB_USER" >/dev/null 2>&1; then
         log "Benutzer $HB_USER existiert bereits."
-        return 0
+    else
+        run useradd --system --no-create-home --home-dir "$HB_DIR" --shell /usr/sbin/nologin --user-group "$HB_USER"
+        manifest_add "USER	$HB_USER"
     fi
-    run useradd --system --no-create-home --home-dir "$HB_DIR" --shell /usr/sbin/nologin --user-group "$HB_USER"
-    manifest_add "USER	$HB_USER"
+    # video: vcgencmd (Temperatur/Throttle) fuer Dashboard und sysEnv.sh
+    if getent group video >/dev/null 2>&1 && ! id -nG "$HB_USER" 2>/dev/null | tr ' ' '\n' | grep -qx video; then
+        run usermod -aG video "$HB_USER"
+    fi
 }
 
 setup_venv() {
@@ -74,14 +78,20 @@ setup_config_ini() {
         log "[dry-run] ini_set: interface.type=tcp, hostname=localhost, interface2.enabled=False, location lat/lon=${LAT}/${LON}, webAdmin enabled=$([[ "${WEB_ADMIN:-0}" == "1" ]] && echo True || echo False)"
         return 0
     fi
-    ini \
-        --set "interface.type=tcp" \
-        --set "interface.hostname=localhost" \
-        --set "interface2.enabled=False" \
-        --set "location.lat=${LAT}" \
-        --set "location.lon=${LON}" \
-        --set "webAdmin.enabled=$([[ "${WEB_ADMIN:-0}" == "1" ]] && echo True || echo False)" \
-        --set "webAdmin.host=${WEB_BIND:-0.0.0.0}"
+    local args=() a
+    while IFS= read -r a; do args+=(--set "$a"); done < <(config_ini_assignments)
+    ini "${args[@]}"
+}
+
+# config_ini_assignments: section.key=value lines the installer sets (webAdmin.host only when the admin is enabled)
+config_ini_assignments() {
+    printf '%s\n' "interface.type=tcp" "interface.hostname=localhost" "interface2.enabled=False" \
+        "location.lat=${LAT}" "location.lon=${LON}"
+    if [[ "${WEB_ADMIN:-0}" == "1" ]]; then
+        printf '%s\n' "webAdmin.enabled=True" "webAdmin.host=${WEB_BIND:-0.0.0.0}"
+    else
+        printf '%s\n' "webAdmin.enabled=False"
+    fi
 }
 
 # write_env_file: web admin secrets, 0600

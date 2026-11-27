@@ -124,22 +124,72 @@ configure_node() {
         die "Node nicht erreichbar (meshtasticd laeuft? journalctl -u meshtasticd)."
     fi
 
+    apply_node_spec "$spec"
+    # Firmware forces tx_enabled=true when the region is set for the first time; a second pass applies tx_enabled=false.
+    local try
+    for ((try = 1; try <= "${VERIFY_ATTEMPTS:-5}"; try++)); do
+        rc=0
+        node_cfg verify "$spec" >/dev/null 2>&1 || rc=$?
+        [[ $rc -eq 0 || $rc -eq 12 ]] && break
+        sleep "${VERIFY_SLEEP:-5}"
+    done
+    if [[ $rc -eq 12 ]]; then
+        log "Node hat TX nach dem ersten Setzen der Region aktiviert; setze TX-Gate erneut (zweiter Durchlauf) ..."
+        apply_node_spec "$spec"
+    fi
+    verify_node_spec "$spec"
+    log "Node-Konfiguration verifiziert (Kanaele, Region, Preset, TX-Leistung, TX-Gate)."
+}
+
+# apply_node_spec SPEC: write the spec to the node, then wait for the meshtasticd restart that follows the commit
+apply_node_spec() {
+    local spec="$1"
     node_cfg apply "$spec" --force || warn "node_config apply meldete einen Fehler (Neustart der Node waehrend des Schreibens ist moeglich); pruefe Ergebnis."
     log "Warte auf meshtasticd-Neustart nach Config-Aenderung ..."
-    sleep 5
-    wait_for_port localhost 4403 90 || die "meshtasticd nach Konfiguration nicht erreichbar."
-    rc=0
-    node_cfg inspect "$spec" || rc=$?
-    [[ $rc -eq 0 ]] || die "Node-Konfiguration nicht wie erwartet uebernommen (Exit $rc)."
-    log "Node-Konfiguration verifiziert."
+    wait_for_port_cycle localhost 4403 12 90 || die "meshtasticd nach Konfiguration nicht erreichbar (journalctl -u meshtasticd -n 50)."
+}
+
+# wait_for_port_cycle HOST PORT DOWN_SECS UP_SECS: meshtasticd restarts shortly after a config commit, so first wait
+# (briefly) for the old process to drop the port, then for the new one to listen.
+wait_for_port_cycle() {
+    local host="$1" port="$2" down_secs="$3" up_secs="$4" i
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    for ((i = 0; i < down_secs; i++)); do
+        (exec 3<>"/dev/tcp/$host/$port") 2>/dev/null || break
+        sleep 1
+    done
+    wait_for_port "$host" "$port" "$up_secs"
+}
+
+# verify_node_spec SPEC: node_config.py verify with retries (node may still be rebooting); a TX-gate violation is fatal.
+verify_node_spec() {
+    local spec="$1" attempt rc=1 max="${VERIFY_ATTEMPTS:-5}"
+    for ((attempt = 1; attempt <= max; attempt++)); do
+        rc=0
+        node_cfg verify "$spec" || rc=$?
+        [[ $rc -eq 0 ]] && return 0
+        [[ $attempt -lt $max ]] && { log "Verifikation $attempt/$max: Abweichung/Fehler (Exit $rc), neuer Versuch ..."; sleep "${VERIFY_SLEEP:-5}"; }
+    done
+    if [[ $rc -eq 12 ]]; then
+        die "TX ist auf der Node AKTIV, obwohl keine Antenne bestaetigt wurde. Sofort stoppen: sudo systemctl stop meshtasticd; dann Konfiguration pruefen (node_config.py info)."
+    fi
+    die "Node-Konfiguration nicht wie erwartet uebernommen (Exit $rc, siehe ABWEICHUNG oben)."
+}
+
+# defined_channel_indices: every channel index this installer knows (enabled or not), comma list
+defined_channel_indices() {
+    local i out=()
+    for i in "${!CHAN_INDEX[@]}"; do out+=("${CHAN_INDEX[$i]}"); done
+    local IFS=,
+    echo "${out[*]}"
 }
 
 # apply_bot_channels: map BOT_CHANNELS onto ignoreChannels/ignoreDefaultChannel/messagesChannel
 apply_bot_channels() {
     CURRENT_PHASE="bot-channels"
     local cfg="$HB_DIR/config.ini" existing
-    existing="$(enabled_channel_indices)"
-    log "Bot verarbeitet Kanaele: ${BOT_CHANNELS} (vorhanden: ${existing})"
+    existing="$(defined_channel_indices)"
+    log "Bot verarbeitet Kanaele: ${BOT_CHANNELS} (Installer-Kanaele: ${existing}; nicht gewaehlte werden ignoriert)"
     if [[ "$DRY_RUN" == "1" && ! -f "$cfg" ]]; then
         log "[dry-run] config.ini fehlt; Kanal-Mapping wuerde auf config.template angewendet."
         cfg="$HB_DIR/config.template"

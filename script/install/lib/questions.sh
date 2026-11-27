@@ -16,8 +16,10 @@ WEB_PASSWORD="${WEB_PASSWORD:-${HESSENBOT_WEB_PASSWORD:-}}"
 ANTENNA_OK="${ANTENNA_OK:-}"
 ANTENNA_GAIN="${ANTENNA_GAIN:-}"
 TX_POWER=""
+EXISTING_NODE_ACK="${EXISTING_NODE_ACK:-}"
+HW_ACK="${HW_ACK:-0}"
 
-STATE_VARS=(MODEM_PRESET LONG_NAME SHORT_NAME HESSENTEST BOT_CHANNELS LAT LON HAS_GPS WEB_ADMIN WEB_BIND ANTENNA_OK ANTENNA_GAIN TX_POWER MESHTASTICD_CHANNEL PHASE_A_DONE)
+STATE_VARS=(MODEM_PRESET LONG_NAME SHORT_NAME HESSENTEST BOT_CHANNELS LAT LON HAS_GPS WEB_ADMIN WEB_BIND ANTENNA_OK ANTENNA_GAIN TX_POWER EXISTING_NODE_ACK MESHTASTICD_CHANNEL PHASE_A_DONE)
 
 PRESET_KEYS=(SHORT_SLOW SHORT_FAST MEDIUM_SLOW MEDIUM_FAST LONG_MODERATE LONG_FAST LONG_SLOW)
 PRESET_LABELS=("Europe Short Slow (Standard, Meshhessen)" "Short Fast" "Medium Slow" "Medium Fast" "Long Moderate" "Long Fast" "Long Slow")
@@ -115,10 +117,7 @@ ask_location() {
 }
 
 ask_gps() {
-    if [[ -z "$HAS_GPS" ]]; then
-        tty_print ""
-        if confirm "GPS-Modul angeschlossen (aktiviert UART, schaltet serielle Konsole ab)?" n; then HAS_GPS=1; else HAS_GPS=0; fi
-    fi
+    HAS_GPS=0
 }
 
 valid_web_password() {
@@ -182,9 +181,42 @@ ask_antenna() {
         fi
     fi
     is_number "$ANTENNA_GAIN" || die "Antennengewinn muss eine Zahl sein."
-    TX_POWER="$(awk -v cap="$RADIO_TX_POWER_CAP" -v g="$ANTENNA_GAIN" 'BEGIN { p = int(cap - g + 0.5); if (p < 1) p = 1; if (p > cap) p = cap; print p }')"
+    TX_POWER="$(compute_tx_power "$ANTENNA_GAIN")"
     if [[ "$ANTENNA_OK" == "1" ]]; then
-        log "tx_power = ${TX_POWER} dBm (${RADIO_TX_POWER_CAP} dBm Obergrenze minus ${ANTENNA_GAIN} dBi). EU_868: 10 % Duty Cycle beachten."
+        log "tx_power = ${TX_POWER} dBm (${RADIO_TX_POWER_CAP} dBm Obergrenze minus ${ANTENNA_GAIN} dBi, abgerundet). EU_868: 10 % Duty Cycle beachten."
+    fi
+}
+
+# compute_tx_power GAIN_DBI -> integer dBm, rounded down, clamped to 1..RADIO_TX_POWER_CAP
+compute_tx_power() {
+    awk -v cap="$RADIO_TX_POWER_CAP" -v g="$1" 'BEGIN { p = cap - g; p = (p == int(p)) ? p : (p > 0 ? int(p) : int(p) - 1); if (p < 1) p = 1; if (p > cap) p = cap; print p }'
+}
+
+# existing_node_prefs -> 0 when meshtasticd already has stored settings (it may transmit as soon as it starts)
+existing_node_prefs() {
+    local d
+    for d in ${MESHTASTICD_STATE_DIRS:-/var/lib/meshtasticd /var/lib/meshtasticd-*}; do
+        [[ -d "$d" ]] || continue
+        [[ -n "$(find "$d" -name config.proto -size +0 -print -quit 2>/dev/null)" ]] && return 0
+    done
+    return 1
+}
+
+ask_existing_node() {
+    [[ "$ANTENNA_OK" != "1" ]] || return 0
+    [[ "${SKIP_MESHTASTICD:-0}" != "1" ]] || return 0
+    existing_node_prefs || return 0
+    if [[ "$EXISTING_NODE_ACK" == "1" ]]; then
+        return 0
+    fi
+    tty_print ""
+    warn "Es gibt bereits gespeicherte meshtasticd-Einstellungen (/var/lib/meshtasticd)."
+    warn "Eine bereits konfigurierte Node kann sofort senden (NodeInfo), sobald meshtasticd startet - das TX-Gate greift erst danach."
+    warn "Antenne zuerst an die RAK13302 anschliessen oder die Node-Prefs entfernen (Backup: /var/backups/hessenbot)."
+    if confirm "meshtasticd trotzdem ohne bestaetigte Antenne starten?" n; then
+        EXISTING_NODE_ACK=1
+    else
+        die "Abgebrochen. Antenne anschliessen und erneut starten (Antenne: ja), oder --skip-meshtasticd verwenden."
     fi
 }
 
@@ -199,6 +231,7 @@ ask_all() {
     ask_gps
     ask_web_admin
     ask_antenna
+    ask_existing_node
 }
 
 print_summary() {
@@ -216,11 +249,13 @@ print_summary() {
         warn "Der Bot verarbeitet Kanal #0 (ShortSlow): ignoreDefaultChannel=False weicht vom Meshhessen-Standard ab."
     fi
     log "Standort:        ${LAT}, ${LON}"
-    log "GPS/UART:        $([[ "$HAS_GPS" == "1" ]] && echo "ja (enable_uart=1, serielle Konsole aus)" || echo "nein (UART bleibt aus)")"
+    log "GPS/UART:        nicht Teil dieser Version (UART bleibt aus)"
     log "Web-Admin:       $([[ "$WEB_ADMIN" == "1" ]] && echo "ja, Bind ${WEB_BIND}, Passwort in /etc/hessenbot/env (0600)" || echo nein)"
     log "TX:              $([[ "$ANTENNA_OK" == "1" ]] && echo "an, ${TX_POWER} dBm" || echo "AUS bis Antenne bestaetigt")"
     log "meshtasticd:     OBS ${MESHTASTICD_CHANNEL} ($(obs_distro)), nativ per apt"
-    log "Aenderungen:     $(boot_config_path) (SPI/I2C$([[ "$HAS_GPS" == "1" ]] && echo "/UART")), apt-Quelle+Schluessel, /etc/meshtasticd/config.d, /opt/Hessenbot (venv, config.ini),"
+    log "config.ini:      $([[ -f "$HB_DIR/config.ini" ]] && echo "vorhanden (Backup), " || echo "neu aus config.template, ")setzt interface.type=tcp, interface.hostname=localhost, interface2.enabled=False,"
+    log "                 location.lat/lon, webAdmin.enabled$([[ "$WEB_ADMIN" == "1" ]] && echo "/host"), Bot-Kanal-Keys (ignoreChannels, ignoreDefaultChannel, messagesChannel)"
+    log "Aenderungen:     $(boot_config_path) (SPI/I2C), apt-Quelle+Schluessel, /etc/meshtasticd/config.d, /opt/Hessenbot (venv, config.ini),"
     log "                 Benutzer ${HB_USER}, /etc/systemd/system (mesh_bot, Reporting-Timer), /etc/hessenbot/env"
     log "Backups/Manifest: ${HB_BACKUP_DIR}, ${HB_MANIFEST} (Rueckbau: wizard.sh --revert)"
 }

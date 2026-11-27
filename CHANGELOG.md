@@ -18,6 +18,8 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Changed
 
+- **`bootstrap.sh`**: klont/aktualisiert jetzt `/opt/Hessenbot` und startet den Wizard (bisher: venv + `config.ini` im aktuellen Verzeichnis); das alte Verhalten gibt es mit `bootstrap.sh --legacy`
+- **Pi-4-Installer**: Antworten werden bei jedem Lauf gespeichert (Ablehnen der Wiederverwendung fragt alles neu); Node wird nach dem Schreiben zurückgelesen (Kanäle, Region, Preset, TX-Leistung, TX-Gate, mit zweitem Durchlauf, weil die Firmware TX beim ersten Setzen der Region aktiviert); Admin-Pakete werden gedrosselt gesendet (sonst verwirft die Node sie); apt ohne Conffile-Prompts und mit dpkg-Lock-Timeout; `MACAddressSource` via `config.d`; vorhandene Node-Identität muss vor dem Start bestätigt werden; Resume-Dienst bleibt bis zum Erfolg und zeigt Fehler beim Login; OBS-Schlüssel-Fingerprint gepinnt; GPS ist in dieser Version nicht Teil des Wizards; Hardware-Rückfrage ohne EEPROM-Treffer standardmäßig „nein“ (`--confirm-hardware`)
 - **Kein Bot-Standort-Fallback** mehr für Nutzer-Nodes (`get_node_location*` / Wetter & Co.)
 - **DM-Befehle**: mit und ohne `!` (erstes Wort); im Kanal weiter nur mit `!` (außer Channel-Test `test`)
 - Entfernt: Aliase `pong` / `pinging` / `testing`
