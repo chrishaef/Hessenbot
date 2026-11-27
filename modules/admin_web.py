@@ -491,29 +491,25 @@ def create_app(
             from modules.dm_delivery_stats import render_dm_delivery_stats_html
 
             dm_admin_block = f"""
-<h3 class="h6 section-title mb-3"><i class="bi bi-envelope-check me-2 text-success"></i>DM-Zustellung (24h)</h3>
+<h3 class="h6 section-title mb-2"><i class="bi bi-envelope-check me-2 text-success"></i>DM-Zustellung (24h)</h3>
 {render_dm_delivery_stats_html(dash["dm_delivery_24h"])}
-<hr class="my-4">
+<hr class="my-3">
 """
         host_block = f"""
-<h3 class="h6 section-title mb-3"><i class="bi bi-activity me-2 text-success"></i>Verbindung</h3>
+<h3 class="h6 section-title mb-2"><i class="bi bi-activity me-2 text-success"></i>Verbindung</h3>
 {render_link_status_html()}
-<hr class="my-4">
+<hr class="my-3">
 {dm_admin_block}
-<h3 class="h6 section-title mb-3"><i class="bi bi-pc-display me-2 text-success"></i>Host</h3>
+<h3 class="h6 section-title mb-2"><i class="bi bi-pc-display me-2 text-success"></i>Host</h3>
 {render_host_metrics_html()}
-<hr class="my-4">
-<h3 class="h6 section-title mb-3"><i class="bi bi-exclamation-triangle me-2 text-warning"></i>Log-Warnungen &amp; Fehler</h3>
+<hr class="my-3">
+<h3 class="h6 section-title mb-2"><i class="bi bi-exclamation-triangle me-2 text-warning"></i>Log-Warnungen &amp; Fehler</h3>
 {alerts_html}
-<hr class="my-4">
 """
         return _render_admin_template(
             host_block
             + """
-<p class="text-muted small mb-0">
-  DM, Kanal, News, NodeDB, MOTD, Scheduler, BBS, Einstellungen, Banliste und Logs erreichst du über die Tabs oben.
-</p>
-<p class="text-center mt-4 mb-0">
+<p class="text-center mt-3 mb-0">
   <a href="{{ url_for('index_dashboard') }}" class="btn btn-sm btn-link text-muted">
     <i class="bi bi-bar-chart me-1"></i>Öffentliche Statistik
   </a>

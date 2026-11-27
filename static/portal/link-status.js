@@ -9,20 +9,13 @@
 
   var api = root.getAttribute("data-api") || "/api/admin/link-status";
   var rows = root.querySelector("[data-link-rows]");
-  var note = root.querySelector("[data-link-updated]");
-  var baseNote = note ? note.textContent : "";
+  var errEl = root.querySelector("[data-link-error]");
   var pollMs = 5000;
 
-  function clock() {
-    var d = new Date();
-    function p(n) {
-      return (n < 10 ? "0" : "") + n;
-    }
-    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
-  }
-
-  function setNote(suffix) {
-    if (note) note.textContent = baseNote.trim() + " " + suffix;
+  function setError(msg) {
+    if (!errEl) return;
+    errEl.textContent = msg;
+    errEl.hidden = !msg;
   }
 
   function poll() {
@@ -37,10 +30,10 @@
       })
       .then(function (data) {
         if (rows && typeof data.html === "string") rows.innerHTML = data.html;
-        setNote("Aktualisiert " + clock() + ".");
+        setError("");
       })
       .catch(function () {
-        setNote("Aktualisierung fehlgeschlagen (" + clock() + ").");
+        setError("Statusabfrage fehlgeschlagen.");
       });
   }
 
