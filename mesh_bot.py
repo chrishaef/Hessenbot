@@ -1412,6 +1412,13 @@ def onReceive(packet, interface):
     from modules.mesh_sim_tunnel import unwrap_sim_tunnel_packet
     from modules.packet_dedup import should_drop_duplicate_packet
 
+    try:
+        from modules.link_status import record_rx
+
+        record_rx(packet, mesh_interface_index(interface))
+    except Exception as e:
+        logger.debug(f"System: link status record failed: {e}")
+
     unwrap_sim_tunnel_packet(packet)
     if should_drop_duplicate_packet(packet):
         return

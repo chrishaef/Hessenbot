@@ -482,6 +482,7 @@ def create_app(
             render_admin_log_alerts_html,
             render_host_metrics_html,
         )
+        from modules.link_status import render_link_status_html
 
         dash = collect_dashboard(log_dir)
         alerts_html = render_admin_log_alerts_html(dash["log"])
@@ -495,6 +496,9 @@ def create_app(
 <hr class="my-4">
 """
         host_block = f"""
+<h3 class="h6 section-title mb-3"><i class="bi bi-activity me-2 text-success"></i>Verbindung</h3>
+{render_link_status_html()}
+<hr class="my-4">
 {dm_admin_block}
 <h3 class="h6 section-title mb-3"><i class="bi bi-pc-display me-2 text-success"></i>Host</h3>
 {render_host_metrics_html()}
@@ -962,6 +966,15 @@ def create_app(
         from modules.web_dashboard import get_host_metrics_payload
 
         return jsonify(get_host_metrics_payload())
+
+    @app.route("/api/admin/link-status")
+    @login_required
+    def api_admin_link_status():
+        from modules.link_status import collect_link_status
+
+        resp = jsonify(collect_link_status())
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     @app.route("/api/admin/mesh/messages")
     @login_required
