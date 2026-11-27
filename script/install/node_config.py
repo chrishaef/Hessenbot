@@ -66,9 +66,19 @@ def validate_spec(spec: dict[str, Any]) -> None:
         if len(ch.get("name", "").encode("utf-8")) > CHANNEL_NAME_MAX:
             raise ValueError(f"channel name too long (max {CHANNEL_NAME_MAX}): {ch['name']!r}")
         decode_psk(ch.get("psk", "default"))
+        if "only_if_name" in ch and not isinstance(ch["only_if_name"], str):
+            raise ValueError("only_if_name must be a string")
     lora = spec.get("lora", {})
     if "tx_power" in lora and not 0 <= int(lora["tx_power"]) <= 30:
         raise ValueError("tx_power must be 0..30 dBm")
+
+
+def _disable_applies(have: Optional[dict[str, Any]], want: dict[str, Any]) -> bool:
+    """A DISABLED entry with only_if_name only touches a channel that still carries that name."""
+    if not have or have["role"] == "DISABLED":
+        return False
+    only = want.get("only_if_name")
+    return only is None or have["name"] == only
 
 
 def find_conflicts(current: list[dict[str, Any]], spec: dict[str, Any]) -> list[str]:
@@ -99,7 +109,7 @@ def channel_mismatches(current: list[dict[str, Any]], spec: dict[str, Any]) -> l
         idx = int(want["index"])
         have = by_idx.get(idx)
         if want["role"] == "DISABLED":
-            if have and have["role"] != "DISABLED":
+            if _disable_applies(have, want):
                 out.append(f"channel #{idx}: still active, expected DISABLED")
             continue
         if not have or have["role"] == "DISABLED":
@@ -248,9 +258,17 @@ def apply_spec(iface, spec: dict[str, Any]) -> None:
     for want in spec.get("channels", []):
         idx = int(want["index"])
         ch = node.channels[idx]
-        ch.role = channel_pb2.Channel.Role.Value(want["role"])
-        ch.settings.name = want.get("name", "")
-        ch.settings.psk = decode_psk(want.get("psk", "default"))
+        if want["role"] == "DISABLED":
+            have = {"role": channel_pb2.Channel.Role.Name(ch.role), "name": ch.settings.name}
+            if not _disable_applies(have, want):
+                continue
+            ch.role = channel_pb2.Channel.Role.Value("DISABLED")
+            ch.settings.name = ""
+            ch.settings.psk = b""
+        else:
+            ch.role = channel_pb2.Channel.Role.Value(want["role"])
+            ch.settings.name = want.get("name", "")
+            ch.settings.psk = decode_psk(want.get("psk", "default"))
         node.writeChannel(idx)
         _pace()
 

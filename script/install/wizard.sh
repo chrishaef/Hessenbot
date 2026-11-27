@@ -66,6 +66,7 @@ Optionen:
   --lat DEG --lon DEG     Standort
   --web-admin on|off      Passwort interaktiv (empfohlen). Nicht-interaktiv: Env HESSENBOT_WEB_PASSWORD
                           (kurz in ps/Shell-History sichtbar - nur auf vertrauenswuerdigen Systemen)
+  --accept-tx-window      Kurzes Sendefenster ohne Antenne akzeptieren (Region-Erstsetzen, vorhandene Node-Prefs; fuer --yes)
   --confirm-hardware      RAK6421 + RAK13302 (Slot 1) ohne HAT-EEPROM-Treffer bestaetigen (fuer --yes)
   --antenna yes|no        Antenne bestaetigt (Default: no -> TX aus)
   --antenna-gain DBI      Antennengewinn (Default 3)
@@ -96,6 +97,7 @@ parse_args() {
             --lon) need_value "$@"; LON="$2"; shift ;;
             --gps) need_value "$@"; [[ "$2" == "off" ]] || die "GPS/UART wird in dieser Version nicht eingerichtet (--gps off)."; shift ;;
             --confirm-hardware) HW_ACK=1 ;;
+            --accept-tx-window) TX_WINDOW_ACK=1; EXISTING_NODE_ACK=1 ;;
             --web-admin) need_value "$@"; WEB_ADMIN="$2"; shift ;;
             --antenna) need_value "$@"; ANTENNA_OK="$2"; shift ;;
             --antenna-gain) need_value "$@"; ANTENNA_GAIN="$2"; shift ;;
@@ -120,10 +122,13 @@ phase_a() {
 on_error_hook() {
     [[ "$DRY_RUN" == "1" ]] && return 0
     [[ "${RESUME:-0}" == "1" || -f "$HB_STATE_DIR/resume.pending" ]] || return 0
+    # One automatic retry per reboot cycle only: without the marker the unit's ConditionPathExists skips the next boot.
+    [[ "${RESUME:-0}" == "1" ]] && rm -f "$HB_STATE_DIR/resume.pending"
     write_install_status "Hessenbot-Installation FEHLGESCHLAGEN in Phase '${CURRENT_PHASE}'.
 Log:       $HB_LOG_FILE
 Journal:   journalctl -u hessenbot-install-resume -n 100
-Erneut:    sudo bash $HB_DIR/script/install/wizard.sh   (Antworten werden angeboten)"
+Erneut:    sudo bash $HB_DIR/script/install/wizard.sh   (Antworten werden angeboten)
+Der automatische Neustart-Fortsetzungsdienst startet nicht erneut von selbst."
 }
 
 finish_reboot() {
@@ -191,6 +196,10 @@ resolve_answers() {
         WEB_ADMIN="${WEB_ADMIN:-0}"
         if [[ -n "${ANTENNA_GAIN:-}" ]]; then
             TX_POWER="$(compute_tx_power "$ANTENNA_GAIN")"
+        fi
+        if [[ "$RESUME" != "1" ]]; then
+            ask_antenna_risks
+            state_save "${STATE_VARS[@]}"
         fi
     else
         PHASE_A_DONE=0

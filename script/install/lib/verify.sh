@@ -125,7 +125,7 @@ Dienste:
   sudo systemctl restart meshtasticd && sudo systemctl restart mesh_bot
 
 TX nach Antennenanschluss freigeben (nie ohne Antenne senden!):
-  $HB_VENV/bin/meshtastic --host localhost --set lora.tx_enabled true
+  $HB_VENV/bin/meshtastic --host localhost --set lora.tx_power ${TX_POWER:-24} --set lora.tx_enabled true
 
 MQTT:     Zugang fuer MeshHessen mit dieser Node-ID im MQTT-Webadmin beantragen.
 
@@ -146,7 +146,7 @@ print_summary_end() {
         log "Web-Admin: siehe $HB_DIR/install_notes.txt"
     fi
     if [[ "${ANTENNA_OK:-0}" != "1" ]]; then
-        warn "TX ist AUS. Antenne anschliessen, dann: $HB_VENV/bin/meshtastic --host localhost --set lora.tx_enabled true"
+        warn "TX ist AUS. Antenne anschliessen, dann: $HB_VENV/bin/meshtastic --host localhost --set lora.tx_power ${TX_POWER:-24} --set lora.tx_enabled true"
     fi
     log "Logs: journalctl -u meshtasticd -u mesh_bot -f"
     log "73!"

@@ -48,12 +48,15 @@ jobs:
     name: node_config.py vs. simulated meshtasticd
     runs-on: ubuntu-latest
     container: debian:trixie
-    continue-on-error: true
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Prerequisites
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 python3-venv procps
+          apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 python3-venv procps iproute2
       - uses: actions/checkout@v4
       - name: Install meshtasticd (OBS beta, native sim build)
         run: |
@@ -72,19 +75,31 @@ jobs:
         run: |
           mkdir -p /tmp/simfs
           nohup meshtasticd -s -d /tmp/simfs -p 4403 > /tmp/sim.log 2>&1 &
-          for i in $(seq 1 30); do (exec 3<>/dev/tcp/localhost/4403) 2>/dev/null && exit 0; sleep 1; done
-          cat /tmp/sim.log; exit 1
-      - name: apply, verify, TX gate
+          for i in $(seq 1 60); do
+            if /tmp/venv/bin/python -c "import socket; socket.create_connection(('127.0.0.1', 4403), 2).close()" 2>/dev/null; then
+              echo "meshtasticd sim is listening after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::meshtasticd sim did not accept connections on 127.0.0.1:4403"
+          ss -ltnp || true
+          tail -n 60 /tmp/sim.log
+          exit 1
+      - name: apply, verify, TX gate, disable channel
         run: |
           cat > /tmp/spec.json <<'EOF'
           {"owner": {"long": "CI Node", "short": "CI"},
-           "lora": {"region": "EU_868", "modem_preset": "SHORT_SLOW", "tx_power": 24, "tx_enabled": false},
+           "lora": {"region": "EU_868", "modem_preset": "SHORT_SLOW", "tx_power": 1, "tx_enabled": false},
            "channels": [
              {"index": 0, "role": "PRIMARY", "name": "", "psk": "default"},
-             {"index": 1, "role": "SECONDARY", "name": "CI Chan", "psk": "Y2ktdGVzdC1rZXktY2ktdGVzdC1rZXktY2ktdGVzISE="}
+             {"index": 1, "role": "SECONDARY", "name": "CI Chan", "psk": "Y2ktdGVzdC1rZXktY2ktdGVzdC1rZXktY2ktdGVzISE="},
+             {"index": 2, "role": "SECONDARY", "name": "HessenTest", "psk": "default"}
            ]}
           EOF
-          cfg="/tmp/venv/bin/python script/install/node_config.py"
+          sed 's/"role": "SECONDARY", "name": "HessenTest", "psk": "default"/"role": "DISABLED", "name": "", "psk": "default", "only_if_name": "HessenTest"/' \
+            /tmp/spec.json > /tmp/spec-off.json
+          cfg="/tmp/venv/bin/python script/install/node_config.py --host 127.0.0.1"
           $cfg info
           $cfg apply /tmp/spec.json --force
           sleep 15
@@ -94,9 +109,12 @@ jobs:
             $cfg apply /tmp/spec.json --force
             sleep 15
             $cfg verify /tmp/spec.json
-          else
+          elif [ "$rc" != 0 ]; then
             exit "$rc"
           fi
+          $cfg apply /tmp/spec-off.json --force
+          sleep 15
+          $cfg verify /tmp/spec-off.json
       - name: Simulator log
         if: failure()
         run: tail -n 80 /tmp/sim.log

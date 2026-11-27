@@ -64,8 +64,11 @@ json_str() {
 
 # write_node_spec FILE : 0600 JSON for node_config.py (contains PSKs)
 write_node_spec() {
-    local file="$1" i first=1 tx_enabled="false"
-    [[ "${ANTENNA_OK:-0}" == "1" ]] && tx_enabled="true"
+    local file="$1" i first=1 tx_enabled="false" tx_power=1
+    if [[ "${ANTENNA_OK:-0}" == "1" ]]; then
+        tx_enabled="true"
+        tx_power="${TX_POWER:-1}"
+    fi
     (
         umask 077
         {
@@ -74,14 +77,18 @@ write_node_spec() {
                 printf '  "owner": {"long": %s, "short": %s},\n' "$(json_str "$LONG_NAME")" "$(json_str "${SHORT_NAME:-}")"
             fi
             printf '  "lora": {"region": %s, "modem_preset": %s, "tx_power": %s, "tx_enabled": %s},\n' \
-                "$(json_str "$RADIO_REGION")" "$(json_str "$MODEM_PRESET")" "${TX_POWER:-1}" "$tx_enabled"
+                "$(json_str "$RADIO_REGION")" "$(json_str "$MODEM_PRESET")" "$tx_power" "$tx_enabled"
             printf '  "channels": [\n'
             for i in "${!CHAN_INDEX[@]}"; do
-                channel_enabled "$i" || continue
                 [[ $first -eq 1 ]] || printf ',\n'
                 first=0
-                printf '    {"index": %s, "role": %s, "name": %s, "psk": %s}' \
-                    "${CHAN_INDEX[$i]}" "$(json_str "${CHAN_ROLE[$i]}")" "$(json_str "${CHAN_NAME[$i]}")" "$(json_str "${CHAN_PSK[$i]}")"
+                if channel_enabled "$i"; then
+                    printf '    {"index": %s, "role": %s, "name": %s, "psk": %s}' \
+                        "${CHAN_INDEX[$i]}" "$(json_str "${CHAN_ROLE[$i]}")" "$(json_str "${CHAN_NAME[$i]}")" "$(json_str "${CHAN_PSK[$i]}")"
+                else
+                    printf '    {"index": %s, "role": "DISABLED", "name": "", "psk": "default", "only_if_name": %s}' \
+                        "${CHAN_INDEX[$i]}" "$(json_str "${CHAN_NAME[$i]}")"
+                fi
             done
             printf '\n  ]\n}\n'
         } >"$file"
@@ -102,7 +109,7 @@ configure_node() {
     fi
     if [[ "$DRY_RUN" == "1" ]]; then
         log "[dry-run] Node-Spec:"
-        log "  Region ${RADIO_REGION}, Preset ${MODEM_PRESET}, tx_power ${TX_POWER:-?} dBm, tx_enabled $([[ "${ANTENNA_OK:-0}" == "1" ]] && echo true || echo false)"
+        log "  Region ${RADIO_REGION}, Preset ${MODEM_PRESET}, tx_power $([[ "${ANTENNA_OK:-0}" == "1" ]] && echo "${TX_POWER:-?}" || echo 1) dBm, tx_enabled $([[ "${ANTENNA_OK:-0}" == "1" ]] && echo true || echo false)"
         local i
         for i in "${!CHAN_INDEX[@]}"; do
             channel_enabled "$i" && log "  Kanal #${CHAN_INDEX[$i]} ${CHAN_ROLE[$i]} '${CHAN_NAME[$i]:-<Preset>}' (PSK $([[ "${CHAN_PSK[$i]}" == "default" ]] && echo default || echo '***'))"
@@ -138,6 +145,8 @@ configure_node() {
         apply_node_spec "$spec"
     fi
     verify_node_spec "$spec"
+    NODE_GATE_VERIFIED=1
+    state_save "${STATE_VARS[@]}"
     log "Node-Konfiguration verifiziert (Kanaele, Region, Preset, TX-Leistung, TX-Gate)."
 }
 
@@ -171,7 +180,9 @@ verify_node_spec() {
         [[ $attempt -lt $max ]] && { log "Verifikation $attempt/$max: Abweichung/Fehler (Exit $rc), neuer Versuch ..."; sleep "${VERIFY_SLEEP:-5}"; }
     done
     if [[ $rc -eq 12 ]]; then
-        die "TX ist auf der Node AKTIV, obwohl keine Antenne bestaetigt wurde. Sofort stoppen: sudo systemctl stop meshtasticd; dann Konfiguration pruefen (node_config.py info)."
+        warn "TX ist auf der Node AKTIV, obwohl keine Antenne bestaetigt wurde: stoppe meshtasticd."
+        systemctl stop meshtasticd || warn "meshtasticd konnte nicht gestoppt werden: sofort 'sudo systemctl stop meshtasticd' ausfuehren!"
+        die "TX war aktiv ohne bestaetigte Antenne; meshtasticd wurde gestoppt. Konfiguration pruefen (node_config.py info), dann den Assistenten erneut starten."
     fi
     die "Node-Konfiguration nicht wie erwartet uebernommen (Exit $rc, siehe ABWEICHUNG oben)."
 }

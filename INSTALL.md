@@ -44,13 +44,15 @@ What happens:
 3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, I2C and the `i2c-dev` module; GPS is not part of this version), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
 4. Phase B: `meshtasticd` from the OBS repo (`Debian_13`), preset `lora-RAK6421-13302-slot1.yaml`, Python 3.13 venv, `config.ini`, node channels (#0 primary, #1 "Mesh Hessen" always, #2 optional), systemd units (`meshtasticd`, `mesh_bot`), self-test.
 
-Channels and bot: the bot serves only the channels you pick, using the existing `ignoreChannels`, `ignoreDefaultChannel` and `messagesChannel` keys.
+Channels and bot: the bot serves only the channels you pick, using the existing `ignoreChannels`, `ignoreDefaultChannel` and `messagesChannel` keys. If you re-run with HessenTest off and channel #2 on the node is still named `HessenTest`, the installer disables it on the node; a channel #2 with any other name is left alone.
 
-TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; `tx_power` = 27 dBm minus antenna gain (rounded down). The installer reads the node back after configuring it and aborts if TX is active without a confirmed antenna. Note: the firmware switches TX on when the region is set for the first time, so the installer applies the TX gate in a second pass right after the first node restart. Connect the antenna before running the installer.
+TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; `tx_power` = 27 dBm minus antenna gain (rounded down). The installer reads the node back after configuring it and aborts if TX is active without a confirmed antenna; in that case it also stops `meshtasticd` automatically.
 
-To release TX later (antenna attached): `sudo /opt/Hessenbot/venv/bin/meshtastic --host localhost --set lora.tx_enabled true`.
+**TX window on first configuration:** the firmware switches TX on when the region is set for the first time, so the installer applies the TX gate (`tx_enabled=false`) in a second pass right after the first node restart. Until then the node can transmit briefly (for example a NodeInfo broadcast). **Connect the antenna (or a 50 ohm load) to the RAK13302 before running the installer.** If you answer "Antenna: no", the wizard warns and asks for confirmation (default no; unattended: `--accept-tx-window`), and it keeps `tx_power` at 1 dBm until you release TX.
 
-Re-runs: the wizard remembers your answers (`/var/lib/hessenbot-install/state.env`, no secrets). If you decline to reuse them you are asked everything again. If a reboot-resume fails, the reason is shown at the next login (`/etc/motd.d/50-hessenbot-install`) and the resume unit stays until the install succeeds; follow it with `journalctl -u hessenbot-install-resume -f`.
+To release TX later (antenna attached; use the `tx_power` from the final notes, 27 dBm minus antenna gain): `sudo /opt/Hessenbot/venv/bin/meshtastic --host localhost --set lora.tx_power 24 --set lora.tx_enabled true`.
+
+Re-runs: the wizard remembers your answers (`/var/lib/hessenbot-install/state.env`, no secrets). If you decline to reuse them you are asked everything again. If a reboot-resume fails, the reason is shown at the next login (`/etc/motd.d/50-hessenbot-install`). The resume unit is not retried on every boot; start the wizard again (or `wizard.sh --resume`). The unit stays until the install succeeds; follow it with `journalctl -u hessenbot-install-resume -f`. When you reuse saved answers without an antenna and the node already has stored settings, you are asked to acknowledge that before `meshtasticd` starts (skipped once the installer has verified TX off on that node).
 
 An existing node identity (`/var/lib/meshtasticd`) must be acknowledged before `meshtasticd` is started, because its old settings may transmit.
 
@@ -64,6 +66,7 @@ Options (`sudo bash /opt/Hessenbot/script/install/wizard.sh ...`):
 | `--yes`, `--non-interactive` | Accept defaults / take values from flags (`--preset`, `--long-name`, `--short-name`, `--hessentest`, `--bot-channels`, `--lat`, `--lon`, `--web-admin`, `--antenna`, `--antenna-gain`) |
 | `--meshtasticd-channel beta\|alpha\|daily` | OBS repository channel for `meshtasticd` (default `beta`; the signing key fingerprint is pinned, a new key needs explicit confirmation) |
 | `--install-dir DIR` | Bot install directory (default `/opt/Hessenbot`; the wizard must run from there) |
+| `--accept-tx-window` | Unattended: accept the short TX window without antenna and start `meshtasticd` with existing node settings (needed with `--yes` and `--antenna no`) |
 | `--confirm-hardware` | Confirm RAK6421 + RAK13302 (Slot 1) without a HAT EEPROM hit (for `--yes`) |
 | `--revert` | Undo changes recorded in `/var/lib/hessenbot-install/manifest` (files are moved to `/var/backups/hessenbot/`, apt packages and node identity are kept; add `--yes` to skip the confirmation) |
 | `--resume`, `--no-reboot` | Continue after reboot / do not reboot automatically |

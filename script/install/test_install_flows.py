@@ -255,17 +255,19 @@ def test_verify_node_spec_retries_then_succeeds(tmp_path: Path):
     assert "attempts=3" in r.stdout
 
 
-def test_verify_node_spec_dies_on_tx_violation(tmp_path: Path):
+def test_verify_node_spec_stops_meshtasticd_on_tx_violation(tmp_path: Path):
     r = run_wizard_lib(
         """
         DRY_RUN=0 VERIFY_SLEEP=0 VERIFY_ATTEMPTS=2
         node_cfg() { return 12; }
+        systemctl() { echo "systemctl $*" >> "$T/calls"; }
         verify_node_spec spec.json
         """,
         tmp_path,
     )
     assert r.returncode != 0
     assert "TX ist auf der Node AKTIV" in r.stderr
+    assert (tmp_path / "calls").read_text().strip() == "systemctl stop meshtasticd"
 
 
 def test_configure_node_reapplies_when_firmware_forces_tx_on(tmp_path: Path):
@@ -347,6 +349,113 @@ def test_question_aborts_non_interactively_when_prefs_exist(tmp_path: Path):
     assert fresh.returncode == 0, fresh.stderr
 
 
+def test_reuse_with_existing_prefs_and_no_antenna_asks_instead_of_dying_later(tmp_path: Path):
+    state_dir = _node_state(tmp_path)
+    write_state(tmp_path, **{**SAVED, "ANTENNA_OK": "0", "TX_POWER": "24", "TX_WINDOW_ACK": "1"})
+    env = {"MESHTASTICD_STATE_DIRS": str(state_dir)}
+    script = """
+        DRY_RUN=0 RESUME=0
+        confirm() { echo "ASKED: $1" >&2; return @RC@; }
+        resolve_answers
+        guard_existing_node
+        echo "REUSE=$REUSE ACK=$EXISTING_NODE_ACK"
+        """
+    yes = run_wizard_lib(script.replace("@RC@", "0"), tmp_path, **env)
+    assert yes.returncode == 0, yes.stderr
+    assert "meshtasticd trotzdem ohne bestaetigte Antenne" in yes.stderr
+    assert "REUSE=1 ACK=1" in yes.stdout
+    assert "EXISTING_NODE_ACK=1" in (tmp_path / "state" / "state.env").read_text()
+
+    write_state(tmp_path, **{**SAVED, "ANTENNA_OK": "0", "TX_WINDOW_ACK": "1"})
+    no = run_wizard_lib(script.replace("@RC@", "1"), tmp_path, **env)
+    assert no.returncode != 0
+
+
+def test_reuse_skips_prompts_when_gate_was_verified_before_and_on_resume(tmp_path: Path):
+    state_dir = _node_state(tmp_path)
+    env = {"MESHTASTICD_STATE_DIRS": str(state_dir)}
+    write_state(tmp_path, **{**SAVED, "ANTENNA_OK": "0", "NODE_GATE_VERIFIED": "1"})
+    verified = run_wizard_lib(
+        'DRY_RUN=0 RESUME=0\nconfirm() { [[ "$1" == Gespeicherte* ]]; }\nresolve_answers\nguard_existing_node\necho OK',
+        tmp_path,
+        **env,
+    )
+    assert verified.returncode == 0, verified.stderr
+    assert "OK" in verified.stdout
+
+    write_state(tmp_path, **{**SAVED, "ANTENNA_OK": "0", "EXISTING_NODE_ACK": "1", "TX_WINDOW_ACK": "1"})
+    resume = run_wizard_lib(
+        'DRY_RUN=0 RESUME=1\nconfirm() { echo "confirm must not be called"; exit 9; }\nresolve_answers\nguard_existing_node\necho OK',
+        tmp_path,
+        **env,
+    )
+    assert resume.returncode == 0, resume.stderr
+
+
+def test_tx_window_confirmation_required_without_antenna(tmp_path: Path):
+    blocked = run_wizard_lib("DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=0 TX_WINDOW_ACK=\nask_tx_window", tmp_path)
+    assert blocked.returncode != 0
+    assert "TX" in blocked.stderr and "accept-tx-window" in blocked.stderr
+    for setup in ("TX_WINDOW_ACK=1", "NODE_GATE_VERIFIED=1", "ANTENNA_OK=1", "DRY_RUN=1", "SKIP_NODE_CONFIG=1"):
+        ok = run_wizard_lib(f"DRY_RUN=0 ASSUME_YES=1 ANTENNA_OK=0 TX_WINDOW_ACK=\n{setup}\nask_tx_window", tmp_path)
+        assert ok.returncode == 0, (setup, ok.stderr)
+
+
+def test_accept_tx_window_flag_sets_both_acks(tmp_path: Path):
+    r = run_wizard_lib('parse_args --accept-tx-window\necho "$TX_WINDOW_ACK$EXISTING_NODE_ACK"', tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "11"
+
+
+def test_node_spec_limits_tx_power_until_antenna_confirmed(tmp_path: Path):
+    script = """
+        load_channel_defs
+        ANTENNA_OK=@A@ TX_POWER=24 RADIO_REGION=EU_868 MODEM_PRESET=SHORT_SLOW HESSENTEST=off LONG_NAME=""
+        write_node_spec "$T/spec.json"
+        cat "$T/spec.json"
+        """
+    import json
+
+    off = run_wizard_lib(script.replace("@A@", "0"), tmp_path)
+    assert off.returncode == 0, off.stderr
+    lora_off = json.loads(off.stdout)["lora"]
+    assert lora_off["tx_power"] == 1 and lora_off["tx_enabled"] is False
+    on = run_wizard_lib(script.replace("@A@", "1"), tmp_path)
+    lora_on = json.loads(on.stdout)["lora"]
+    assert lora_on["tx_power"] == 24 and lora_on["tx_enabled"] is True
+
+
+def test_node_spec_disables_hessentest_only_if_it_carries_our_name(tmp_path: Path):
+    import json
+
+    r = run_wizard_lib(
+        """
+        load_channel_defs
+        ANTENNA_OK=0 RADIO_REGION=EU_868 MODEM_PRESET=SHORT_SLOW HESSENTEST=off LONG_NAME=""
+        write_node_spec "$T/spec.json"
+        cat "$T/spec.json"
+        """,
+        tmp_path,
+    )
+    assert r.returncode == 0, r.stderr
+    channels = {c["index"]: c for c in json.loads(r.stdout)["channels"]}
+    assert channels[2]["role"] == "DISABLED" and channels[2]["only_if_name"] == "HessenTest"
+    assert channels[1]["role"] == "SECONDARY"
+
+
+def test_disabled_entry_with_only_if_name_matches_just_that_channel():
+    spec = {"channels": [{"index": 2, "role": "DISABLED", "name": "", "psk": "default", "only_if_name": "HessenTest"}]}
+    ours = [{"index": 2, "role": "SECONDARY", "name": "HessenTest", "psk_fp": "abcd1234"}]
+    foreign = [{"index": 2, "role": "SECONDARY", "name": "Familie", "psk_fp": "abcd1234"}]
+    gone = [{"index": 2, "role": "DISABLED", "name": "", "psk_fp": "-"}]
+    assert node_config.channel_mismatches(ours, spec)
+    assert not node_config.channel_mismatches(foreign, spec)
+    assert not node_config.channel_mismatches(gone, spec)
+    assert node_config._disable_applies(ours[0], spec["channels"][0])
+    assert not node_config._disable_applies(foreign[0], spec["channels"][0])
+    node_config.validate_spec(spec)
+
+
 # --- I5: resume unit / status -----------------------------------------------------------------------
 
 
@@ -370,6 +479,14 @@ def test_failure_during_resume_leaves_login_status(tmp_path: Path):
     assert r.returncode == 0, r.stderr
     status = (tmp_path / "motd").read_text()
     assert "FEHLGESCHLAGEN" in status and "phase-b" in status and "journalctl" in status
+
+
+def test_failed_resume_does_not_retry_on_every_boot(tmp_path: Path):
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "resume.pending").write_text("pending\n")
+    r = run_wizard_lib('DRY_RUN=0 RESUME=1 CURRENT_PHASE=phase-b\n( die "kaputt" ) || true', tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert not (tmp_path / "state" / "resume.pending").exists()
 
 
 def test_no_status_file_for_interactive_failure(tmp_path: Path):

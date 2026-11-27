@@ -165,12 +165,13 @@ link_radio_preset() {
 
 guard_existing_node() {
     [[ "${ANTENNA_OK:-0}" == "1" ]] && return 0
+    [[ "${NODE_GATE_VERIFIED:-}" == "1" ]] && return 0
     existing_node_prefs || return 0
     if [[ "$DRY_RUN" == "1" ]]; then
         warn "[dry-run] Bestehende Node-Prefs gefunden: meshtasticd wuerde sofort senden koennen (Antenne nicht bestaetigt)."
         return 0
     fi
-    [[ "${EXISTING_NODE_ACK:-0}" == "1" ]] || die "Bestehende Node-Prefs und keine bestaetigte Antenne: meshtasticd wird nicht gestartet (Antenne anschliessen und mit 'Antenne: ja' erneut starten)."
+    [[ "${EXISTING_NODE_ACK:-0}" == "1" ]] || die "Bestehende Node-Prefs und keine bestaetigte Antenne: meshtasticd wird nicht gestartet (Antenne anschliessen und mit 'Antenne: ja' erneut starten, oder --accept-tx-window)."
     warn "meshtasticd startet mit bestehenden Prefs ohne bestaetigte Antenne (von dir bestaetigt)."
 }
 

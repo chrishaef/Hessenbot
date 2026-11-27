@@ -17,9 +17,11 @@ ANTENNA_OK="${ANTENNA_OK:-}"
 ANTENNA_GAIN="${ANTENNA_GAIN:-}"
 TX_POWER=""
 EXISTING_NODE_ACK="${EXISTING_NODE_ACK:-}"
+TX_WINDOW_ACK="${TX_WINDOW_ACK:-}"
+NODE_GATE_VERIFIED="${NODE_GATE_VERIFIED:-}"
 HW_ACK="${HW_ACK:-0}"
 
-STATE_VARS=(MODEM_PRESET LONG_NAME SHORT_NAME HESSENTEST BOT_CHANNELS LAT LON HAS_GPS WEB_ADMIN WEB_BIND ANTENNA_OK ANTENNA_GAIN TX_POWER EXISTING_NODE_ACK MESHTASTICD_CHANNEL PHASE_A_DONE)
+STATE_VARS=(MODEM_PRESET LONG_NAME SHORT_NAME HESSENTEST BOT_CHANNELS LAT LON HAS_GPS WEB_ADMIN WEB_BIND ANTENNA_OK ANTENNA_GAIN TX_POWER EXISTING_NODE_ACK TX_WINDOW_ACK NODE_GATE_VERIFIED MESHTASTICD_CHANNEL PHASE_A_DONE)
 
 PRESET_KEYS=(SHORT_SLOW SHORT_FAST MEDIUM_SLOW MEDIUM_FAST LONG_MODERATE LONG_FAST LONG_SLOW)
 PRESET_LABELS=("Europe Short Slow (Standard, Meshhessen)" "Short Fast" "Medium Slow" "Medium Fast" "Long Moderate" "Long Fast" "Long Slow")
@@ -202,9 +204,33 @@ existing_node_prefs() {
     return 1
 }
 
+# ask_tx_window: without an antenna the firmware still transmits briefly when the region is set for the first time
+ask_tx_window() {
+    [[ "$ANTENNA_OK" != "1" ]] || return 0
+    [[ "${SKIP_MESHTASTICD:-0}" != "1" && "${SKIP_NODE_CONFIG:-0}" != "1" ]] || return 0
+    [[ "${NODE_GATE_VERIFIED:-}" != "1" && "${TX_WINDOW_ACK:-}" != "1" ]] || return 0
+    [[ "$DRY_RUN" != "1" ]] || { warn "Ohne Antenne: beim ersten Setzen der Region kann die Node kurz senden (Dry-run: keine Rueckfrage)."; return 0; }
+    tty_print ""
+    warn "ACHTUNG: Die Firmware schaltet TX ein, sobald die Region zum ersten Mal gesetzt wird; das TX-Gate (aus) greift erst im zweiten Durchlauf."
+    warn "Ohne Antenne oder 50-Ohm-Last kann der 1-W-Booster dabei Schaden nehmen. Der Installer setzt in dieser Zeit tx_power auf 1 dBm."
+    warn "Empfehlung: Antenne (oder Last) JETZT an die RAK13302 anschliessen und hier mit 'nein' abbrechen, dann erneut starten mit 'Antenne: ja'."
+    if confirm "Trotzdem ohne Antenne/Last fortfahren (kurzes Sendefenster akzeptieren)?" n; then
+        TX_WINDOW_ACK=1
+    else
+        die "Abgebrochen. Antenne oder Last anschliessen und erneut starten (oder --accept-tx-window)."
+    fi
+}
+
+# ask_antenna_risks: TX-without-antenna confirmations; also used when saved answers are reused
+ask_antenna_risks() {
+    ask_tx_window
+    ask_existing_node
+}
+
 ask_existing_node() {
     [[ "$ANTENNA_OK" != "1" ]] || return 0
     [[ "${SKIP_MESHTASTICD:-0}" != "1" ]] || return 0
+    [[ "${NODE_GATE_VERIFIED:-}" != "1" ]] || return 0
     existing_node_prefs || return 0
     if [[ "$EXISTING_NODE_ACK" == "1" ]]; then
         return 0
@@ -231,7 +257,7 @@ ask_all() {
     ask_gps
     ask_web_admin
     ask_antenna
-    ask_existing_node
+    ask_antenna_risks
 }
 
 print_summary() {
