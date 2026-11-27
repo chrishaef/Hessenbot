@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import html
+import inspect
 import os
 import re
 import time
@@ -1618,6 +1619,7 @@ def fetch_local_node_settings(iface_id: int) -> Tuple[Optional[str], Optional[Di
         "short_name": short_name,
         "long_name": long_name,
         "is_licensed": bool(user.get("isLicensed")),
+        "is_unmessagable": bool(user.get("isUnmessagable")),
         "role": int(dev.role),
         "role_name": _enum_name("DeviceConfig.Role", dev.role, _NODE_ROLE_LABELS),
         "rebroadcast_mode": int(dev.rebroadcast_mode),
@@ -1769,6 +1771,13 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     except (TypeError, ValueError):
         return False, "Rolle oder Rebroadcast-Modus ungültig."
 
+    from modules.admin_node_config import ROLE_WARNING, role_change_needs_confirm
+
+    if role_change_needs_confirm(current["role"], role) and (
+        (form.get("confirm__role") or "").strip().lower() not in ("1", "on", "yes", "true")
+    ):
+        return False, f"Rolle nicht gespeichert: Bitte die Warnung bestätigen. {ROLE_WARNING}"
+
     tx_power_new, err = plan_tx_power_change(
         current["lora_tx_power"],
         form.get("tx_power"),
@@ -1780,10 +1789,11 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     changes: List[str] = []
 
     if short_name != current["short_name"] or long_name != current["long_name"]:
+        owner_kw: Dict[str, Any] = {"is_licensed": bool(current.get("is_licensed"))}
+        if "is_unmessagable" in inspect.signature(node.setOwner).parameters:
+            owner_kw["is_unmessagable"] = bool(current.get("is_unmessagable"))
         try:
-            node.setOwner(
-                long_name=long_name, short_name=short_name, is_licensed=bool(current.get("is_licensed"))
-            )
+            node.setOwner(long_name=long_name, short_name=short_name, **owner_kw)
         except Exception as e:
             return False, f"Name konnte nicht gesetzt werden: {e!s}"
         changes.append("Name")
@@ -2258,6 +2268,12 @@ def build_channels_settings_html(
 """
 
 
+def _role_warning_text() -> str:
+    from modules.admin_node_config import ROLE_WARNING
+
+    return ROLE_WARNING
+
+
 def node_settings_role_options(selected: int) -> str:
     opts = []
     for val, label in sorted(_NODE_ROLE_LABELS.items()):
@@ -2339,6 +2355,7 @@ def build_node_settings_html(
 </div>
 
 <form method="post" class="node-settings-form">
+  <input type="hidden" name="action" value="save_overview">
   <input type="hidden" name="iface_id" value="{iface_id}">
 
   <h5 class="mt-2 mb-3">Knotenname</h5>
@@ -2362,6 +2379,12 @@ def build_node_settings_html(
       <select class="form-select" id="ns-role" name="role">
         {node_settings_role_options(settings["role"])}
       </select>
+      <div class="form-text text-danger">Andere Rollen als CLIENT/CLIENT_MUTE/TAK/CLIENT_BASE:
+        {html.escape(_role_warning_text())}</div>
+      <div class="form-check small">
+        <input class="form-check-input" type="checkbox" id="ns-role-confirm" name="confirm__role" value="1">
+        <label class="form-check-label" for="ns-role-confirm">Warnung gelesen — Rolle bewusst ändern</label>
+      </div>
     </div>
     <div class="col-md-4">
       <label class="form-label" for="ns-rebroadcast">Rebroadcast</label>

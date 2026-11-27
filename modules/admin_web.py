@@ -116,6 +116,10 @@ def create_app(
         static_url_path="/static",
     )
     app.secret_key = secret_key
+    # Lax: session cookie is not sent on cross-site POSTs (CSRF), but links from other sites still log in.
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
 
     dateien = {
         "direktnachricht": alert_path,
@@ -1566,7 +1570,7 @@ def create_app(
                     iface_id = post_iface
                     redirect_kw["iface"] = iface_id
                 try:
-                    ok, msg = node_cfg.dispatch_post(iface_id, request.form)
+                    ok, msg = node_cfg.dispatch_post(iface_id, request.form, session)
                 except Exception as e:
                     from modules.log import logger
 
@@ -1581,6 +1585,9 @@ def create_app(
                     iface_id=iface_id,
                     ifaces=ifaces,
                     base_url=url_for("node_settings_index"),
+                    csrf_token=node_cfg.ensure_csrf_token(session),
+                    refresh=request.args.get("refresh") == "1",
+                    read_strings=request.args.get("read") == "1",
                 )
             except Exception as e:
                 from modules.log import logger

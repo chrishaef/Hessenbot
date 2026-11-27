@@ -10,6 +10,7 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 - **Kanäle**: Positionsgenauigkeit und „stumm“ je Kanal-Slot
 - **Remote-Zugriff auf meshtasticd** (`script/install/remote-access.sh`, INSTALL.md): optionaler UFW-Helfer, der Port 4403 nur für das LAN-Subnetz oder `tailscale0` freigibt (`status|lan|tailscale|close`); Sicherheits- und Ein-Client-Hinweise (meshtasticd bedient nur einen TCP-Client gleichzeitig, kein Auth/TLS)
 - **Pi-4-Installer (nativ)**: `bootstrap.sh` + `script/install/wizard.sh` für Raspberry Pi 4, RAK6421/RAK13302 Slot 1 (EU_868), Trixie, `meshtasticd` (OBS) + Bot als systemd-Dienste; Preset-/Kanal-Abfrage (#1 Mesh Hessen, optional HessenTest), TX erst nach Antennenbestätigung, `--dry-run`, `--revert`, Reboot-Resume; `install.sh --nope` mit Bestätigung und Backup; `bootstrap.sh --legacy` für das alte Verhalten
+- **Node Settings — Absicherung**: CSRF-Token in allen Node-Settings-Formularen (Anfragen ohne gültiges Token ändern nichts), Session-/Remember-Cookie `SameSite=Lax`; vor jedem Schreiben wird der Bereich frisch von der Node gelesen und bei zwischenzeitlicher Änderung abgelehnt (statt veraltete Cache-Werte zurückzuschreiben); Link „Neu von der Node laden“; Canned-Message-Texte und Klingelton werden nur auf Klick gelesen (kein Blockieren beim Tab-Wechsel); veraltete Felder (z. B. `device.is_managed`) nur noch Anzeige; unbekannte Formular-Aktionen werden abgelehnt
 - **BBS-DM Lesebestätigung** (Issue #9): `bbspost ack @Empfänger #Text` verlangt Nutzer-ACK per `ack <id>`; Mesh-/Node-Empfang (`wantAckOnDm`) und Nutzer-Bestätigung getrennt; Absender-Status-DMs; Config `bbsDmUserAckEnabled`, Retry/Max/Expire, Admin-Spalten + Checkbox
 - **Service-API**: `POST /api/v1/dm` / `GET /api/v1/whoami` für externe Dienste (z. B. MQTT-Webadmin Watchcat); Admin-Tab **API** (Enable, Key einmalig erzeugen, Doku, Request-Log); Token als SHA-256-Hash (`api_token_hash`), Schalter `api_enabled`, optional Env `HESSENBOT_API_TOKEN`; Rate-Limit 30/min; Audit in `logs/service_api.log`
 
@@ -33,7 +34,10 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Fixed
 
-- **Node Settings (Übersicht)**: Namen speichern setzte den Amateurfunk-Status (`is_licensed`) der Node stillschweigend zurück
+- **Node Settings (Übersicht)**: Namen speichern setzte den Amateurfunk-Status (`is_licensed`) und „nicht anschreibbar“ (`is_unmessagable`) der Node stillschweigend zurück; Rollenwechsel auf Router/Repeater/Tracker/Sensor/Hidden braucht jetzt auch in der Übersicht eine Bestätigung
+- **Node Settings (Sicherheit)**: Neuer privater Schlüssel leert den öffentlichen Schlüssel, damit die Firmware ihn neu ableitet (vorher blieb das alte Paar inkonsistent); keine irreführende „leeren“-Option mehr für den privaten Schlüssel
+- **Node Settings (LoRa)**: Sendeleistung 0 bedeutet Regionsmaximum (EU_868: 27 dBm) und braucht nun eine Bestätigung
+- **Node Settings (Benutzer)**: HAM-Modus warnt vor den Firmware-Folgen (PSKs aller Kanäle inkl. Meshhessen werden gelöscht, Admin-Kanal aus, neues Schlüsselpaar) und verlangt zusätzlich das Wort „HAM“; Namensänderung aktualisiert sofort die Anzeige
 - **`!readnews`**: Führendes `!` wird vor der Quellen-Auswertung entfernt — sonst wurde `!` als Quellenname gelesen (`data/!_news.txt`) und fälschlich „No news for you!“ geliefert (DM und Kanal)
 - **News-Versand (ACP)**: Zeitplan-Hinweise/`config.template`/Tooltips an MOTD-Versand angeglichen (inkl. mehrerer Uhrzeiten)
 - **ACP Einstellungen**: Speichern schrieb `config.ini` per `ConfigParser.write()` und flattente dabei alle Keys auf Kleinbuchstaben; Formular-POST aktualisiert jetzt nur übermittelte `cfg__*`-Felder (übrige Keys bleiben), Schreibweg stellt camelCase aus `config.template` wieder her

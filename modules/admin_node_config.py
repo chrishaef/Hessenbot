@@ -5,8 +5,11 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import html
 import math
+import secrets
 import re
 import threading
 import time
@@ -188,15 +191,30 @@ def _turned_off(old: Any, new: Any) -> bool:
     return bool(old) and not bool(new)
 
 
+TX_POWER_ZERO_NOTE = (
+    "0 heißt nicht „aus“: die Firmware sendet dann mit dem Regionsmaximum (EU_868: 27 dBm). "
+    "Die Firmware begrenzt auf das Regionslimit, außer im Amateurfunk-Modus."
+)
+
+
 def _tx_power_needs_confirm(old: Any, new: Any) -> bool:
-    return int(new) != int(old) and int(new) > TX_POWER_EU_SAFE_DBM
+    """0 = region maximum in firmware (EU_868: 27 dBm), so it needs the same confirmation as > 14 dBm."""
+    return int(new) != int(old) and (int(new) > TX_POWER_EU_SAFE_DBM or int(new) == 0)
 
 
-_ROUTER_ROLES = {2, 3, 4, 11}
+# CLIENT, CLIENT_MUTE, TAK, CLIENT_BASE behave like a normal reachable client; every other role
+# changes forwarding (ROUTER*, REPEATER), sleeps (TRACKER, SENSOR, TAK_TRACKER) or hides the node.
+_SAFE_ROLES = {0, 1, 7, 12}
+
+ROLE_WARNING = (
+    "Router-/Repeater-Rollen leiten aggressiver weiter und verändern das Verhalten des ganzen Mesh. "
+    "TRACKER, SENSOR und TAK_TRACKER schlafen bzw. sparen Energie, CLIENT_HIDDEN und LOST_AND_FOUND "
+    "verändern die Sichtbarkeit — die Bot-Node kann dadurch unerreichbar oder unsichtbar werden."
+)
 
 
-def _router_role(old: Any, new: Any) -> bool:
-    return int(new) != int(old) and int(new) in _ROUTER_ROLES
+def role_change_needs_confirm(old: Any, new: Any) -> bool:
+    return int(new) != int(old) and int(new) not in _SAFE_ROLES
 
 
 S = "s"
@@ -206,8 +224,7 @@ FIELD_META: Dict[str, FieldMeta] = {
     # Config.DeviceConfig
     "device.role": FieldMeta(
         "Rolle", "CLIENT ist Standard. Router-Rollen nur an exponierten Standorten und nach Absprache.",
-        danger="Router-/Repeater-Rollen leiten aggressiver weiter und verändern das Verhalten des ganzen Mesh.",
-        danger_when=_router_role),
+        danger=ROLE_WARNING, danger_when=role_change_needs_confirm),
     "device.serial_enabled": FieldMeta("Serielle Konsole (veraltet, siehe Sicherheit)"),
     "device.button_gpio": FieldMeta("GPIO Taster", "0 = Board-Standard"),
     "device.buzzer_gpio": FieldMeta("GPIO Buzzer", "0 = Board-Standard"),
@@ -305,9 +322,12 @@ FIELD_META: Dict[str, FieldMeta] = {
         "Senden (TX) aktiv",
         danger="TX nur mit angeschlossener Antenne einschalten. Ausgeschaltet sendet die Node — und damit der Bot — nichts.",
         danger_when=_changed),
-    "lora.tx_power": FieldMeta("Sendeleistung", f"0 = Firmware-Standard, {TX_POWER_MAX_DBM} = Volllast; kein harter Cap",
-                               "dBm", min=0, max=TX_POWER_MAX_DBM, danger=TX_POWER_WARNING_TEXT,
-                               danger_when=_tx_power_needs_confirm),
+    "lora.tx_power": FieldMeta(
+        "Sendeleistung",
+        f"0 = Regionsmaximum (EU_868: 27 dBm), {TX_POWER_MAX_DBM} = Volllast. Hessenbot begrenzt nicht; "
+        "die Firmware begrenzt auf das Regionslimit, außer im Amateurfunk-Modus.",
+        "dBm", min=0, max=TX_POWER_MAX_DBM, danger=f"{TX_POWER_WARNING_TEXT} {TX_POWER_ZERO_NOTE}",
+        danger_when=_tx_power_needs_confirm),
     "lora.channel_num": FieldMeta("Frequenz-Slot", "0 = aus Kanalname berechnet", min=0, max=_UINT32_MAX,
                                   danger=MESH_PARAMS_WARNING, danger_when=_changed),
     "lora.override_duty_cycle": FieldMeta(
@@ -331,7 +351,10 @@ FIELD_META: Dict[str, FieldMeta] = {
     # Config.SecurityConfig
     "security.public_key": FieldMeta("Öffentlicher Schlüssel", widget="readonly_b64", readonly=True),
     "security.private_key": FieldMeta(
-        "Privater Schlüssel", "leer = unverändert; „leeren“ erzeugt beim Neustart ein neues Schlüsselpaar",
+        "Privater Schlüssel",
+        "leer = unverändert. Neuen Schlüssel (Base64, 32 Byte) einfügen; der öffentliche Schlüssel wird dann "
+        "von der Firmware neu abgeleitet. Ein komplett neues Schlüsselpaar erzeugt „Werksreset (Gerät komplett)“ "
+        "unter Administration.",
         widget="secret_b64",
         danger="Ein neuer privater Schlüssel ist eine neue Identität: verschlüsselte DMs und Admin-Zugänge "
                "anderer Nodes passen danach nicht mehr.",
@@ -342,7 +365,9 @@ FIELD_META: Dict[str, FieldMeta] = {
     "security.is_managed": FieldMeta(
         "Managed Mode",
         danger="Im Managed Mode lässt sich die Konfiguration nur noch per Admin-Schlüssel (Remote-Admin) ändern — "
-               "Bot und Companion-App können lokal nichts mehr einstellen.",
+               "Bot und Companion-App können lokal nichts mehr einstellen. Auch die übrigen Admin-Schreibzugriffe "
+               "des Bots (Channel-Test speichern, NodeDB-Favoriten, Node Settings) funktionieren nicht mehr, und "
+               "Canned Messages/Klingelton lassen sich nicht mehr lesen.",
         danger_when=_turned_on),
     "security.serial_enabled": FieldMeta(
         "Serielle Konsole/API",
@@ -715,8 +740,9 @@ def parse_field(ref: FieldRef, meta: FieldMeta, form: Any, current: Any) -> Tupl
             return None, f"{meta.label}: IPv4-Adresse wie 192.168.1.10 erwartet."
 
     if meta.widget in ("secret", "secret_b64"):
-        if _is_checked(form, clear_name(ref.path)):
-            return (b"" if fd.type == FieldDescriptor.TYPE_BYTES else ""), None
+        # secret_b64 (private key) has no clear option: current firmware ignores an omitted key.
+        if meta.widget == "secret" and _is_checked(form, clear_name(ref.path)):
+            return "", None
         if not text:
             return current, None
         if meta.widget == "secret_b64":
@@ -858,7 +884,7 @@ def plan_section_update(section: str, current: Message, form: Any) -> SectionPla
         if ref.path not in present:
             continue
         meta = field_meta(section, ref.path)
-        if meta.readonly:
+        if is_locked(section, ref, meta):
             continue
         old = get_value(current, ref)
         new, err = parse_field(ref, meta, form, old)
@@ -878,8 +904,24 @@ def plan_section_update(section: str, current: Message, form: Any) -> SectionPla
         set_value(candidate, ref, new)
         changes.append(meta.label)
 
+    if section == "security" and hasattr(candidate, "public_key") and candidate.private_key != current.private_key:
+        # Firmware derives the public key only when it is blank; it never checks that a supplied pair matches.
+        candidate.public_key = b""
+        changes.append("Öffentlicher Schlüssel (wird neu abgeleitet)")
+
     errors.extend(_cross_field_errors(section, candidate))
     return SectionPlan(candidate, changes, errors, unconfirmed)
+
+
+# Deprecated in the protobufs but still used by firmware, so they stay editable.
+DEPRECATED_EDITABLE = {"canned_message.enabled", "canned_message.allow_input_source"}
+
+
+def is_locked(section: str, ref: FieldRef, meta: FieldMeta) -> bool:
+    """Read-only fields: explicit readonly metadata or deprecated protobuf fields."""
+    if meta.readonly:
+        return True
+    return _is_deprecated(ref.fd) and f"{section}.{ref.path}" not in DEPRECATED_EDITABLE
 
 
 def _cross_field_errors(section: str, msg: Message) -> List[str]:
@@ -937,6 +979,90 @@ def write_section(node: Any, kind: str, section: str, candidate: Message) -> Non
     getattr(_section_store(node, kind), section).CopyFrom(candidate)
 
 
+REFRESH_TIMEOUT_S = 3.0
+
+_REQUEST_ENUM_OVERRIDES = {"external_notification": "EXTNOTIF_CONFIG", "canned_message": "CANNEDMSG_CONFIG"}
+
+
+def admin_request(node: Any, msg: Message, extract: Callable[[Any], Any],
+                  timeout: float = 3.0) -> Tuple[Any, Optional[str]]:
+    """Send an AdminMessage with wantResponse and wait (bounded) for the reply; ``extract`` maps the raw AdminMessage."""
+    done = threading.Event()
+    box: Dict[str, Any] = {}
+
+    def on_response(packet: Dict[str, Any]) -> None:
+        try:
+            decoded = packet.get("decoded") or {}
+            routing = decoded.get("routing") or {}
+            if routing.get("errorReason", "NONE") != "NONE":
+                box["error"] = str(routing.get("errorReason"))
+            else:
+                raw = (decoded.get("admin") or {}).get("raw")
+                if raw is not None:
+                    box["value"] = extract(raw)
+        except Exception as e:
+            box["error"] = str(e)
+        finally:
+            done.set()
+
+    try:
+        _send_admin(node, msg, wantResponse=True, onResponse=on_response)
+    except Exception as e:
+        return None, f"Anfrage fehlgeschlagen: {e!s}"
+    if not done.wait(timeout):
+        return None, "Keine Antwort der Node (Timeout)."
+    if "error" in box:
+        return None, f"Node meldet Fehler: {box['error']}"
+    return box.get("value"), None
+
+
+def section_request_enum(kind: str, section: str) -> Optional[int]:
+    from meshtastic.protobuf import admin_pb2
+
+    enum = admin_pb2.AdminMessage.ConfigType if kind == "config" else admin_pb2.AdminMessage.ModuleConfigType
+    name = _REQUEST_ENUM_OVERRIDES.get(section) or f"{section.replace('_', '').upper()}_CONFIG"
+    try:
+        return int(enum.Value(name))
+    except ValueError:
+        return None
+
+
+def request_section(node: Any, kind: str, section: str,
+                    timeout: Optional[float] = None) -> Tuple[Optional[Message], Optional[str]]:
+    """Read one Config/ModuleConfig section fresh from the device (get_config_request / get_module_config_request)."""
+    from meshtastic.protobuf import admin_pb2
+
+    num = section_request_enum(kind, section)
+    if num is None:
+        return None, "Bereich kann nicht einzeln abgefragt werden."
+    p = admin_pb2.AdminMessage()
+    if kind == "config":
+        p.get_config_request = num
+    else:
+        p.get_module_config_request = num
+
+    def extract(raw: Any) -> Message:
+        resp = raw.get_config_response if kind == "config" else raw.get_module_config_response
+        if not resp.HasField(section):
+            raise ValueError("Antwort enthält einen anderen Bereich")
+        return getattr(resp, section)
+
+    return admin_request(node, p, extract, REFRESH_TIMEOUT_S if timeout is None else timeout)
+
+
+def section_fingerprint(msg: Message) -> str:
+    return hashlib.sha256(msg.SerializeToString(deterministic=True)).hexdigest()[:16]
+
+
+def refresh_section(node: Any, kind: str, section: str) -> Optional[str]:
+    """Update the bot's cache from the device. Returns an error text if the device did not answer."""
+    fresh, err = request_section(node, kind, section)
+    if fresh is None:
+        return err or "keine Daten"
+    getattr(_section_store(node, kind), section).CopyFrom(fresh)
+    return None
+
+
 def apply_section(iface_id: int, tab_key: str, form: Any) -> Tuple[bool, str]:
     spec = tab_by_key(tab_key)
     if spec.kind not in ("config", "module") or spec.key != tab_key:
@@ -947,7 +1073,15 @@ def apply_section(iface_id: int, tab_key: str, form: Any) -> Tuple[bool, str]:
     store = _section_store(node, spec.kind)
     if store is None:
         return False, "Konfiguration der Node wurde noch nicht gelesen."
+    refresh_err = refresh_section(node, spec.kind, spec.section)
     current = getattr(store, spec.section)
+    baseline = _form_get(form, "baseline").strip()
+    if baseline and baseline != section_fingerprint(current):
+        return False, (
+            f"{spec.label}: nicht gespeichert — die Werte auf der Node haben sich seit dem Laden der Seite geändert "
+            "(z. B. per App, CLI oder Firmware-Korrektur). Die Seite zeigt jetzt den aktuellen Stand; "
+            "bitte Änderungen prüfen und erneut speichern."
+        )
     plan = plan_section_update(spec.section, current, form)
     if plan.errors:
         return False, f"{spec.label}: nicht gespeichert — " + " · ".join(plan.errors)
@@ -961,17 +1095,25 @@ def apply_section(iface_id: int, tab_key: str, form: Any) -> Tuple[bool, str]:
         write_section(node, spec.kind, spec.section, plan.candidate)
     except Exception as e:
         return False, f"{spec.label} konnte nicht geschrieben werden: {e!s}"
+    note = ""
+    if refresh_err:
+        note = (f" Hinweis: Abgleich mit der Node vor dem Speichern nicht möglich ({refresh_err}) — "
+                "Basis war der Stand im Bot (beim Verbinden bzw. letzten Speichern gelesen).")
     return True, (
         f"{spec.label} gespeichert: {', '.join(plan.changes)}. "
-        "Die Node startet bei manchen Änderungen neu — der Bot verbindet sich dann erneut."
+        "Die Node startet bei manchen Änderungen neu — der Bot verbindet sich dann erneut." + note
     )
 
 
 # --- Owner (Companion: Benutzer) ---
 
+HAM_CONFIRM_WORD = "HAM"
 HAM_WARNING = (
-    "Amateurfunk-Modus: Direktnachrichten werden nicht mehr Ende-zu-Ende verschlüsselt (gesetzliche Vorgabe), "
-    "der Langname sollte dein Rufzeichen sein. Nur mit gültiger Lizenz aktivieren."
+    "Amateurfunk-Modus (Verhalten je nach Firmware-Version, aktuelle Firmware): beim Umschalten löscht die Firmware "
+    "den PSK aller Kanäle — auch der verschlüsselten Meshhessen-Kanäle, der Bot verliert sie —, deaktiviert den "
+    "Admin-Kanal und erzeugt bei gesetzter Region ein neues Schlüsselpaar (neue Identität). Direktnachrichten "
+    "werden nicht mehr Ende-zu-Ende verschlüsselt, und das Regionslimit der Sendeleistung entfällt. Der Langname "
+    "sollte dein Rufzeichen sein. Nur mit gültiger Lizenz aktivieren."
 )
 
 
@@ -1009,9 +1151,30 @@ def plan_owner_update(current: Mapping[str, Any], form: Any) -> Tuple[Dict[str, 
     labels = {"long_name": "Langname", "short_name": "Kurzname", "is_licensed": "Amateurfunk",
               "is_unmessagable": "Nicht anschreibbar"}
     changes = [labels[k] for k in new if new[k] != old[k]]
-    if new["is_licensed"] and not old["is_licensed"] and not _is_checked(form, "confirm__is_licensed"):
-        return {}, [], f"Amateurfunk-Modus nicht gespeichert: Bitte die Warnung bestätigen. {HAM_WARNING}"
+    if new["is_licensed"] and not old["is_licensed"]:
+        if not _is_checked(form, "confirm__is_licensed"):
+            return {}, [], f"Amateurfunk-Modus nicht gespeichert: Bitte die Warnung bestätigen. {HAM_WARNING}"
+        if _form_get(form, "confirm_word_ham").strip().upper() != HAM_CONFIRM_WORD:
+            return {}, [], f"Amateurfunk-Modus nicht gespeichert: Bitte zur Bestätigung „{HAM_CONFIRM_WORD}“ eintippen."
     return new, changes, None
+
+
+def _update_owner_cache(node: Any, new: Mapping[str, Any]) -> None:
+    """Reflect a saved owner in the interface NodeDB until the firmware's NodeInfo arrives."""
+    iface = getattr(node, "iface", None)
+    by_num = getattr(iface, "nodesByNum", None)
+    if not isinstance(by_num, dict) or not callable(getattr(iface, "getMyNodeInfo", None)):
+        return
+    try:
+        num = int((iface.getMyNodeInfo() or {}).get("num") or 0)
+    except (TypeError, ValueError):
+        return
+    entry = by_num.get(num)
+    if not isinstance(entry, dict):
+        return
+    user = entry.setdefault("user", {})
+    user.update({"longName": new["long_name"], "shortName": new["short_name"],
+                 "isLicensed": new["is_licensed"], "isUnmessagable": new["is_unmessagable"]})
 
 
 def apply_owner(iface_id: int, form: Any) -> Tuple[bool, str]:
@@ -1036,6 +1199,7 @@ def apply_owner(iface_id: int, form: Any) -> Tuple[bool, str]:
         _send_admin(node, p)
     except Exception as e:
         return False, f"Benutzer konnte nicht gesetzt werden: {e!s}"
+    _update_owner_cache(node, new)
     return True, f"Benutzer gespeichert: {', '.join(changes)}."
 
 
@@ -1050,35 +1214,10 @@ def request_admin_string(node: Any, request_field: str, response_field: str,
     """Ask the node for a string-valued admin response with a timeout (lib helpers block forever)."""
     from meshtastic.protobuf import admin_pb2
 
-    done = threading.Event()
-    box: Dict[str, Any] = {}
-
-    def on_response(packet: Dict[str, Any]) -> None:
-        try:
-            decoded = packet.get("decoded") or {}
-            routing = decoded.get("routing") or {}
-            if routing.get("errorReason", "NONE") != "NONE":
-                box["error"] = str(routing.get("errorReason"))
-            else:
-                raw = (decoded.get("admin") or {}).get("raw")
-                if raw is not None:
-                    box["value"] = str(getattr(raw, response_field))
-        except Exception as e:
-            box["error"] = str(e)
-        finally:
-            done.set()
-
     p = admin_pb2.AdminMessage()
     setattr(p, request_field, True)
-    try:
-        _send_admin(node, p, wantResponse=True, onResponse=on_response)
-    except Exception as e:
-        return None, f"Anfrage fehlgeschlagen: {e!s}"
-    if not done.wait(timeout):
-        return None, "Keine Antwort der Node (Timeout)."
-    if "error" in box:
-        return None, f"Node meldet Fehler: {box['error']}"
-    return box.get("value", ""), None
+    val, err = admin_request(node, p, lambda raw: str(getattr(raw, response_field)), timeout)
+    return (None, err) if err else ((val or ""), None)
 
 
 def plan_canned_messages(form: Any) -> Tuple[Optional[str], Optional[str]]:
@@ -1344,12 +1483,15 @@ def _input_html(section: str, ref: FieldRef, meta: FieldMeta, value: Any) -> str
     if meta.widget in ("secret", "secret_b64"):
         state = "gesetzt" if value else "leer"
         clear_id = f"{fid}-clear"
+        clear = ""
+        if meta.widget == "secret":
+            clear = (f'<div class="form-check small"><input class="form-check-input" type="checkbox" id="{clear_id}" '
+                     f'name="{_esc(clear_name(path))}" value="1"><label class="form-check-label" for="{clear_id}">'
+                     "leeren</label></div>")
         return (
             f'{label}<input class="form-control form-control-sm font-monospace" type="password" id="{fid}" '
             f'name="{name}" autocomplete="new-password" placeholder="leer = unverändert ({state})">'
-            f'<div class="form-check small"><input class="form-check-input" type="checkbox" id="{clear_id}" '
-            f'name="{_esc(clear_name(path))}" value="1"><label class="form-check-label" for="{clear_id}">leeren</label></div>'
-            f"{help_html}{tech}"
+            f"{clear}{help_html}{tech}"
         )
 
     if meta.widget == "ip":
@@ -1394,21 +1536,27 @@ def _input_html(section: str, ref: FieldRef, meta: FieldMeta, value: Any) -> str
 
 
 def build_section_form_html(spec: TabSpec, current: Message, *, iface_id: int, reported: bool,
-                            excluded: bool) -> str:
+                            excluded: bool, refreshed: bool = False, refresh_err: Optional[str] = None) -> str:
     cols = []
     hidden = []
     shown_warnings: set = set()
     for ref in iter_section_fields(current.DESCRIPTOR):
         meta = field_meta(spec.section, ref.path)
         value = get_value(current, ref)
-        if not meta.readonly:
-            hidden.append(f'<input type="hidden" name="present" value="{_esc(ref.path)}">')
+        locked = is_locked(spec.section, ref, meta)
         block = _input_html(spec.section, ref, meta, value)
+        if locked:
+            for tag in ("<input ", "<select ", "<textarea "):
+                block = block.replace(tag, f"{tag}disabled ")
+            if not meta.readonly:
+                block += '<div class="form-text">Veraltetes Feld — nur Anzeige.</div>'
+        else:
+            hidden.append(f'<input type="hidden" name="present" value="{_esc(ref.path)}">')
         repeat = meta.danger in shown_warnings
-        if meta.danger and not meta.readonly:
+        if meta.danger and not locked:
             block += _danger_block(ref.path, meta, repeat=repeat)
             shown_warnings.add(meta.danger)
-        wide = meta.widget in ("bitmask", "b64list", "pins") or (bool(meta.danger) and not repeat)
+        wide = meta.widget in ("bitmask", "b64list", "pins") or (bool(meta.danger) and not repeat and not locked)
         cols.append(
             f'<div class="{"col-12 col-lg-6" if wide else "col-sm-6 col-lg-4"}">'
             f'<div class="p-2 rounded border border-secondary-subtle h-100">{block}</div></div>'
@@ -1422,6 +1570,16 @@ def build_section_form_html(spec: TabSpec, current: Message, *, iface_id: int, r
     if not reported:
         notes.append('<div class="alert alert-info small">Die Node hat diesen Bereich beim Verbinden nicht gemeldet '
                      "(ältere Firmware?). Angezeigt werden Standardwerte; Speichern schreibt sie auf das Gerät.</div>")
+    if refresh_err:
+        notes.append(f'<div class="alert alert-warning small">Neu laden von der Node fehlgeschlagen: '
+                     f"{_esc(refresh_err)}</div>")
+    source = "gerade von der Node gelesen" if refreshed else "Stand im Bot (beim Verbinden bzw. letzten Speichern gelesen)"
+    notes.append(
+        f'<p class="small text-muted">Werte: {source}. '
+        f'<a href="?iface={iface_id}&amp;tab={_esc(spec.key)}&amp;refresh=1">Neu von der Node laden</a> · '
+        "Vor dem Speichern wird der Bereich neu gelesen; hat er sich inzwischen geändert (App, CLI, Firmware), "
+        "wird nicht gespeichert.</p>"
+    )
     return f"""
 <h5 class="mb-2">{_esc(spec.label)}</h5>
 {"".join(notes)}
@@ -1429,6 +1587,7 @@ def build_section_form_html(spec: TabSpec, current: Message, *, iface_id: int, r
   <input type="hidden" name="action" value="save_section">
   <input type="hidden" name="iface_id" value="{iface_id}">
   <input type="hidden" name="section_tab" value="{_esc(spec.key)}">
+  <input type="hidden" name="baseline" value="{section_fingerprint(current)}">
   {"".join(hidden)}
   <div class="row g-2 mb-3">{"".join(cols)}</div>
   <button type="submit" class="btn btn-primary"
@@ -1477,6 +1636,9 @@ def build_user_tab_html(user: Mapping[str, Any], *, iface_id: int) -> str:
         <input class="form-check-input" type="checkbox" id="us-ham-confirm" name="confirm__is_licensed" value="1">
         <label class="form-check-label" for="us-ham-confirm">Warnung gelesen — Amateurfunk-Modus bewusst aktivieren</label>
       </div>
+      <label class="form-label small mb-0 mt-1" for="us-ham-word">Zum Einschalten „{HAM_CONFIRM_WORD}“ eintippen</label>
+      <input class="form-control form-control-sm" style="width:8rem" id="us-ham-word" name="confirm_word_ham"
+             autocomplete="off">
     </div>
   </div>
   <button type="submit" class="btn btn-primary"
@@ -1485,10 +1647,14 @@ def build_user_tab_html(user: Mapping[str, Any], *, iface_id: int) -> str:
 """
 
 
-def build_canned_messages_html(text: Optional[str], err: Optional[str], *, iface_id: int) -> str:
+def build_canned_messages_html(text: Optional[str], err: Optional[str], *, iface_id: int,
+                               read_hint: str = "") -> str:
     lines = "\n".join((text or "").split("|")) if text else ""
     status = (f'<div class="alert alert-warning small">Aktuelle Nachrichten nicht gelesen: {_esc(err)}</div>'
               if err else "")
+    if read_hint:
+        status += (f'<p class="small text-muted">Aktuelle Texte noch nicht gelesen: {read_hint}. '
+                   "Speichern ersetzt alle Texte auf der Node.</p>")
     return f"""
 <hr class="my-4">
 <h5 class="mb-2">Canned-Message-Texte</h5>
@@ -1504,9 +1670,11 @@ def build_canned_messages_html(text: Optional[str], err: Optional[str], *, iface
 """
 
 
-def build_ringtone_html(text: Optional[str], err: Optional[str], *, iface_id: int) -> str:
+def build_ringtone_html(text: Optional[str], err: Optional[str], *, iface_id: int, read_hint: str = "") -> str:
     status = (f'<div class="alert alert-warning small">Aktueller Klingelton nicht gelesen: {_esc(err)}</div>'
               if err else "")
+    if read_hint:
+        status += f'<p class="small text-muted">Aktueller Klingelton noch nicht gelesen: {read_hint}.</p>'
     return f"""
 <hr class="my-4">
 <h5 class="mb-2">Klingelton (RTTTL)</h5>
@@ -1585,32 +1753,82 @@ def build_admin_tab_html(node: Any, *, iface_id: int) -> str:
 """
 
 
-def build_config_tab_html(spec: TabSpec, node: Any, *, iface_id: int, read_strings: bool = True) -> str:
+def _read_link(iface_id: int, tab: str, what: str) -> str:
+    return (f'<a href="?iface={iface_id}&amp;tab={_esc(tab)}&amp;read=1">{_esc(what)} von der Node laden</a> '
+            "(dauert bis zu 3 s)")
+
+
+def build_config_tab_html(spec: TabSpec, node: Any, *, iface_id: int, read_strings: bool = False,
+                          refresh: bool = False) -> str:
     store = _section_store(node, spec.kind)
     if store is None:
         return '<p class="alert alert-warning">Konfiguration der Node wurde noch nicht gelesen.</p>'
+    refresh_err = refresh_section(node, spec.kind, spec.section) if refresh else None
     current = getattr(store, spec.section)
     try:
         reported = store.HasField(spec.section)
     except ValueError:
         reported = True
     body = build_section_form_html(spec, current, iface_id=iface_id, reported=reported,
-                                   excluded=spec.key in excluded_tab_keys(node))
+                                   excluded=spec.key in excluded_tab_keys(node),
+                                   refreshed=refresh and not refresh_err, refresh_err=refresh_err)
     if spec.section == "canned_message":
-        text, err = (request_admin_string(node, "get_canned_message_module_messages_request",
-                                          "get_canned_message_module_messages_response")
-                     if read_strings else (None, "nicht abgefragt"))
-        body += build_canned_messages_html(text, err, iface_id=iface_id)
+        if read_strings:
+            text, err = request_admin_string(node, "get_canned_message_module_messages_request",
+                                             "get_canned_message_module_messages_response")
+        else:
+            text, err = None, None
+        body += build_canned_messages_html(text, err, iface_id=iface_id,
+                                           read_hint="" if read_strings else _read_link(iface_id, spec.key, "Texte"))
     if spec.section == "external_notification":
-        text, err = (request_admin_string(node, "get_ringtone_request", "get_ringtone_response")
-                     if read_strings else (None, "nicht abgefragt"))
-        body += build_ringtone_html(text, err, iface_id=iface_id)
+        if read_strings:
+            text, err = request_admin_string(node, "get_ringtone_request", "get_ringtone_response")
+        else:
+            text, err = None, None
+        body += build_ringtone_html(text, err, iface_id=iface_id,
+                                    read_hint="" if read_strings else _read_link(iface_id, spec.key, "Klingelton"))
     return body
 
 
+# --- CSRF (per-session token for every Node Settings form) ---
+
+CSRF_SESSION_KEY = "node_settings_csrf"
+CSRF_FIELD = "csrf_token"
+_FORM_POST_RE = re.compile(r'(<form\b[^>]*\bmethod="post"[^>]*>)', re.IGNORECASE)
+
+
+def ensure_csrf_token(session: Any) -> str:
+    token = session.get(CSRF_SESSION_KEY)
+    if not isinstance(token, str) or len(token) < 32:
+        token = secrets.token_urlsafe(32)
+        session[CSRF_SESSION_KEY] = token
+    return token
+
+
+def csrf_ok(session: Any, form: Any) -> bool:
+    expected = session.get(CSRF_SESSION_KEY)
+    sent = _form_get(form, CSRF_FIELD)
+    return isinstance(expected, str) and bool(sent) and hmac.compare_digest(expected, sent)
+
+
+def inject_csrf(html_text: str, token: str) -> str:
+    field = f'<input type="hidden" name="{CSRF_FIELD}" value="{_esc(token)}">'
+    return _FORM_POST_RE.sub(lambda m: m.group(1) + field, html_text)
+
+
 def build_node_settings_tab_page(tab_key: Optional[str], *, iface_id: int, ifaces: Sequence[int],
-                                 base_url: str) -> str:
-    """Full Node Settings page body: interface selector, Companion-style sub-tabs, active tab content."""
+                                 base_url: str, csrf_token: str, refresh: bool = False,
+                                 read_strings: bool = False) -> str:
+    """Full Node Settings page body; every POST form carries the session CSRF token."""
+    return inject_csrf(
+        _build_tab_page(tab_key, iface_id=iface_id, ifaces=ifaces, base_url=base_url, refresh=refresh,
+                        read_strings=read_strings),
+        csrf_token,
+    )
+
+
+def _build_tab_page(tab_key: Optional[str], *, iface_id: int, ifaces: Sequence[int], base_url: str,
+                    refresh: bool, read_strings: bool) -> str:
     from modules import admin_web_ops as ops
 
     spec = tab_by_key(tab_key)
@@ -1637,14 +1855,18 @@ def build_node_settings_tab_page(tab_key: Optional[str], *, iface_id: int, iface
         return nav + build_user_tab_html(_my_user(node), iface_id=iface_id)
     if spec.key == "admin":
         return nav + build_admin_tab_html(node, iface_id=iface_id)
-    return nav + build_config_tab_html(spec, node, iface_id=iface_id)
+    return nav + build_config_tab_html(spec, node, iface_id=iface_id, refresh=refresh, read_strings=read_strings)
 
 
-def dispatch_post(iface_id: int, form: Any) -> Tuple[bool, str]:
-    """Route a Node Settings POST by its ``action`` field."""
+def dispatch_post(iface_id: int, form: Any, session: Any) -> Tuple[bool, str]:
+    """Route a Node Settings POST by its ``action`` field after the CSRF check."""
     from modules import admin_web_ops as ops
 
+    if not csrf_ok(session, form):
+        return False, "Sicherheits-Token fehlt oder ist abgelaufen — bitte die Seite neu laden und erneut speichern."
     action = _form_get(form, "action").strip()
+    if action == "save_overview":
+        return ops.apply_local_node_settings(iface_id, form)
     if action == "save_channel":
         return ops.apply_local_channel_settings(iface_id, form)
     if action == "save_section":
@@ -1657,4 +1879,4 @@ def dispatch_post(iface_id: int, form: Any) -> Tuple[bool, str]:
         return apply_ringtone(iface_id, form)
     if action == "admin_action":
         return apply_admin_action(iface_id, form)
-    return ops.apply_local_node_settings(iface_id, form)
+    return False, "Unbekannte Aktion — nichts gespeichert."

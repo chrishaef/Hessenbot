@@ -34,6 +34,8 @@ class _FormSerializer(HTMLParser):
             self._cur = []
         elif self._cur is None:
             return
+        elif tag in ("input", "select", "textarea") and "disabled" in attrs:
+            return
         elif tag == "input" and "name" in attrs and "readonly" not in attrs:
             kind = attrs.get("type", "text")
             if kind == "checkbox":
@@ -84,9 +86,10 @@ class FakeIface:
     def __init__(self) -> None:
         self.metadata = None
         self.user: Dict[str, Any] = {"longName": "Hessenbot", "shortName": "HB", "id": "!00000001"}
+        self.nodesByNum: Dict[int, Dict[str, Any]] = {1: {"num": 1, "user": self.user}}
 
     def getMyNodeInfo(self) -> Dict[str, Any]:
-        return {"num": 1, "user": self.user}
+        return self.nodesByNum[1]
 
 
 class FakeNode:
@@ -96,6 +99,9 @@ class FakeNode:
         self.iface = FakeIface()
         self.sent: List[admin_pb2.AdminMessage] = []
         self.responder = None
+        self.answer_config_requests = True
+        # Simulated device state that differs from the bot cache: {(kind, section): message}
+        self.device_override: Dict[Tuple[str, str], Any] = {}
         self.localConfig.lora.region = config_pb2.Config.LoRaConfig.RegionCode.Value("EU_868")
         self.localConfig.lora.use_preset = True
         self.localConfig.lora.tx_enabled = True
@@ -106,9 +112,25 @@ class FakeNode:
         pass
 
     def _sendAdmin(self, p, wantResponse=True, onResponse=None, adminIndex=0):
+        variant = p.WhichOneof("payload_variant")
+        if variant in ("get_config_request", "get_module_config_request"):
+            if onResponse is not None and self.answer_config_requests:
+                onResponse(self._config_response(variant, getattr(p, variant)))
+            return
         self.sent.append(p)
         if onResponse is not None and self.responder is not None:
             onResponse(self.responder(p))
+
+    def _config_response(self, variant: str, num: int) -> Dict[str, Any]:
+        kind = "config" if variant == "get_config_request" else "module"
+        section = next(s for s in anc._section_names(kind) if anc.section_request_enum(kind, s) == num)
+        raw = admin_pb2.AdminMessage()
+        target = raw.get_config_response if kind == "config" else raw.get_module_config_response
+        source = self.device_override.get((kind, section))
+        if source is None:
+            source = getattr(self.localConfig if kind == "config" else self.moduleConfig, section)
+        getattr(target, section).CopyFrom(source)
+        return {"decoded": {"admin": {"raw": raw}}}
 
 
 class NodeConfigTestBase(unittest.TestCase):
@@ -217,6 +239,16 @@ class LoraValidationTests(NodeConfigTestBase):
         self.assertFalse(ok)
         self.assertIn("0 und 30", msg)
         self.assertEqual(self.node.sent, [])
+
+    def test_tx_power_zero_means_region_max_and_needs_confirm(self) -> None:
+        form = with_values(self.section_form("lora"), f__tx_power=0)
+        ok, msg = anc.apply_section(1, "lora", form)
+        self.assertFalse(ok)
+        self.assertIn("27 dBm", msg)
+        self.assertEqual(self.node.sent, [])
+        ok, msg = anc.apply_section(1, "lora", with_values(form, confirm__tx_power="1"))
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.node.sent[0].set_config.lora.tx_power, 0)
 
     def test_tx_power_low_value_needs_no_confirm(self) -> None:
         form = with_values(self.section_form("lora"), **{"f__tx_power": 10})
@@ -327,6 +359,36 @@ class OtherSectionTests(NodeConfigTestBase):
         self.assertTrue(sec.is_managed)
         self.assertEqual(list(sec.admin_key), [b"\x02" * 32])
 
+    def test_new_private_key_clears_public_key(self) -> None:
+        self.node.localConfig.security.private_key = b"\x01" * 32
+        self.node.localConfig.security.public_key = b"\x02" * 32
+        new_key = base64.b64encode(b"\x03" * 32).decode()
+        form = with_values(self.section_form("security"), f__private_key=new_key)
+        self.assertFalse(anc.apply_section(1, "security", form)[0])
+        ok, msg = anc.apply_section(1, "security", with_values(form, confirm__private_key="1"))
+        self.assertTrue(ok, msg)
+        sec = self.node.sent[0].set_config.security
+        self.assertEqual(sec.private_key, b"\x03" * 32)
+        self.assertEqual(sec.public_key, b"")
+
+    def test_unchanged_security_keeps_keypair(self) -> None:
+        self.node.localConfig.security.private_key = b"\x01" * 32
+        self.node.localConfig.security.public_key = b"\x02" * 32
+        form = with_values(self.section_form("security"), f__debug_log_api_enabled="1")
+        ok, msg = anc.apply_section(1, "security", form)
+        self.assertTrue(ok, msg)
+        sec = self.node.sent[0].set_config.security
+        self.assertEqual((sec.private_key, sec.public_key), (b"\x01" * 32, b"\x02" * 32))
+
+    def test_private_key_has_no_clear_option(self) -> None:
+        self.node.localConfig.security.private_key = b"\x01" * 32
+        html_text = anc.build_config_tab_html(anc.tab_by_key("security"), self.node, iface_id=1)
+        self.assertNotIn('name="clear__private_key"', html_text)
+        form = with_values(self.section_form("security"), clear__private_key="1")
+        ok, msg = anc.apply_section(1, "security", form)
+        self.assertTrue(ok, msg)
+        self.assertIn("keine Änderungen", msg)
+
     def test_admin_key_length_checked(self) -> None:
         form = with_values(self.section_form("security"), f__admin_key=base64.b64encode(b"x" * 10).decode(),
                            confirm__admin_key="1")
@@ -391,6 +453,168 @@ class OtherSectionTests(NodeConfigTestBase):
     def test_special_tab_not_accepted_as_section(self) -> None:
         self.assertFalse(anc.apply_section(1, "admin", MultiDict())[0])
 
+    def test_role_gate_covers_sleeping_and_hidden_roles(self) -> None:
+        role = config_pb2.Config.DeviceConfig.Role
+        for name in ("ROUTER", "ROUTER_LATE", "TRACKER", "SENSOR", "TAK_TRACKER", "CLIENT_HIDDEN", "LOST_AND_FOUND"):
+            self.assertTrue(anc.role_change_needs_confirm(0, role.Value(name)), name)
+        for name in ("CLIENT", "CLIENT_MUTE", "TAK", "CLIENT_BASE"):
+            self.assertFalse(anc.role_change_needs_confirm(2, role.Value(name)), name)
+        form = with_values(self.section_form("device"), f__role=role.Value("TRACKER"))
+        self.assertFalse(anc.apply_section(1, "device", form)[0])
+
+    def test_deprecated_fields_are_read_only(self) -> None:
+        html_text = anc.build_config_tab_html(anc.tab_by_key("device"), self.node, iface_id=1)
+        self.assertNotIn('name="present" value="is_managed"', html_text)
+        self.assertIn("nur Anzeige", html_text)
+        form = with_values(self.section_form("device"), f__is_managed="1", confirm__is_managed="1")
+        form.add("present", "is_managed")
+        ok, msg = anc.apply_section(1, "device", form)
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.node.sent, [])
+
+    def test_canned_message_enabled_stays_editable(self) -> None:
+        form = with_values(self.section_form("canned_message"), f__enabled="1")
+        ok, msg = anc.apply_section(1, "canned_message", form)
+        self.assertTrue(ok, msg)
+        self.assertTrue(self.node.sent[0].set_module_config.canned_message.enabled)
+
+    def test_mqtt_password_not_rendered(self) -> None:
+        self.node.moduleConfig.mqtt.password = "mqtt-geheim"
+        html_text = anc.build_config_tab_html(anc.tab_by_key("mqtt"), self.node, iface_id=1)
+        self.assertNotIn("mqtt-geheim", html_text)
+
+
+class StaleCacheTests(NodeConfigTestBase):
+    def test_section_reread_before_write_rejects_external_change(self) -> None:
+        form = with_values(self.section_form("lora"), f__hop_limit=5)
+        changed = config_pb2.Config.LoRaConfig()
+        changed.CopyFrom(self.node.localConfig.lora)
+        changed.tx_power = 20
+        self.node.device_override[("config", "lora")] = changed
+        ok, msg = anc.apply_section(1, "lora", form)
+        self.assertFalse(ok)
+        self.assertIn("seit dem Laden", msg)
+        self.assertEqual(self.node.sent, [])
+        self.assertEqual(self.node.localConfig.lora.tx_power, 20)
+        ok, msg = anc.apply_section(1, "lora", with_values(self.section_form("lora"), f__hop_limit=5))
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.node.sent[0].set_config.lora.tx_power, 20)
+        self.assertEqual(self.node.sent[0].set_config.lora.hop_limit, 5)
+
+    def test_unanswered_reread_falls_back_with_note(self) -> None:
+        self.node.answer_config_requests = False
+        form = with_values(self.section_form("lora"), f__hop_limit=5)
+        with mock.patch.object(anc, "REFRESH_TIMEOUT_S", 0.05):
+            ok, msg = anc.apply_section(1, "lora", form)
+        self.assertTrue(ok, msg)
+        self.assertIn("Abgleich mit der Node", msg)
+
+    def test_refresh_link_reads_device_on_get(self) -> None:
+        changed = config_pb2.Config.LoRaConfig()
+        changed.CopyFrom(self.node.localConfig.lora)
+        changed.hop_limit = 6
+        self.node.device_override[("config", "lora")] = changed
+        html_text = anc.build_config_tab_html(anc.tab_by_key("lora"), self.node, iface_id=1, refresh=True)
+        self.assertIn("gerade von der Node gelesen", html_text)
+        self.assertEqual(self.node.localConfig.lora.hop_limit, 6)
+
+    def test_request_enum_for_every_section(self) -> None:
+        for kind in ("config", "module"):
+            for section in anc._section_names(kind):
+                self.assertIsNotNone(anc.section_request_enum(kind, section), section)
+
+
+class CsrfAndDispatchTests(NodeConfigTestBase):
+    def test_dispatch_rejects_missing_or_wrong_token(self) -> None:
+        session: Dict[str, Any] = {}
+        token = anc.ensure_csrf_token(session)
+        form = MultiDict({"action": "admin_action", "admin_op": "factory_reset_device",
+                          "confirm_admin": "1", "confirm_word": "RESET"})
+        ok, msg = anc.dispatch_post(1, form, session)
+        self.assertFalse(ok)
+        self.assertIn("Sicherheits-Token", msg)
+        form["csrf_token"] = "x" * len(token)
+        self.assertFalse(anc.dispatch_post(1, form, session)[0])
+        self.assertFalse(anc.dispatch_post(1, form, {})[0])
+        self.assertEqual(self.node.sent, [])
+        form["csrf_token"] = token
+        self.assertTrue(anc.dispatch_post(1, form, session)[0])
+        self.assertEqual(self.node.sent[0].factory_reset_device, 1)
+
+    def test_unknown_action_rejected(self) -> None:
+        session: Dict[str, Any] = {}
+        token = anc.ensure_csrf_token(session)
+        for action in ("", "bogus"):
+            ok, msg = anc.dispatch_post(1, MultiDict({"action": action, "csrf_token": token}), session)
+            self.assertFalse(ok)
+            self.assertIn("Unbekannte Aktion", msg)
+
+    def test_token_injected_into_every_post_form(self) -> None:
+        html_text = anc.inject_csrf(anc.build_admin_tab_html(self.node, iface_id=1), "tok123")
+        self.assertEqual(html_text.count('<form method="post"'), html_text.count('name="csrf_token" value="tok123"'))
+        self.assertGreater(html_text.count('name="csrf_token"'), 0)
+
+
+class LibraryContractTests(unittest.TestCase):
+    def test_send_admin_signature(self) -> None:
+        import inspect
+
+        from meshtastic.node import Node
+
+        params = inspect.signature(Node._sendAdmin).parameters
+        for name in ("p", "wantResponse", "onResponse", "adminIndex"):
+            self.assertIn(name, params)
+
+
+class OverviewOwnerTests(unittest.TestCase):
+    """Overview form must not reset owner flags or bypass the role gate."""
+
+    def setUp(self) -> None:
+        from modules import admin_web_ops as ops
+
+        self.ops = ops
+        self.node = mock.Mock()
+        self.node.localConfig = localonly_pb2.LocalConfig()
+        self.node.localConfig.position.fixed_position = True
+        self.owner_calls: List[Dict[str, Any]] = []
+
+        def set_owner(long_name=None, short_name=None, is_licensed=False, is_unmessagable=None):
+            self.owner_calls.append({"long_name": long_name, "short_name": short_name,
+                                     "is_licensed": is_licensed, "is_unmessagable": is_unmessagable})
+
+        self.node.setOwner = set_owner
+        settings = dict(_OVERVIEW_SETTINGS, is_licensed=True, is_unmessagable=True, latitude=50.1,
+                        longitude=8.6, altitude_m=120)
+        for target, value in (
+            ("_local_node_for_iface", lambda iface_id: (self.node, None)),
+            ("fetch_local_node_settings", lambda iface_id: (None, dict(settings))),
+        ):
+            p = mock.patch.object(ops, target, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _form(self, **extra: str) -> Dict[str, str]:
+        form = {"action": "save_overview", "short_name": "NEU", "long_name": "Neuer Name", "role": "0",
+                "rebroadcast_mode": "0", "node_info_broadcast_secs": "10800", "position_broadcast_secs": "900",
+                "latitude": "50.1", "longitude": "8.6", "altitude_m": "120"}
+        form.update(extra)
+        return form
+
+    def test_rename_keeps_licensed_and_unmessagable(self) -> None:
+        ok, msg = self.ops.apply_local_node_settings(1, self._form())
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.owner_calls[0]["is_licensed"], True)
+        self.assertEqual(self.owner_calls[0]["is_unmessagable"], True)
+
+    def test_router_role_needs_confirm(self) -> None:
+        ok, msg = self.ops.apply_local_node_settings(1, self._form(role="2"))
+        self.assertFalse(ok)
+        self.assertIn("Rolle", msg)
+        self.assertEqual(self.owner_calls, [])
+        ok, msg = self.ops.apply_local_node_settings(1, self._form(role="2", confirm__role="1"))
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.node.localConfig.device.role, 2)
+
 
 class OwnerTests(NodeConfigTestBase):
     def test_owner_render_roundtrip_noop(self) -> None:
@@ -417,8 +641,22 @@ class OwnerTests(NodeConfigTestBase):
         self.assertFalse(ok)
         self.assertIn("Amateurfunk", msg)
         form["confirm__is_licensed"] = "1"
+        ok, msg = anc.apply_owner(1, form)
+        self.assertFalse(ok)
+        self.assertIn("„HAM“", msg)
+        self.assertEqual(self.node.sent, [])
+        form["confirm_word_ham"] = "ham"
         self.assertTrue(anc.apply_owner(1, form)[0])
         self.assertTrue(self.node.sent[0].set_owner.is_licensed)
+
+    def test_ham_warning_lists_firmware_side_effects(self) -> None:
+        for phrase in ("PSK aller Kanäle", "Admin-Kanal", "Schlüsselpaar", "Regionslimit"):
+            self.assertIn(phrase, anc.HAM_WARNING)
+
+    def test_owner_save_updates_local_cache(self) -> None:
+        ok, _ = anc.apply_owner(1, MultiDict({"long_name": "Neu", "short_name": "NEU"}))
+        self.assertTrue(ok)
+        self.assertEqual(self.node.iface.nodesByNum[1]["user"]["longName"], "Neu")
 
 
 class StringsAndAdminTests(NodeConfigTestBase):
@@ -534,7 +772,9 @@ _OVERVIEW_SETTINGS: Dict[str, Any] = {
     "rebroadcast_mode": 0, "rebroadcast_name": "ALL", "node_info_broadcast_secs": 10800,
     "position_broadcast_secs": 900, "fixed_position": True, "latitude": 50.1, "longitude": 8.6,
     "altitude_m": 120, "config_latitude": 50.1, "config_longitude": 8.6, "lora_region": "EU_868",
-    "lora_modem_preset": "SHORT_SLOW", "lora_channel_num": 0,
+    "lora_modem_preset": "SHORT_SLOW", "lora_channel_num": 0, "is_unmessagable": False,
+    # Keys added by PR #18 (TX power in Overview); harmless before it lands.
+    "lora_tx_power": 14, "lora_tx_enabled": True,
 }
 _CHANNELS: List[Dict[str, Any]] = [{
     "index": 0, "name": "", "name_display": "ShortSlow", "label": "ShortSlow", "role": 1, "role_name": "PRIMARY",
@@ -560,10 +800,31 @@ class RouteTests(NodeConfigTestBase):
             p = mock.patch.object(ops, target, value)
             p.start()
             self.addCleanup(p.stop)
+        self.app = app
         self.client = app.test_client()
+        self.token = "t" * 43
         with self.client.session_transaction() as sess:
             sess["_user_id"] = "admin"
             sess["_fresh"] = True
+            sess[anc.CSRF_SESSION_KEY] = self.token
+
+    def test_session_cookie_samesite(self) -> None:
+        self.assertEqual(self.app.config["SESSION_COOKIE_SAMESITE"], "Lax")
+        self.assertEqual(self.app.config["REMEMBER_COOKIE_SAMESITE"], "Lax")
+
+    def test_rendered_forms_carry_session_token(self) -> None:
+        for tab in ("overview", "channels", "lora", "user", "admin"):
+            body = self.client.get(f"/node-settings?iface=1&tab={tab}").get_data(as_text=True)
+            self.assertGreater(body.count(f'name="csrf_token" value="{self.token}"'), 0, tab)
+            self.assertEqual(body.count('<form method="post"'), body.count('name="csrf_token"'), tab)
+
+    def test_post_without_token_is_rejected(self) -> None:
+        resp = self.client.post("/node-settings?iface=1&tab=admin", data={
+            "action": "admin_action", "iface_id": "1", "admin_op": "factory_reset_device",
+            "confirm_admin": "1", "confirm_word": "RESET",
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.node.sent, [])
 
     def test_every_tab_renders(self) -> None:
         with mock.patch.object(anc, "request_admin_string", lambda *a, **k: ("A|B", None)):
@@ -587,7 +848,7 @@ class RouteTests(NodeConfigTestBase):
     def test_post_section_redirects_back_to_tab(self) -> None:
         resp = self.client.post("/node-settings?iface=1&tab=lora", data={
             "action": "save_section", "iface_id": "1", "section_tab": "lora",
-            "present": "hop_limit", "f__hop_limit": "5",
+            "present": "hop_limit", "f__hop_limit": "5", "csrf_token": self.token,
         })
         self.assertEqual(resp.status_code, 302)
         self.assertIn("tab=lora", resp.headers["Location"])
