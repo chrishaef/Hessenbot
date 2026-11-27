@@ -101,6 +101,29 @@ Options (`sudo bash /opt/Hessenbot/script/install/wizard.sh ...`):
 
 Log: `/var/log/hessenbot-install.log` (0600, PSKs and passwords masked). Notes: `/opt/Hessenbot/install_notes.txt`.
 
+### Remote clients (Companion app, MeshHessen client, MeshMonitor) -> meshtasticd :4403
+
+**Security first.** The meshtasticd TCP API (`4403`) has **no authentication and no TLS**. Anyone who can reach the port can read and change the node (channel keys, config, factory reset, TX settings). Never forward it through your router and never expose it to the internet. Use LAN and/or Tailscale only.
+
+Facts (from the meshtasticd source):
+
+- meshtasticd already listens on `0.0.0.0:4403` (IPv4 only). There is no bind-address option, so there is nothing to "fix" in `config.yaml`; the only control is a firewall. The installer does not configure a firewall, and Raspberry Pi OS ships none, so on a fresh install `4403` is reachable from your whole LAN (and over Tailscale). The Hessenbot bot itself connects via `localhost` and is unaffected by firewall rules.
+- Optional: `General: APIPort: <1024-65535>` in `/etc/meshtasticd/config.d/*.yaml` moves the port (then use `hostname = localhost:<port>` in `config.ini`). It is not a security measure.
+- **meshtasticd serves exactly one TCP API client at a time.** A new connection force-closes the previous one. `mesh_bot` reconnects automatically (watchdog, about 20 to 35 s), so a Companion/MeshMonitor session and the bot will keep kicking each other off. The Meshtastic web UI of meshtasticd (`https://<pi>/`, port 443 by default) is a separate path and not affected by this single-client rule.
+
+Restrict the port with UFW (helper, never opens to the world):
+
+```sh
+sudo bash /opt/Hessenbot/script/install/remote-access.sh status
+sudo bash /opt/Hessenbot/script/install/remote-access.sh lan --enable          # own subnet, auto-detected (or: lan 192.168.1.0/24)
+sudo bash /opt/Hessenbot/script/install/remote-access.sh tailscale              # tailscale0 only
+sudo bash /opt/Hessenbot/script/install/remote-access.sh close                  # remove these rules again
+```
+
+`--enable` switches UFW on if it is inactive and allows SSH (22/tcp) first. With UFW active everything else incoming is denied, so also allow what you use (for example the web admin: `sudo ufw allow from 192.168.1.0/24 to any port 5000 proto tcp`). Manual equivalent: `sudo ufw allow from 192.168.1.0/24 to any port 4403 proto tcp` or `sudo ufw allow in on tailscale0 to any port 4403 proto tcp`; verify with `ss -ltn '( sport = :4403 )'` and from the client (`meshtastic --host <pi-ip> --info`).
+
+Running several clients at once: native multi-connect is not enough. Either stop the bot while you configure (`sudo systemctl stop mesh_bot`, then `start`), or put a multiplexer in front, for example the Virtual Node of MeshMonitor (MeshMonitor is the only direct client on `4403`; Companion/MeshHessen connect to MeshMonitor's virtual-node port). Virtual nodes block admin messages by default, so settings changes then go through MeshMonitor or a direct, temporary connection.
+
 ---
 
 ## Manual Install

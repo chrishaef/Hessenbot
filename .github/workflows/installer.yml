@@ -28,7 +28,7 @@ jobs:
       - name: Shellcheck
         run: |
           shellcheck -x -P SCRIPTDIR bootstrap.sh script/install/wizard.sh \
-            script/install/lib/*.sh script/install/wait-for-port.sh etc/install_service.sh
+            script/install/lib/*.sh script/install/wait-for-port.sh script/install/remote-access.sh etc/install_service.sh
           shellcheck -S error install.sh
 
   dry-run:
