@@ -49,7 +49,6 @@ for p in runtime_writable_paths_from_config('${REPO_ROOT}/config.ini'):
 if [ "${#RUNTIME_FILES[@]}" -eq 0 ]; then
   RUNTIME_FILES=(
     "$REPO_ROOT/data/bbs_ban_list.txt"
-    "$REPO_ROOT/data/node_favorites.json"
     "$REPO_ROOT/data/alert.txt"
     "$REPO_ROOT/data/news.txt"
     "$REPO_ROOT/alert.txt"

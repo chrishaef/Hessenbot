@@ -11,44 +11,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from modules import admin_web_ops as ops
 from modules import link_status as ls
-from modules import node_favorites as nf
 
 
 class FavoritesTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "data", "node_favorites.json")
-        patcher = mock.patch.object(nf, "_path", return_value=self.path)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.addCleanup(self.tmp.cleanup)
-        nf.reset_for_tests()
-
-    def test_roundtrip_persists_across_reload(self):
-        self.assertTrue(nf.set_favorite(123, True))
-        self.assertTrue(nf.set_favorite(456, True))
-        self.assertTrue(nf.set_favorite(123, False))
-        nf.reset_for_tests()
-        self.assertEqual(nf.list_favorites(), [456])
-        self.assertTrue(nf.is_favorite(456))
-        with open(self.path, encoding="utf-8") as f:
-            self.assertEqual(json.load(f), {"favorites": [456]})
-
-    def test_invalid_numbers_rejected(self):
-        self.assertFalse(nf.set_favorite(0, True))
-        self.assertFalse(nf.set_favorite("abc", True))
-        self.assertEqual(nf.list_favorites(), [])
-
-    def test_empty_and_corrupt_file_are_tolerated(self):
-        os.makedirs(os.path.dirname(self.path))
-        open(self.path, "w").close()
-        self.assertEqual(nf.list_favorites(), [])
-        nf.reset_for_tests()
-        with open(self.path, "w", encoding="utf-8") as f:
-            f.write("{not json")
-        self.assertEqual(nf.list_favorites(), [])
-        self.assertTrue(nf.set_favorite(7, True))
-
     def test_sort_favorites_first_then_recent(self):
         rows = [
             {"num": 1, "favorite": False, "lastHeard_raw": 300},
@@ -58,6 +23,72 @@ class FavoritesTests(unittest.TestCase):
         ]
         order = [r["num"] for r in ops.sort_rows_favorites_first(rows)]
         self.assertEqual(order, [3, 2, 4, 1])
+
+
+def _fake_sm(nodes, local=None):
+    import types
+
+    by_num = {n["num"]: n for n in nodes.values()}
+    iface = types.SimpleNamespace(nodes=nodes, nodesByNum=by_num)
+    local = local or mock.MagicMock()
+    iface.getNode = mock.MagicMock(return_value=local)
+    sm = types.SimpleNamespace(interface1=iface, interface1_enabled=True, myNodeNum1=999)
+    return sm, iface, local
+
+
+class RadioFavoriteTests(unittest.TestCase):
+    def setUp(self):
+        self.nodes = {
+            "a": {"num": 100, "user": {"shortName": "AA"}, "lastHeard": 50},
+            "b": {"num": 200, "user": {"shortName": "BB"}, "lastHeard": 60, "isFavorite": True},
+        }
+        self.sm, self.iface, self.local = _fake_sm(self.nodes)
+
+    def _call(self, num, value):
+        with mock.patch.object(ops, "_system_mod", return_value=self.sm):
+            return ops.set_node_favorite_on_radio(1, num, value)
+
+    def test_set_and_clear_use_admin_calls_and_update_cache(self):
+        ok, _ = self._call(100, True)
+        self.assertTrue(ok)
+        self.local.setFavorite.assert_called_once_with(100)
+        self.assertTrue(self.nodes["a"]["isFavorite"])
+        ok, _ = self._call(200, False)
+        self.assertTrue(ok)
+        self.local.removeFavorite.assert_called_once_with(200)
+        self.assertNotIn("isFavorite", self.nodes["b"])
+        self.assertNotIn("isFavorite", self.iface.nodesByNum[200])
+
+    def test_self_node_rejected(self):
+        ok, _ = self._call(999, True)
+        self.assertFalse(ok)
+        self.local.setFavorite.assert_not_called()
+
+    def test_radio_error_keeps_cache(self):
+        self.local.setFavorite.side_effect = RuntimeError("boom")
+        ok, msg = self._call(100, True)
+        self.assertFalse(ok)
+        self.assertIn("boom", msg)
+        self.assertNotIn("isFavorite", self.nodes["a"])
+
+    def test_no_interface(self):
+        self.sm.interface1 = None
+        ok, _ = self._call(100, True)
+        self.assertFalse(ok)
+
+    def test_role_hint(self):
+        import types
+
+        def iface(role, loaded=True):
+            cfg = types.SimpleNamespace(
+                HasField=lambda name: loaded, device=types.SimpleNamespace(role=role)
+            )
+            return types.SimpleNamespace(localNode=types.SimpleNamespace(localConfig=cfg))
+
+        self.assertIsNone(ops.local_device_role_hint(iface(12)))
+        self.assertIn("CLIENT_BASE", ops.local_device_role_hint(iface(0)))
+        self.assertIsNone(ops.local_device_role_hint(iface(0, loaded=False)))
+        self.assertIsNone(ops.local_device_role_hint(None))
 
 
 class TransportTests(unittest.TestCase):
@@ -120,7 +151,7 @@ class RowsTests(unittest.TestCase):
 
         nodes = {
             "a": {"num": 100, "user": {"shortName": "AA", "longName": "Alpha"}, "lastHeard": 50, "hopsAway": 2},
-            "b": {"num": 200, "user": {"shortName": "BB", "longName": "Beta"}, "lastHeard": 60, "hopsAway": 0},
+            "b": {"num": 200, "user": {"shortName": "BB", "longName": "Beta"}, "lastHeard": 60, "hopsAway": 0, "isFavorite": True},
             "c": {"num": 300, "user": {"shortName": "CC", "longName": "Gamma"}},
         }
         sm = types.SimpleNamespace(
@@ -130,7 +161,6 @@ class RowsTests(unittest.TestCase):
         )
         ls.record_rx({"from": 100, "transport_mechanism": "TRANSPORT_MQTT"}, 1, now=10.0)
         with mock.patch.object(ops, "_system_mod", return_value=sm), \
-                mock.patch.object(nf, "favorites_set", return_value={200}), \
                 mock.patch.object(ops, "_map_position_for_node", return_value=(False, None, None)), \
                 mock.patch.object(ops, "_enrich_blitzwatch_rows"):
             err, rows = ops.list_node_rows(1)
@@ -153,18 +183,10 @@ class RowsTests(unittest.TestCase):
 class FavoriteRouteTests(unittest.TestCase):
     def setUp(self):
         import re
-        import types
 
         self.re = re
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        path = os.path.join(self.tmp.name, "node_favorites.json")
-        for p in (
-            mock.patch.object(nf, "_path", return_value=path),
-        ):
-            p.start()
-            self.addCleanup(p.stop)
-        nf.reset_for_tests()
         ls.reset_for_tests()
         from modules.admin_web import create_app
 
@@ -183,11 +205,9 @@ class FavoriteRouteTests(unittest.TestCase):
             "a": {"num": 100, "user": {"shortName": "AA", "longName": "Alpha"}, "lastHeard": 50, "hopsAway": 1},
             "b": {"num": 200, "user": {"shortName": "BB", "longName": "Beta"}, "lastHeard": 60},
         }
-        sm = types.SimpleNamespace(
-            interface1=types.SimpleNamespace(nodes=nodes), interface1_enabled=True, myNodeNum1=999
-        )
+        self.sm, self.iface, self.local = _fake_sm(nodes)
         for p in (
-            mock.patch.object(ops, "_system_mod", return_value=sm),
+            mock.patch.object(ops, "_system_mod", return_value=self.sm),
             mock.patch.object(ops, "_map_position_for_node", return_value=(False, None, None)),
             mock.patch.object(ops, "_enrich_blitzwatch_rows"),
         ):
@@ -200,36 +220,36 @@ class FavoriteRouteTests(unittest.TestCase):
         self.assertIsNotNone(m)
         return m.group(1), html_text
 
-    def test_toggle_requires_csrf_and_persists(self):
-        resp = self.client.post("/nodes/favorite", data={"iface_id": "1", "node_num": "100", "favorite": "1"})
+    def test_toggle_requires_csrf_and_writes_to_node(self):
+        resp = self.client.post("/nodes/favorite", data={"iface_id": "1", "node_num": "200", "favorite": "1"})
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(nf.list_favorites(), [])
+        self.local.setFavorite.assert_not_called()
 
         token, _ = self._token()
         resp = self.client.post(
             "/nodes/favorite",
-            data={"iface_id": "1", "node_num": "100", "favorite": "1", "csrf_token": token},
+            data={"iface_id": "1", "node_num": "200", "favorite": "1", "csrf_token": token},
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertTrue(resp.headers["Location"].endswith("#node-100"))
-        self.assertEqual(nf.list_favorites(), [100])
+        self.assertTrue(resp.headers["Location"].endswith("#node-200"))
+        self.local.setFavorite.assert_called_once_with(200)
 
         _, page = self._token()
-        self.assertLess(page.index('id="node-100"'), page.index('id="node-200"'))
+        self.assertLess(page.index('id="node-200"'), page.index('id="node-100"'))
         self.assertIn("Hops", page)
 
         self.client.post(
             "/nodes/favorite",
-            data={"iface_id": "1", "node_num": "100", "favorite": "0", "csrf_token": token},
+            data={"iface_id": "1", "node_num": "200", "favorite": "0", "csrf_token": token},
         )
-        self.assertEqual(nf.list_favorites(), [])
+        self.local.removeFavorite.assert_called_once_with(200)
 
     def test_unauthenticated_post_rejected(self):
         anon = self.client.application.test_client()
         resp = anon.post("/nodes/favorite", data={"iface_id": "1", "node_num": "100", "favorite": "1"})
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/admin", resp.headers["Location"])
-        self.assertEqual(nf.list_favorites(), [])
+        self.local.setFavorite.assert_not_called()
 
 
 if __name__ == "__main__":

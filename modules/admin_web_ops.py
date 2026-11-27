@@ -184,13 +184,10 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     try:
         from modules import nodedb as _ndb
         from modules.link_status import last_node_transport
-        from modules.node_favorites import favorites_set
 
         _ndb._ensure_nodedb_loaded()
-        favs = favorites_set()
     except Exception:
         _ndb = None
-        favs = set()
 
         def last_node_transport(_i, _n):  # type: ignore[misc]
             return None
@@ -236,7 +233,7 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
         rows.append(
             {
                 "num": num,
-                "favorite": isinstance(num, int) and num in favs,
+                "favorite": bool(node.get("isFavorite")),
                 "hops": hops,
                 "hops_source": hops_src,
                 "hops_html": _format_hops(hops, hops_src),
@@ -430,6 +427,72 @@ def nodedb_search_toolbar_html(*, placeholder: str = "Knoten suchen (ID, Name, �
     <span class="input-group-text nodedb-search-count text-muted" aria-live="polite"></span>
   </div>
 </div>"""
+
+
+CLIENT_BASE_ROLE = 12
+
+
+def local_device_role_hint(iface: Any) -> Optional[str]:
+    """Warning text when the local node's role is not CLIENT_BASE (favorites then save no hops)."""
+    try:
+        local_cfg = iface.localNode.localConfig
+        if not local_cfg.HasField("device"):
+            return None
+        role = int(local_cfg.device.role)
+    except Exception:
+        return None
+    if role == CLIENT_BASE_ROLE:
+        return None
+    name = _NODE_ROLE_LABELS.get(role, str(role))
+    return (
+        f"Rolle der lokalen Node ist {name}: Favoriten werden zwar in der Node gespeichert, "
+        "das Hop-Sparen (Pakete von/zu Favoriten wie ein Router weiterleiten) greift aber nur mit "
+        "der Rolle CLIENT_BASE (Node Settings → Gerät)."
+    )
+
+
+def _set_cached_favorite(iface: Any, node_num: int, value: bool) -> None:
+    """Mirror the new state into the python-meshtastic node dict (the node sends no update)."""
+    entries = []
+    by_num = getattr(iface, "nodesByNum", None)
+    if isinstance(by_num, dict) and node_num in by_num:
+        entries.append(by_num[node_num])
+    for node in (getattr(iface, "nodes", None) or {}).values():
+        if isinstance(node, dict) and node.get("num") == node_num:
+            entries.append(node)
+    for entry in entries:
+        if value:
+            entry["isFavorite"] = True
+        else:
+            entry.pop("isFavorite", None)
+
+
+def set_node_favorite_on_radio(iface_id: int, node_num: int, favorite: bool) -> Tuple[bool, str]:
+    """
+    Set/clear a favorite in the local node's NodeDB (AdminMessage set_favorite_node /
+    remove_favorite_node via Node.setFavorite / removeFavorite). Returns (ok, German status).
+    """
+    from meshtastic import LOCAL_ADDR
+
+    sm = _system_mod()
+    iface = sm.__dict__.get(f"interface{iface_id}")
+    if iface is None:
+        return False, "Interface nicht verbunden."
+    myn = sm.__dict__.get(f"myNodeNum{iface_id}", 777)
+    if node_num == myn:
+        return False, "Der eigene Knoten kann nicht als Favorit markiert werden."
+    try:
+        local = iface.getNode(LOCAL_ADDR, requestChannels=False, timeout=90)
+        if favorite:
+            local.setFavorite(node_num)
+        else:
+            local.removeFavorite(node_num)
+    except Exception as e:
+        return False, f"Fehler beim Setzen des Favoriten: {e!s}"
+    _set_cached_favorite(iface, node_num, favorite)
+    return True, (
+        "Favorit in der Node gesetzt." if favorite else "Favorit in der Node entfernt."
+    )
 
 
 def remove_node_from_radio(iface_id: int, node_num: int) -> str:

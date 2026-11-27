@@ -1462,6 +1462,12 @@ def create_app(
                 from modules import admin_node_config as node_cfg
 
                 rows = ops.sort_rows_favorites_first(rows)
+                role_hint = ops.local_device_role_hint(ops._system_mod().__dict__.get(f"interface{iface_id}"))
+                role_hint_html = (
+                    f'<p class="alert alert-warning small py-2 mb-2">{html_escape(role_hint)}</p>'
+                    if role_hint
+                    else ""
+                )
                 csrf_token = html_escape(node_cfg.ensure_csrf_token(session), quote=True)
                 tab_parts = []
                 for i in ifaces:
@@ -1497,6 +1503,8 @@ def create_app(
                         f'aria-pressed="{"true" if is_fav else "false"}">'
                         f'{"★" if is_fav else "☆"}</button></form>'
                     )
+                    if r["is_self"]:
+                        fav_btn = '<span class="text-muted" title="Eigene Node">—</span>'
                     rows_html.append(
                         f'<tr id="node-{r["num"]}"{ops.nodedb_row_search_attr(r)}>'
                         f"<td class=\"text-center\">{fav_btn}</td>"
@@ -1515,7 +1523,7 @@ def create_app(
                     )
                 body = f"""
 <p class="small text-muted mb-2">Schnittstelle: {tabs}</p>
-<p class="small text-muted mb-1">★ markiert Favoriten (oben sortiert, gespeichert in <code>data/node_favorites.json</code>).
+{role_hint_html}<p class="small text-muted mb-1">★ = Favorit in der Node (Admin-Nachricht, wie in der Companion-App); Anzeige aus der Node-NodeDB, oben sortiert.
   <strong>Weg</strong>: MQTT oder Funk laut letztem empfangenen Paket seit Botstart (sonst NodeInfo); „—“ = unbekannt.</p>
 <p class="small">Entfernen sendet einen Admin-Befehl an dein lokales Gerät (wie meshtastic --remove-node).</p>
 <div class="nodedb-search-block">
@@ -1541,7 +1549,7 @@ def create_app(
     @limiter.limit("60 per minute")
     def nodes_favorite():
         from modules import admin_node_config as node_cfg
-        from modules import node_favorites
+        from modules import admin_web_ops as ops
 
         try:
             iface_id = int(request.form.get("iface_id", "1"))
@@ -1556,8 +1564,8 @@ def create_app(
             flash("Sicherheits-Token fehlt oder ist abgelaufen — bitte die Seite neu laden.", "error")
             return redirect(url_for("nodes_list", iface=iface_id))
         want = request.form.get("favorite") == "1"
-        if not node_favorites.set_favorite(node_num, want):
-            flash("Favorit konnte nicht gespeichert werden.", "error")
+        ok, msg = ops.set_node_favorite_on_radio(iface_id, node_num, want)
+        flash(msg, "success" if ok else "error")
         return redirect(url_for("nodes_list", iface=iface_id) + f"#node-{node_num}")
 
     @app.route("/nodes/remove", methods=["POST"])

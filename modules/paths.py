@@ -39,7 +39,6 @@ def runtime_writable_paths_from_config(config_ini: str | None = None) -> list[st
     for rel in (
         "data/bbs_ban_list.txt",
         "data/leaderboard.pkl",
-        "data/node_favorites.json",
         "data/alert.txt",
         "data/news.txt",
         "alert.txt",
