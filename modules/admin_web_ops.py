@@ -99,6 +99,75 @@ def _map_position_for_node(node_num: int) -> Tuple[bool, Optional[float], Option
         return False, None, None
 
 
+def resolve_node_transport(
+    live: Optional[Tuple[bool, float]], node: Dict[str, Any]
+) -> Tuple[Optional[str], str]:
+    """
+    ("mqtt" | "radio" | None, source). Same signals as link_status: last packet's
+    transport_mechanism / viaMqtt (live), else the NodeInfo viaMqtt flag; None if never heard.
+    """
+    if live is not None:
+        return ("mqtt" if live[0] else "radio"), "live"
+    if node.get("viaMqtt") or node.get("via_mqtt"):
+        return "mqtt", "nodeinfo"
+    if node.get("lastHeard"):
+        return "radio", "nodeinfo"
+    return None, ""
+
+
+def resolve_node_hops(
+    node: Dict[str, Any],
+    transport: Optional[str],
+    persistent_hops: int = 0,
+    *,
+    is_self: bool = False,
+) -> Tuple[Optional[int], str]:
+    """
+    (hops, source) from NodeInfo ``hopsAway``; fall back to the learned positive count in
+    data/nodedb.json. 0 = direct, only trusted when not heard via MQTT. None = unknown.
+    """
+    if is_self:
+        return None, ""
+    raw = node.get("hopsAway", node.get("hops_away"))
+    if raw is not None:
+        try:
+            hops = int(raw)
+        except (TypeError, ValueError):
+            hops = -1
+        if hops > 0:
+            return hops, "nodeinfo"
+        if hops == 0 and transport == "radio" and node.get("lastHeard"):
+            return 0, "nodeinfo"
+    if persistent_hops and persistent_hops > 0:
+        return int(persistent_hops), "nodedb"
+    return None, ""
+
+
+def _format_hops(hops: Optional[int], source: str) -> str:
+    if hops is None:
+        return '<span class="text-muted" title="Hop-Anzahl unbekannt">—</span>'
+    src = "NodeInfo (hopsAway)" if source == "nodeinfo" else "zuletzt gelernt (data/nodedb.json)"
+    if hops == 0:
+        return f'<span title="Direkt empfangen — {src}">Direkt</span>'
+    return f'<span title="{hops} Hop(s) — {src}">{hops}</span>'
+
+
+def _format_transport(transport: Optional[str], source: str, ts: Optional[float]) -> str:
+    if transport is None:
+        return '<span class="text-muted" title="Übertragungsweg unbekannt">—</span>'
+    if source == "live" and ts:
+        try:
+            when = time.strftime("%H:%M:%S", time.localtime(ts))
+        except (OverflowError, OSError, ValueError):
+            when = ""
+        tip = f"Letztes Paket seit Botstart ({when})" if when else "Letztes Paket seit Botstart"
+    else:
+        tip = "Laut NodeInfo (kein Paket seit Botstart)"
+    if transport == "mqtt":
+        return f'<span class="badge bg-info text-dark" title="{html.escape(tip)}">MQTT</span>'
+    return f'<span class="badge bg-secondary" title="{html.escape(tip)}">Funk</span>'
+
+
 def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     """Return (error_message or None, rows dicts for template)."""
     from modules.system import decimal_to_hex
@@ -112,6 +181,17 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     nodes = getattr(iface, "nodes", None) or {}
     myn = sm.__dict__.get(f"myNodeNum{iface_id}", 777)
     rows: List[Dict[str, Any]] = []
+    try:
+        from modules import nodedb as _ndb
+        from modules.link_status import last_node_transport
+
+        _ndb._ensure_nodedb_loaded()
+    except Exception:
+        _ndb = None
+
+        def last_node_transport(_i, _n):  # type: ignore[misc]
+            return None
+
     for node in nodes.values():
         num = node.get("num")
         if num is None:
@@ -137,9 +217,30 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
             node_id_disp = html.escape(decimal_to_hex(int(num)))
         except (TypeError, ValueError):
             node_id_disp = "—"
+        live = last_node_transport(iface_id, num)
+        transport, transport_src = resolve_node_transport(live, node)
+        if is_self:
+            transport, transport_src = None, ""
+        persistent_hops = 0
+        if _ndb is not None:
+            try:
+                persistent_hops = _ndb.get_node_hops_away(int(num))
+            except Exception:
+                persistent_hops = 0
+        hops, hops_src = resolve_node_hops(
+            node, transport, persistent_hops, is_self=is_self
+        )
         rows.append(
             {
                 "num": num,
+                "favorite": bool(node.get("isFavorite")),
+                "hops": hops,
+                "hops_source": hops_src,
+                "hops_html": _format_hops(hops, hops_src),
+                "transport": transport,
+                "transport_html": _format_transport(
+                    transport, transport_src, live[1] if live else None
+                ),
                 "node_id": node_id_disp,
                 "shortName": short_n,
                 "longName": long_n,
@@ -157,6 +258,14 @@ def list_node_rows(iface_id: int) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     rows.sort(key=lambda r: r.get("lastHeard_raw", 0), reverse=True)
     _enrich_blitzwatch_rows(rows)
     return None, rows
+
+
+def sort_rows_favorites_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Favorites first, then newest lastHeard (stable)."""
+    return sorted(
+        rows,
+        key=lambda r: (not r.get("favorite"), -(r.get("lastHeard_raw") or 0)),
+    )
 
 
 def _enrich_blitzwatch_rows(rows: List[Dict[str, Any]]) -> None:
@@ -283,6 +392,18 @@ def nodedb_row_search_text(row: Dict[str, Any]) -> str:
         text = html.unescape(str(val)).strip()
         if text and text != "—":
             parts.append(text)
+    if row.get("favorite"):
+        parts.append("favorit")
+    transport = row.get("transport")
+    if transport == "mqtt":
+        parts.append("mqtt")
+    elif transport == "radio":
+        parts.append("funk lora radio")
+    hops = row.get("hops")
+    if hops == 0:
+        parts.append("direkt 0 hops")
+    elif hops:
+        parts.append(f"{hops} hop hops")
     parts.append("gps" if row.get("has_gps") else "kein gps")
     if row.get("blitzwatch_active"):
         parts.append("blitzwatch an")
@@ -306,6 +427,72 @@ def nodedb_search_toolbar_html(*, placeholder: str = "Knoten suchen (ID, Name, �
     <span class="input-group-text nodedb-search-count text-muted" aria-live="polite"></span>
   </div>
 </div>"""
+
+
+CLIENT_BASE_ROLE = 12
+
+
+def local_device_role_hint(iface: Any) -> Optional[str]:
+    """Warning text when the local node's role is not CLIENT_BASE (favorites then save no hops)."""
+    try:
+        local_cfg = iface.localNode.localConfig
+        if not local_cfg.HasField("device"):
+            return None
+        role = int(local_cfg.device.role)
+    except Exception:
+        return None
+    if role == CLIENT_BASE_ROLE:
+        return None
+    name = _NODE_ROLE_LABELS.get(role, str(role))
+    return (
+        f"Rolle der lokalen Node ist {name}: Favoriten werden zwar in der Node gespeichert, "
+        "das Hop-Sparen (Pakete von/zu Favoriten wie ein Router weiterleiten) greift aber nur mit "
+        "der Rolle CLIENT_BASE (Node Settings → Gerät)."
+    )
+
+
+def _set_cached_favorite(iface: Any, node_num: int, value: bool) -> None:
+    """Mirror the new state into the python-meshtastic node dict (the node sends no update)."""
+    entries = []
+    by_num = getattr(iface, "nodesByNum", None)
+    if isinstance(by_num, dict) and node_num in by_num:
+        entries.append(by_num[node_num])
+    for node in (getattr(iface, "nodes", None) or {}).values():
+        if isinstance(node, dict) and node.get("num") == node_num:
+            entries.append(node)
+    for entry in entries:
+        if value:
+            entry["isFavorite"] = True
+        else:
+            entry.pop("isFavorite", None)
+
+
+def set_node_favorite_on_radio(iface_id: int, node_num: int, favorite: bool) -> Tuple[bool, str]:
+    """
+    Set/clear a favorite in the local node's NodeDB (AdminMessage set_favorite_node /
+    remove_favorite_node via Node.setFavorite / removeFavorite). Returns (ok, German status).
+    """
+    from meshtastic import LOCAL_ADDR
+
+    sm = _system_mod()
+    iface = sm.__dict__.get(f"interface{iface_id}")
+    if iface is None:
+        return False, "Interface nicht verbunden."
+    myn = sm.__dict__.get(f"myNodeNum{iface_id}", 777)
+    if node_num == myn:
+        return False, "Der eigene Knoten kann nicht als Favorit markiert werden."
+    try:
+        local = iface.getNode(LOCAL_ADDR, requestChannels=False, timeout=90)
+        if favorite:
+            local.setFavorite(node_num)
+        else:
+            local.removeFavorite(node_num)
+    except Exception as e:
+        return False, f"Fehler beim Setzen des Favoriten: {e!s}"
+    _set_cached_favorite(iface, node_num, favorite)
+    return True, (
+        "Favorit in der Node gesetzt." if favorite else "Favorit in der Node entfernt."
+    )
 
 
 def remove_node_from_radio(iface_id: int, node_num: int) -> str:

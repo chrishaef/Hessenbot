@@ -12,15 +12,18 @@ from __future__ import annotations
 import threading
 import time
 from html import escape as html_escape
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 MQTT_FLOW_WINDOW_SEC = 600
+NODE_TRANSPORT_MAX = 4000
 
 _lock = threading.Lock()
 _started_ts = time.time()
 _last_rx: Dict[int, float] = {}
 _last_mqtt_rx: Dict[int, float] = {}
 _mqtt_rx_count = 0
+# (interface index, node num) -> (last packet arrived via MQTT, timestamp)
+_node_transport: Dict[Tuple[int, int], Tuple[bool, float]] = {}
 
 _INTERFACE_TYPE_LABELS = {
     "serial": "Serial (USB)",
@@ -54,16 +57,37 @@ def record_rx(packet: Any, iface_idx: Optional[int], now: Optional[float] = None
     ts = time.time() if now is None else now
     idx = int(iface_idx) if iface_idx else 0
     mqtt = packet_via_mqtt_transport(packet)
+    try:
+        from_num = int(packet.get("from") or 0)
+    except (TypeError, ValueError):
+        from_num = 0
     with _lock:
+        if from_num > 0:
+            _node_transport[(idx, from_num)] = (mqtt, ts)
+            if len(_node_transport) > NODE_TRANSPORT_MAX:
+                oldest = sorted(_node_transport.items(), key=lambda kv: kv[1][1])
+                for key, _ in oldest[: len(_node_transport) - NODE_TRANSPORT_MAX]:
+                    _node_transport.pop(key, None)
         _last_rx[idx] = ts
         if mqtt:
             _last_mqtt_rx[idx] = ts
             _mqtt_rx_count += 1
 
 
+def last_node_transport(iface_idx: Optional[int], node_num: Any) -> Optional[Tuple[bool, float]]:
+    """(via_mqtt, timestamp) of the last packet heard from a node on this interface, if any."""
+    try:
+        num = int(node_num)
+    except (TypeError, ValueError):
+        return None
+    with _lock:
+        return _node_transport.get((int(iface_idx) if iface_idx else 0, num))
+
+
 def reset_for_tests() -> None:
     global _mqtt_rx_count, _started_ts
     with _lock:
+        _node_transport.clear()
         _last_rx.clear()
         _last_mqtt_rx.clear()
         _mqtt_rx_count = 0
