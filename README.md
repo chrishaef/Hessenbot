@@ -165,7 +165,11 @@ cp config.template config.ini
 
 - **MOTD** und **News**: Text bearbeiten plus automatischer Versand — Zeitplan mit klarer UI; Kanalwahl aus der Meshtastic-Instanz
 - **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …) mit derselben Intervall-UI und Kanalwahl vom Radio
-- **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot) sowie **Mesh-Kanäle** (Name, Rolle, PSK, Up-/Downlink je Slot 0–7)
+- **Node Settings**: alle Einstellungen der verbundenen Meshtastic-Node wie in der Companion-App, als Unter-Tabs (`/node-settings?tab=…`):
+  - **Radio-Konfiguration**: Übersicht (Name, Rolle, Intervalle, feste Position — kein GPS am Bot), Benutzer (inkl. HAM-Modus, „nicht anschreibbar“), **Kanäle** (Name, Rolle, PSK, Up-/Downlink, Positionsgenauigkeit, stumm je Slot 0–7), Gerät, Position, Energie, Netzwerk, Display, LoRa (inkl. Region, Preset, Sendeleistung), Bluetooth, Sicherheit (Schlüssel, Admin-Keys, Managed Mode)
+  - **Module**: MQTT, Seriell, Ext. Benachrichtigung (+ Klingelton), Store & Forward, Range Test, Telemetrie, Canned Messages (+ Texte), Audio, Remote Hardware, Neighbor Info, Umgebungslicht, Detection Sensor, Paxcounter sowie — je nach installierter `meshtastic`-Version — Statusnachricht, Traffic Management, TAK
+  - **Administration**: Uhrzeit setzen, Neustart, Herunterfahren, NodeDB-Reset, Werksreset (Konfiguration / Gerät)
+  - Gefährliche Änderungen (Region, Preset/Frequenz, Sendeleistung über 14 dBm, TX aus, Duty-Cycle, Managed Mode, Verbindung kappende Schalter, Resets) brauchen eine Bestätigung; Werte werden nie still begrenzt, ungültige Eingaben lehnen den ganzen Bereich ab
 - **Blitzwatch (Admin):** NodeDB-Liste mit Suche; Nutzer-Einstellungen (Home, Radius, Zusatzorte)
 - Einheitliche **Top-Navigation** (Statistik, Befehle, Blitzwatch, BBS, NodeDB, FAQ); Footer: Impressum · Datenschutz · GitHub
 - Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template)); optional `publicUrl`, Impressumsfelder

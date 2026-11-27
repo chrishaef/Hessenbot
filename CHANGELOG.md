@@ -6,6 +6,8 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Added
 
+- **Node Settings mit Companion-Parität**: Unter-Tabs für alle `Config`-/`ModuleConfig`-Bereiche der lokalen Node (Gerät, Position, Energie, Netzwerk, Display, LoRa, Bluetooth, Sicherheit; MQTT, Seriell, Ext. Benachrichtigung, Store & Forward, Range Test, Telemetrie, Canned Messages, Audio, Remote Hardware, Neighbor Info, Umgebungslicht, Detection Sensor, Paxcounter, Statusnachricht, Traffic Management, TAK), plus Benutzer (HAM-Modus, nicht anschreibbar), Canned-Message-Texte, Klingelton und Administration (Uhrzeit, Neustart, Herunterfahren, NodeDB-/Werksreset). Formulare werden aus den Protobuf-Deskriptoren erzeugt, deutsche Labels; gefährliche Felder (Region, Preset, Sendeleistung > 14 dBm, TX aus, Duty-Cycle, Managed Mode, …) und Resets nur mit Bestätigung, keine stille Begrenzung
+- **Kanäle**: Positionsgenauigkeit und „stumm“ je Kanal-Slot
 - **Remote-Zugriff auf meshtasticd** (`script/install/remote-access.sh`, INSTALL.md): optionaler UFW-Helfer, der Port 4403 nur für das LAN-Subnetz oder `tailscale0` freigibt (`status|lan|tailscale|close`); Sicherheits- und Ein-Client-Hinweise (meshtasticd bedient nur einen TCP-Client gleichzeitig, kein Auth/TLS)
 - **Pi-4-Installer (nativ)**: `bootstrap.sh` + `script/install/wizard.sh` für Raspberry Pi 4, RAK6421/RAK13302 Slot 1 (EU_868), Trixie, `meshtasticd` (OBS) + Bot als systemd-Dienste; Preset-/Kanal-Abfrage (#1 Mesh Hessen, optional HessenTest), TX erst nach Antennenbestätigung, `--dry-run`, `--revert`, Reboot-Resume; `install.sh --nope` mit Bestätigung und Backup; `bootstrap.sh --legacy` für das alte Verhalten
 - **BBS-DM Lesebestätigung** (Issue #9): `bbspost ack @Empfänger #Text` verlangt Nutzer-ACK per `ack <id>`; Mesh-/Node-Empfang (`wantAckOnDm`) und Nutzer-Bestätigung getrennt; Absender-Status-DMs; Config `bbsDmUserAckEnabled`, Retry/Max/Expire, Admin-Spalten + Checkbox
@@ -31,6 +33,7 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Fixed
 
+- **Node Settings (Übersicht)**: Namen speichern setzte den Amateurfunk-Status (`is_licensed`) der Node stillschweigend zurück
 - **`!readnews`**: Führendes `!` wird vor der Quellen-Auswertung entfernt — sonst wurde `!` als Quellenname gelesen (`data/!_news.txt`) und fälschlich „No news for you!“ geliefert (DM und Kanal)
 - **News-Versand (ACP)**: Zeitplan-Hinweise/`config.template`/Tooltips an MOTD-Versand angeglichen (inkl. mehrerer Uhrzeiten)
 - **ACP Einstellungen**: Speichern schrieb `config.ini` per `ConfigParser.write()` und flattente dabei alle Keys auf Kleinbuchstaben; Formular-POST aktualisiert jetzt nur übermittelte `cfg__*`-Felder (übrige Keys bleiben), Schreibweg stellt camelCase aus `config.template` wieder her
