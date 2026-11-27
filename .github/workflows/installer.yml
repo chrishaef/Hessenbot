@@ -74,7 +74,8 @@ jobs:
       - name: Start simulated node
         run: |
           mkdir -p /tmp/simfs
-          nohup meshtasticd -s -d /tmp/simfs -p 4403 > /tmp/sim.log 2>&1 &
+          # the node exits on its post-config reboot; systemd restarts it on a real system
+          nohup bash -c 'while true; do meshtasticd -s -d /tmp/simfs -p 4403; sleep 1; done' > /tmp/sim.log 2>&1 &
           for i in $(seq 1 60); do
             if /tmp/venv/bin/python -c "import socket; socket.create_connection(('127.0.0.1', 4403), 2).close()" 2>/dev/null; then
               echo "meshtasticd sim is listening after ${i}s"
