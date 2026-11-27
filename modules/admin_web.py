@@ -1459,6 +1459,10 @@ def create_app(
             if err:
                 body = f'<p class="alert alert-danger">{err}</p>'
             else:
+                from modules import admin_node_config as node_cfg
+
+                rows = ops.sort_rows_favorites_first(rows)
+                csrf_token = html_escape(node_cfg.ensure_csrf_token(session), quote=True)
                 tab_parts = []
                 for i in ifaces:
                     cls = "btn-light" if i == iface_id else "btn-outline-secondary"
@@ -1479,8 +1483,23 @@ def create_app(
                         )
                     else:
                         del_btn = '<span class="text-muted">(lokal)</span>'
+                    is_fav = bool(r.get("favorite"))
+                    fav_btn = (
+                        f'<form method="post" action="{url_for("nodes_favorite")}" class="d-inline">'
+                        f'<input type="hidden" name="csrf_token" value="{csrf_token}">'
+                        f'<input type="hidden" name="iface_id" value="{iface_id}">'
+                        f'<input type="hidden" name="node_num" value="{r["num"]}">'
+                        f'<input type="hidden" name="favorite" value="{0 if is_fav else 1}">'
+                        f'<button type="submit" class="btn btn-sm btn-link p-0 '
+                        f'{"text-warning" if is_fav else "text-muted"}" '
+                        f'title="{"Favorit entfernen" if is_fav else "Als Favorit markieren"}" '
+                        f'aria-label="{"Favorit entfernen" if is_fav else "Als Favorit markieren"}" '
+                        f'aria-pressed="{"true" if is_fav else "false"}">'
+                        f'{"★" if is_fav else "☆"}</button></form>'
+                    )
                     rows_html.append(
-                        f"<tr{ops.nodedb_row_search_attr(r)}>"
+                        f'<tr id="node-{r["num"]}"{ops.nodedb_row_search_attr(r)}>'
+                        f"<td class=\"text-center\">{fav_btn}</td>"
                         f"<td><code>{r['num']}</code></td>"
                         f"<td><code>{r['node_id']}</code></td>"
                         f"<td>{r['shortName']}</td>"
@@ -1488,19 +1507,23 @@ def create_app(
                         f"<td>{r['location_html']}</td>"
                         f"<td>{r.get('blitzwatch_html', '—')}</td>"
                         f"<td>{r['lastHeard']}</td>"
+                        f"<td>{r['hops_html']}</td>"
+                        f"<td>{r['transport_html']}</td>"
                         f"<td>{html_escape(str(r['snr']))}</td>"
                         f"<td>{del_btn}</td>"
                         "</tr>"
                     )
                 body = f"""
 <p class="small text-muted mb-2">Schnittstelle: {tabs}</p>
+<p class="small text-muted mb-1">★ markiert Favoriten (oben sortiert, gespeichert in <code>data/node_favorites.json</code>).
+  <strong>Weg</strong>: MQTT oder Funk laut letztem empfangenen Paket seit Botstart (sonst NodeInfo); „—“ = unbekannt.</p>
 <p class="small">Entfernen sendet einen Admin-Befehl an dein lokales Gerät (wie meshtastic --remove-node).</p>
 <div class="nodedb-search-block">
 {ops.nodedb_search_toolbar_html()}
 <div class="table-scroll"><table class="nodes-table table-dark table-bordered">
-<thead><tr><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Standort</th><th>Blitzwatch</th><th>Zuletzt</th><th>SNR</th><th></th></tr></thead>
+<thead><tr><th title="Favoriten stehen oben">★</th><th>Nr.</th><th>Node ID</th><th>Kurz</th><th>Lang</th><th>Standort</th><th>Blitzwatch</th><th>Zuletzt</th><th title="Hops bis zum Knoten (NodeInfo hopsAway)">Hops</th><th title="Letzter Empfangsweg: MQTT oder Funk (LoRa)">Weg</th><th>SNR</th><th></th></tr></thead>
 <tbody>{"".join(rows_html)}
-<tr class="nodedb-search-empty" hidden><td colspan="9" class="text-muted small">Keine Treffer für die Suche.</td></tr>
+<tr class="nodedb-search-empty" hidden><td colspan="12" class="text-muted small">Keine Treffer für die Suche.</td></tr>
 </tbody></table></div>
 </div>
 <script src="/static/portal/nodedb-search.js"></script>"""
@@ -1512,6 +1535,30 @@ def create_app(
             active_tab="nodes",
             body=Markup(body),
         )
+
+    @app.route("/nodes/favorite", methods=["POST"])
+    @login_required
+    @limiter.limit("60 per minute")
+    def nodes_favorite():
+        from modules import admin_node_config as node_cfg
+        from modules import node_favorites
+
+        try:
+            iface_id = int(request.form.get("iface_id", "1"))
+            node_num = int(request.form.get("node_num", "0"))
+        except ValueError:
+            flash("Ungültige Parameter.", "error")
+            return redirect(url_for("nodes_list"))
+        if iface_id < 1 or iface_id > 9 or node_num <= 0:
+            flash("Ungültige Parameter.", "error")
+            return redirect(url_for("nodes_list", iface=iface_id))
+        if not node_cfg.csrf_ok(session, request.form):
+            flash("Sicherheits-Token fehlt oder ist abgelaufen — bitte die Seite neu laden.", "error")
+            return redirect(url_for("nodes_list", iface=iface_id))
+        want = request.form.get("favorite") == "1"
+        if not node_favorites.set_favorite(node_num, want):
+            flash("Favorit konnte nicht gespeichert werden.", "error")
+        return redirect(url_for("nodes_list", iface=iface_id) + f"#node-{node_num}")
 
     @app.route("/nodes/remove", methods=["POST"])
     @login_required
