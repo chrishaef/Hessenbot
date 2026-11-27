@@ -4,6 +4,10 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+
+- **Admin Übersicht**: aufgeräumt — Erklärtexte unter „Verbindung“, `!sysinfo`/sysEnv.sh- und thermal-zone/vcgencmd-Hinweise bei CPU-Last/-Temperatur sowie der Tab-Hinweis am Seitenende entfernt (Statusanzeigen und Messwerte bleiben); engere Abstände
+
 ### Added
 
 - **Node Settings mit Companion-Parität**: Unter-Tabs für alle `Config`-/`ModuleConfig`-Bereiche der lokalen Node (Gerät, Position, Energie, Netzwerk, Display, LoRa, Bluetooth, Sicherheit; MQTT, Seriell, Ext. Benachrichtigung, Store & Forward, Range Test, Telemetrie, Canned Messages, Audio, Remote Hardware, Neighbor Info, Umgebungslicht, Detection Sensor, Paxcounter, Statusnachricht, Traffic Management, TAK), plus Benutzer (HAM-Modus, nicht anschreibbar), Canned-Message-Texte, Klingelton und Administration (Uhrzeit, Neustart, Herunterfahren, NodeDB-/Werksreset). Formulare werden aus den Protobuf-Deskriptoren erzeugt, deutsche Labels; gefährliche Felder (Region, Preset, Sendeleistung > 14 dBm, TX aus, Duty-Cycle, Managed Mode, …) und Resets nur mit Bestätigung, keine stille Begrenzung

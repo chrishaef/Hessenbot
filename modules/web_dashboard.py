@@ -1688,7 +1688,6 @@ def render_host_metrics_html() -> str:
           <div class="metric-value small mb-0" data-host="cpu_pct">{html_escape(cpu_s)}</div>
         </div>
         <canvas class="host-sparkline" data-spark="cpu_pct" width="320" height="48" aria-hidden="true"></canvas>
-        <div class="form-text mb-0">wie <code>!sysinfo</code> / sysEnv.sh · Verlauf ~{int(_HOST_HIST_MAX * _HOST_SAMPLE_SEC / 60)}&nbsp;min</div>
       </div>
     </div>
     <div class="col-md-6">
@@ -1698,7 +1697,6 @@ def render_host_metrics_html() -> str:
           <div class="metric-value small mb-0" data-host="cpu_temp_c">{html_escape(temp_s)}</div>
         </div>
         <canvas class="host-sparkline" data-spark="cpu_temp_c" width="320" height="48" aria-hidden="true"></canvas>
-        <div class="form-text mb-0">thermal zone / vcgencmd · Verlauf ~{int(_HOST_HIST_MAX * _HOST_SAMPLE_SEC / 60)}&nbsp;min</div>
       </div>
     </div>
   </div>

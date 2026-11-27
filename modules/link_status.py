@@ -282,10 +282,7 @@ def render_link_status_html() -> str:
     return f"""
 <div id="link-status" data-api="/api/admin/link-status">
   <div data-link-rows>{rows}</div>
-  <div class="form-text mb-0" data-link-updated>
-    Hardware = Meshtastic-Verbindung des Bots (meshtasticd/Serial/BLE). MQTT = Pakete, die über MQTT am Node ankommen
-    (grün: in den letzten {int(MQTT_FLOW_WINDOW_SEC / 60)} min empfangen).
-  </div>
+  <div class="form-text text-danger mb-0" data-link-error hidden></div>
 </div>
-<script src="/static/portal/link-status.js?v=1"></script>
+<script src="/static/portal/link-status.js?v=2"></script>
 """
