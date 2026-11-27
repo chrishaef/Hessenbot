@@ -100,3 +100,12 @@ python3 script/addFav.py
 - Always run this script from the main repo directory to ensure module imports work.
 - After running on the bot, copy `roofNodeList.pkl` to the roof node and rerun the script there to complete the process.
 
+## script/install/
+
+**Purpose:**
+Native one-command installer for Raspberry Pi 4 + RAK6421/RAK13302 (see [INSTALL.md](../INSTALL.md)). `wizard.sh` orchestrates `lib/*.sh`; `node_config.py` configures the node channels via the Meshtastic API, `bot_channels.py` maps channels to `ignoreChannels`/`messagesChannel`, `ini_set.py` edits `config.ini` preserving comments. Channel and radio definitions live in `channels.d/` and `radios.d/`.
+
+```sh
+bash script/install/wizard.sh --dry-run --yes --non-interactive
+python -m pytest script/install/test_install_helpers.py
+```

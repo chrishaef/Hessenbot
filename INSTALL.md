@@ -2,6 +2,7 @@
 
 ## Table of Contents
 
+- [Raspberry Pi + RAK6421/RAK13302 (native one-command install)](#raspberry-pi--rak6421rak13302-native-one-command-install)
 - [Manual Install](#manual-install)
 - [Docker Installation](#docker-installation)
 - [Requirements](#requirements)
@@ -22,6 +23,44 @@
   - [How to Use](#how-to-use)
   - [What it does](#what-it-does-2)
   - [Note](#note-2)
+
+---
+
+## Raspberry Pi + RAK6421/RAK13302 (native one-command install)
+
+Target: Raspberry Pi 4B, Raspberry Pi OS Lite 64-bit (Debian 13 Trixie), RAK6421 HAT with RAK13302 (1 W) in slot 1, SPI, region EU_868. No Docker.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/chrishaef/Hessenbot/main/bootstrap.sh -o /tmp/hb-bootstrap.sh
+sudo bash /tmp/hb-bootstrap.sh
+```
+
+Review the script first if you like; it is safe to pipe (`curl ... | sudo bash`) because all prompts are read from `/dev/tty`.
+
+What happens:
+
+1. `bootstrap.sh` installs git/curl, clones or fast-forwards `/opt/Hessenbot` and starts `script/install/wizard.sh`.
+2. Wizard asks: modem preset (default Europe Short Slow), node names, optional `HessenTest` channel (#2, default no), bot channels, location, web admin, antenna and gain.
+3. Phase A: base packages, `/boot/firmware/config.txt` managed block (`dtparam=spi=on`, `dtoverlay=spi0-0cs`, I2C; UART only with GPS), `/etc/hessenbot/env` (0600). Reboot if needed; the install resumes automatically via `hessenbot-install-resume.service`.
+4. Phase B: `meshtasticd` from the OBS repo (`Debian_13`), preset `lora-RAK6421-13302-slot1.yaml`, Python 3.13 venv, `config.ini`, node channels (#0 primary, #1 "Mesh Hessen" always, #2 optional), systemd units (`meshtasticd`, `mesh_bot`), self-test.
+
+Channels and bot: the bot serves only the channels you pick, using the existing `ignoreChannels`, `ignoreDefaultChannel` and `messagesChannel` keys.
+
+TX safety: `lora.tx_enabled` stays `false` until you confirm an antenna is attached; `tx_power` = 27 dBm minus antenna gain.
+
+Options (`sudo bash /opt/Hessenbot/script/install/wizard.sh ...`):
+
+| Flag | Meaning |
+|------|---------|
+| `--dry-run` | Print the plan, change nothing (no root needed via `bootstrap.sh --dry-run`) |
+| `--yes`, `--non-interactive` | Accept defaults / take values from flags (`--preset`, `--long-name`, `--short-name`, `--hessentest`, `--bot-channels`, `--lat`, `--lon`, `--gps`, `--web-admin`, `--antenna`, `--antenna-gain`) |
+| `--revert` | Undo changes recorded in `/var/lib/hessenbot-install/manifest` (files are moved to `/var/backups/hessenbot/`, apt packages and node identity are kept) |
+| `--resume`, `--no-reboot` | Continue after reboot / do not reboot automatically |
+| `--skip-meshtasticd`, `--skip-node-config` | Skip those steps |
+
+`bootstrap.sh --legacy` keeps the previous venv + `config.ini` behaviour. `install.sh --nope` removes the bot after a typed `yes` confirmation and a backup tarball in `/var/backups/hessenbot/`.
+
+Log: `/var/log/hessenbot-install.log` (0600, PSKs and passwords masked). Notes: `/opt/Hessenbot/install_notes.txt`.
 
 ---
 

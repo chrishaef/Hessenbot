@@ -6,6 +6,7 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 ### Added
 
+- **Pi-4-Installer (nativ)**: `bootstrap.sh` + `script/install/wizard.sh` für Raspberry Pi 4, RAK6421/RAK13302 Slot 1 (EU_868), Trixie, `meshtasticd` (OBS) + Bot als systemd-Dienste; Preset-/Kanal-Abfrage (#1 Mesh Hessen, optional HessenTest), TX erst nach Antennenbestätigung, `--dry-run`, `--revert`, Reboot-Resume; `install.sh --nope` mit Bestätigung und Backup; `bootstrap.sh --legacy` für das alte Verhalten
 - **BBS-DM Lesebestätigung** (Issue #9): `bbspost ack @Empfänger #Text` verlangt Nutzer-ACK per `ack <id>`; Mesh-/Node-Empfang (`wantAckOnDm`) und Nutzer-Bestätigung getrennt; Absender-Status-DMs; Config `bbsDmUserAckEnabled`, Retry/Max/Expire, Admin-Spalten + Checkbox
 - **Service-API**: `POST /api/v1/dm` / `GET /api/v1/whoami` für externe Dienste (z. B. MQTT-Webadmin Watchcat); Admin-Tab **API** (Enable, Key einmalig erzeugen, Doku, Request-Log); Token als SHA-256-Hash (`api_token_hash`), Schalter `api_enabled`, optional Env `HESSENBOT_API_TOKEN`; Rate-Limit 30/min; Audit in `logs/service_api.log`
 

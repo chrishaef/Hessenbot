@@ -1,0 +1,44 @@
+name: Installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - bootstrap.sh
+      - script/install/**
+      - etc/install_service.sh
+      - .github/workflows/installer.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - bootstrap.sh
+      - script/install/**
+      - etc/install_service.sh
+      - .github/workflows/installer.yml
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: |
+          shellcheck -x -P SCRIPTDIR bootstrap.sh script/install/wizard.sh \
+            script/install/lib/*.sh script/install/wait-for-port.sh etc/install_service.sh
+
+  dry-run:
+    name: Wizard dry-run (Debian Trixie)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Prerequisites
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3 python3-pytest
+      - uses: actions/checkout@v4
+      - name: Installer unit tests
+        run: python3 -m pytest script/install/test_install_helpers.py -q
+      - name: Wizard dry-run
+        run: bash script/install/wizard.sh --dry-run --yes --non-interactive
