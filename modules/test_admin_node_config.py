@@ -250,6 +250,16 @@ class LoraValidationTests(NodeConfigTestBase):
         self.assertTrue(ok, msg)
         self.assertEqual(self.node.sent[0].set_config.lora.tx_power, 0)
 
+    def test_overview_and_lora_tab_share_tx_power_rules(self) -> None:
+        from modules import admin_web_ops as ops
+
+        self.assertIs(ops.plan_tx_power_change, anc.plan_tx_power_change)
+        self.assertIs(ops.TX_POWER_WARNING_TEXT, anc.TX_POWER_WARNING_TEXT)
+        self.assertIs(anc.FIELD_META["lora.tx_power"].danger_when, anc.tx_power_needs_confirm)
+        for old, new in ((14, 0), (14, 15), (14, 30), (0, 14), (30, 14), (14, 14), (0, 0)):
+            needs = anc.tx_power_needs_confirm(old, new)
+            self.assertEqual(needs, anc.plan_tx_power_change(old, str(new), False)[1] is not None, (old, new))
+
     def test_tx_power_low_value_needs_no_confirm(self) -> None:
         form = with_values(self.section_form("lora"), **{"f__tx_power": 10})
         ok, msg = anc.apply_section(1, "lora", form)

@@ -11,6 +11,14 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from modules.admin_node_config import (
+    ROLE_WARNING,
+    TX_POWER_EU_SAFE_DBM,
+    TX_POWER_MAX_DBM,
+    TX_POWER_WARNING_TEXT,
+    plan_tx_power_change,
+    role_change_needs_confirm,
+)
 from modules.paths import path_in_repo
 
 
@@ -1682,46 +1690,6 @@ def _coords_changed(current: Dict[str, Any], lat: float, lon: float, alt_m: Opti
     return int(cur_alt) != int(alt_m)
 
 
-# lora.tx_power: Hessenbot adds no cap of its own (the firmware limits to the region maximum unless HAM mode is on).
-# Values above the EU-safe level and 0 (= firmware uses the region maximum, not "off") need an explicit confirmation.
-TX_POWER_EU_SAFE_DBM = 14
-TX_POWER_MAX_DBM = 30
-
-TX_POWER_WARNING_TEXT = (
-    f"Werte über {TX_POWER_EU_SAFE_DBM} dBm sowie 0 (= die Firmware nimmt das Regions-Maximum, EU_868: 27 dBm; "
-    "0 bedeutet nicht „aus“) können die EU-868-Grenzwerte überschreiten "
-    "(je nach Teilband 14 bzw. 27 dBm ERP, 1–10 % Duty Cycle). Mit einem PA-Modul (z. B. RAK13302, "
-    "SKY66122, ca. +13 dB) liegt die Leistung an der Antenne deutlich über dem Einstellwert. "
-    "Die Firmware begrenzt den Wert ohne HAM-Modus selbst auf das Regionslimit (EU_868: ca. 27 dBm); Hessenbot setzt "
-    "keinen eigenen Cap und kürzt deinen Wert nicht. Du bist selbst für die Einhaltung der Vorschriften verantwortlich."
-)
-
-
-def plan_tx_power_change(
-    current: int, raw: Optional[str], confirmed: bool
-) -> Tuple[Optional[int], Optional[str]]:
-    """Validate a requested lora.tx_power. Returns (new value or None if unchanged/not submitted, error)."""
-    text = (raw or "").strip().lower()
-    if not text:
-        return None, None
-    if text in ("max", "full", "voll"):
-        value = TX_POWER_MAX_DBM
-    else:
-        try:
-            value = int(text)
-        except ValueError:
-            return None, "Sendeleistung: bitte eine ganze Zahl (dBm) oder „max“ eingeben."
-    if not 0 <= value <= TX_POWER_MAX_DBM:
-        return None, f"Sendeleistung: Wert zwischen 0 und {TX_POWER_MAX_DBM} dBm (0 = Regions-Maximum der Firmware)."
-    if value == int(current):
-        return None, None
-    if (value == 0 or value > TX_POWER_EU_SAFE_DBM) and not confirmed:
-        return None, (
-            f"Sendeleistung {value} dBm nicht gespeichert: Bitte die Warnung bestätigen. {TX_POWER_WARNING_TEXT}"
-        )
-    return value, None
-
-
 def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     """Apply form values to the connected local Meshtastic node."""
     node, err = _local_node_for_iface(iface_id)
@@ -1770,8 +1738,6 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
         rebroadcast = int(form.get("rebroadcast_mode", current["rebroadcast_mode"]))
     except (TypeError, ValueError):
         return False, "Rolle oder Rebroadcast-Modus ungültig."
-
-    from modules.admin_node_config import ROLE_WARNING, role_change_needs_confirm
 
     if role_change_needs_confirm(current["role"], role) and (
         (form.get("confirm__role") or "").strip().lower() not in ("1", "on", "yes", "true")
@@ -2267,13 +2233,6 @@ def build_channels_settings_html(
 {''.join(rows) if rows else '<p class="text-muted">Keine Kanäle geladen.</p>'}
 """
 
-
-def _role_warning_text() -> str:
-    from modules.admin_node_config import ROLE_WARNING
-
-    return ROLE_WARNING
-
-
 def node_settings_role_options(selected: int) -> str:
     opts = []
     for val, label in sorted(_NODE_ROLE_LABELS.items()):
@@ -2380,7 +2339,7 @@ def build_node_settings_html(
         {node_settings_role_options(settings["role"])}
       </select>
       <div class="form-text text-danger">Andere Rollen als CLIENT/CLIENT_MUTE/TAK/CLIENT_BASE:
-        {html.escape(_role_warning_text())}</div>
+        {html.escape(ROLE_WARNING)}</div>
       <div class="form-check small">
         <input class="form-check-input" type="checkbox" id="ns-role-confirm" name="confirm__role" value="1">
         <label class="form-check-label" for="ns-role-confirm">Warnung gelesen — Rolle bewusst ändern</label>

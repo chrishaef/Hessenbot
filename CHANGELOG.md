@@ -36,7 +36,7 @@ Notable changes for Hessenbot (Meshhessen). Format inspired by [Keep a Changelog
 
 - **Node Settings (Übersicht)**: Namen speichern setzte den Amateurfunk-Status (`is_licensed`) und „nicht anschreibbar“ (`is_unmessagable`) der Node stillschweigend zurück; Rollenwechsel auf Router/Repeater/Tracker/Sensor/Hidden braucht jetzt auch in der Übersicht eine Bestätigung
 - **Node Settings (Sicherheit)**: Neuer privater Schlüssel leert den öffentlichen Schlüssel, damit die Firmware ihn neu ableitet (vorher blieb das alte Paar inkonsistent); keine irreführende „leeren“-Option mehr für den privaten Schlüssel
-- **Node Settings (LoRa)**: Sendeleistung 0 bedeutet Regionsmaximum (EU_868: 27 dBm) und braucht nun eine Bestätigung
+- **Node Settings (LoRa)**: Sendeleistung 0 bedeutet Regionsmaximum (EU_868: 27 dBm) und braucht auch im LoRa-Tab eine Bestätigung; Übersicht und LoRa-Tab nutzen dieselbe Prüfung und denselben Warntext
 - **Node Settings (Benutzer)**: HAM-Modus warnt vor den Firmware-Folgen (PSKs aller Kanäle inkl. Meshhessen werden gelöscht, Admin-Kanal aus, neues Schlüsselpaar) und verlangt zusätzlich das Wort „HAM“; Namensänderung aktualisiert sofort die Anzeige
 - **`!readnews`**: Führendes `!` wird vor der Quellen-Auswertung entfernt — sonst wurde `!` als Quellenname gelesen (`data/!_news.txt`) und fälschlich „No news for you!“ geliefert (DM und Kanal)
 - **News-Versand (ACP)**: Zeitplan-Hinweise/`config.template`/Tooltips an MOTD-Versand angeglichen (inkl. mehrerer Uhrzeiten)

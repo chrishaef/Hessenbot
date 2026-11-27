@@ -19,16 +19,49 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from google.protobuf.descriptor import Descriptor, FieldDescriptor
 from google.protobuf.message import Message
 
-# lora.tx_power: no hard cap in Hessenbot (hardware/firmware limit applies); above the EU-safe level the admin must confirm.
+# lora.tx_power: Hessenbot adds no cap of its own (the firmware limits to the region maximum unless HAM mode is on).
+# Values above the EU-safe level and 0 (= firmware uses the region maximum, not "off") need an explicit confirmation.
+# Shared by the LoRa tab here and the Overview form in admin_web_ops.
 TX_POWER_EU_SAFE_DBM = 14
 TX_POWER_MAX_DBM = 30
 
 TX_POWER_WARNING_TEXT = (
-    f"Werte über {TX_POWER_EU_SAFE_DBM} dBm können die EU-868-Grenzwerte überschreiten "
+    f"Werte über {TX_POWER_EU_SAFE_DBM} dBm sowie 0 (= die Firmware nimmt das Regions-Maximum, EU_868: 27 dBm; "
+    "0 bedeutet nicht „aus“) können die EU-868-Grenzwerte überschreiten "
     "(je nach Teilband 14 bzw. 27 dBm ERP, 1–10 % Duty Cycle). Mit einem PA-Modul (z. B. RAK13302, "
     "SKY66122, ca. +13 dB) liegt die Leistung an der Antenne deutlich über dem Einstellwert. "
-    "Du bist selbst für die Einhaltung der Vorschriften verantwortlich; es wird nichts still begrenzt."
+    "Die Firmware begrenzt den Wert ohne HAM-Modus selbst auf das Regionslimit (EU_868: ca. 27 dBm); Hessenbot setzt "
+    "keinen eigenen Cap und kürzt deinen Wert nicht. Du bist selbst für die Einhaltung der Vorschriften verantwortlich."
 )
+
+
+def tx_power_needs_confirm(old: Any, new: Any) -> bool:
+    return int(new) != int(old) and (int(new) > TX_POWER_EU_SAFE_DBM or int(new) == 0)
+
+
+def plan_tx_power_change(
+    current: int, raw: Optional[str], confirmed: bool
+) -> Tuple[Optional[int], Optional[str]]:
+    """Validate a requested lora.tx_power. Returns (new value or None if unchanged/not submitted, error)."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return None, None
+    if text in ("max", "full", "voll"):
+        value = TX_POWER_MAX_DBM
+    else:
+        try:
+            value = int(text)
+        except ValueError:
+            return None, "Sendeleistung: bitte eine ganze Zahl (dBm) oder „max“ eingeben."
+    if not 0 <= value <= TX_POWER_MAX_DBM:
+        return None, f"Sendeleistung: Wert zwischen 0 und {TX_POWER_MAX_DBM} dBm (0 = Regions-Maximum der Firmware)."
+    if tx_power_needs_confirm(current, value) and not confirmed:
+        return None, (
+            f"Sendeleistung {value} dBm nicht gespeichert: Bitte die Warnung bestätigen. {TX_POWER_WARNING_TEXT}"
+        )
+    if value == int(current):
+        return None, None
+    return value, None
 
 MESH_PARAMS_WARNING = (
     "Region, Preset, Frequenz-Slot und Modem-Parameter müssen im ganzen Mesh gleich sein — "
@@ -191,17 +224,6 @@ def _turned_off(old: Any, new: Any) -> bool:
     return bool(old) and not bool(new)
 
 
-TX_POWER_ZERO_NOTE = (
-    "0 heißt nicht „aus“: die Firmware sendet dann mit dem Regionsmaximum (EU_868: 27 dBm). "
-    "Die Firmware begrenzt auf das Regionslimit, außer im Amateurfunk-Modus."
-)
-
-
-def _tx_power_needs_confirm(old: Any, new: Any) -> bool:
-    """0 = region maximum in firmware (EU_868: 27 dBm), so it needs the same confirmation as > 14 dBm."""
-    return int(new) != int(old) and (int(new) > TX_POWER_EU_SAFE_DBM or int(new) == 0)
-
-
 # CLIENT, CLIENT_MUTE, TAK, CLIENT_BASE behave like a normal reachable client; every other role
 # changes forwarding (ROUTER*, REPEATER), sleeps (TRACKER, SENSOR, TAK_TRACKER) or hides the node.
 _SAFE_ROLES = {0, 1, 7, 12}
@@ -326,8 +348,8 @@ FIELD_META: Dict[str, FieldMeta] = {
         "Sendeleistung",
         f"0 = Regionsmaximum (EU_868: 27 dBm), {TX_POWER_MAX_DBM} = Volllast. Hessenbot begrenzt nicht; "
         "die Firmware begrenzt auf das Regionslimit, außer im Amateurfunk-Modus.",
-        "dBm", min=0, max=TX_POWER_MAX_DBM, danger=f"{TX_POWER_WARNING_TEXT} {TX_POWER_ZERO_NOTE}",
-        danger_when=_tx_power_needs_confirm),
+        "dBm", min=0, max=TX_POWER_MAX_DBM, danger=TX_POWER_WARNING_TEXT,
+        danger_when=tx_power_needs_confirm),
     "lora.channel_num": FieldMeta("Frequenz-Slot", "0 = aus Kanalname berechnet", min=0, max=_UINT32_MAX,
                                   danger=MESH_PARAMS_WARNING, danger_when=_changed),
     "lora.override_duty_cycle": FieldMeta(
