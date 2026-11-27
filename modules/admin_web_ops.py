@@ -5,11 +5,20 @@ from __future__ import annotations
 
 import base64
 import html
+import inspect
 import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from modules.admin_node_config import (
+    ROLE_WARNING,
+    TX_POWER_EU_SAFE_DBM,
+    TX_POWER_MAX_DBM,
+    TX_POWER_WARNING_TEXT,
+    plan_tx_power_change,
+    role_change_needs_confirm,
+)
 from modules.paths import path_in_repo
 
 
@@ -1617,6 +1626,8 @@ def fetch_local_node_settings(iface_id: int) -> Tuple[Optional[str], Optional[Di
         "node_id_hex": decimal_to_hex(node_num) if node_num else "—",
         "short_name": short_name,
         "long_name": long_name,
+        "is_licensed": bool(user.get("isLicensed")),
+        "is_unmessagable": bool(user.get("isUnmessagable")),
         "role": int(dev.role),
         "role_name": _enum_name("DeviceConfig.Role", dev.role, _NODE_ROLE_LABELS),
         "rebroadcast_mode": int(dev.rebroadcast_mode),
@@ -1679,46 +1690,6 @@ def _coords_changed(current: Dict[str, Any], lat: float, lon: float, alt_m: Opti
     return int(cur_alt) != int(alt_m)
 
 
-# lora.tx_power: Hessenbot adds no cap of its own (the firmware limits to the region maximum unless HAM mode is on).
-# Values above the EU-safe level and 0 (= firmware uses the region maximum, not "off") need an explicit confirmation.
-TX_POWER_EU_SAFE_DBM = 14
-TX_POWER_MAX_DBM = 30
-
-TX_POWER_WARNING_TEXT = (
-    f"Werte über {TX_POWER_EU_SAFE_DBM} dBm sowie 0 (= die Firmware nimmt das Regions-Maximum, EU_868: 27 dBm; "
-    "0 bedeutet nicht „aus“) können die EU-868-Grenzwerte überschreiten "
-    "(je nach Teilband 14 bzw. 27 dBm ERP, 1–10 % Duty Cycle). Mit einem PA-Modul (z. B. RAK13302, "
-    "SKY66122, ca. +13 dB) liegt die Leistung an der Antenne deutlich über dem Einstellwert. "
-    "Die Firmware begrenzt den Wert ohne HAM-Modus selbst auf das Regionslimit (EU_868: ca. 27 dBm); Hessenbot setzt "
-    "keinen eigenen Cap und kürzt deinen Wert nicht. Du bist selbst für die Einhaltung der Vorschriften verantwortlich."
-)
-
-
-def plan_tx_power_change(
-    current: int, raw: Optional[str], confirmed: bool
-) -> Tuple[Optional[int], Optional[str]]:
-    """Validate a requested lora.tx_power. Returns (new value or None if unchanged/not submitted, error)."""
-    text = (raw or "").strip().lower()
-    if not text:
-        return None, None
-    if text in ("max", "full", "voll"):
-        value = TX_POWER_MAX_DBM
-    else:
-        try:
-            value = int(text)
-        except ValueError:
-            return None, "Sendeleistung: bitte eine ganze Zahl (dBm) oder „max“ eingeben."
-    if not 0 <= value <= TX_POWER_MAX_DBM:
-        return None, f"Sendeleistung: Wert zwischen 0 und {TX_POWER_MAX_DBM} dBm (0 = Regions-Maximum der Firmware)."
-    if value == int(current):
-        return None, None
-    if (value == 0 or value > TX_POWER_EU_SAFE_DBM) and not confirmed:
-        return None, (
-            f"Sendeleistung {value} dBm nicht gespeichert: Bitte die Warnung bestätigen. {TX_POWER_WARNING_TEXT}"
-        )
-    return value, None
-
-
 def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     """Apply form values to the connected local Meshtastic node."""
     node, err = _local_node_for_iface(iface_id)
@@ -1768,6 +1739,11 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     except (TypeError, ValueError):
         return False, "Rolle oder Rebroadcast-Modus ungültig."
 
+    if role_change_needs_confirm(current["role"], role) and (
+        (form.get("confirm__role") or "").strip().lower() not in ("1", "on", "yes", "true")
+    ):
+        return False, f"Rolle nicht gespeichert: Bitte die Warnung bestätigen. {ROLE_WARNING}"
+
     tx_power_new, err = plan_tx_power_change(
         current["lora_tx_power"],
         form.get("tx_power"),
@@ -1779,8 +1755,11 @@ def apply_local_node_settings(iface_id: int, form) -> Tuple[bool, str]:
     changes: List[str] = []
 
     if short_name != current["short_name"] or long_name != current["long_name"]:
+        owner_kw: Dict[str, Any] = {"is_licensed": bool(current.get("is_licensed"))}
+        if "is_unmessagable" in inspect.signature(node.setOwner).parameters:
+            owner_kw["is_unmessagable"] = bool(current.get("is_unmessagable"))
         try:
-            node.setOwner(long_name=long_name, short_name=short_name)
+            node.setOwner(long_name=long_name, short_name=short_name, **owner_kw)
         except Exception as e:
             return False, f"Name konnte nicht gesetzt werden: {e!s}"
         changes.append("Name")
@@ -1892,9 +1871,24 @@ def fetch_local_channels(iface_id: int) -> Tuple[Optional[str], Optional[List[Di
                 "uplink": bool(slot.get("uplink")),
                 "downlink": bool(slot.get("downlink")),
                 "empty": int(slot.get("role") or 0) == 0 and not name,
+                **_channel_module_settings(node, int(slot["index"])),
             }
         )
     return None, out
+
+
+def _channel_module_settings(node, idx: int) -> Dict[str, Any]:
+    """position_precision / is_muted from ChannelSettings.module_settings (None if unsupported)."""
+    out: Dict[str, Any] = {"position_precision": None, "is_muted": None}
+    try:
+        ms = node.channels[idx].settings.module_settings
+    except Exception:
+        return out
+    if hasattr(ms, "position_precision"):
+        out["position_precision"] = int(ms.position_precision)
+    if hasattr(ms, "is_muted"):
+        out["is_muted"] = bool(ms.is_muted)
+    return out
 
 
 def _parse_channel_psk(psk_raw: str) -> Tuple[Optional[bytes], Optional[str]]:
@@ -2005,6 +1999,19 @@ def _apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
     uplink = form.get("uplink_enabled") in ("1", "on", "true", "yes")
     downlink = form.get("downlink_enabled") in ("1", "on", "true", "yes")
 
+    module_settings = getattr(settings, "module_settings", None)
+    pos_precision: Optional[int] = None
+    if module_settings is not None and hasattr(module_settings, "position_precision"):
+        pp_raw = (form.get("position_precision") or "").strip()
+        if pp_raw:
+            try:
+                pos_precision = int(pp_raw)
+            except ValueError:
+                return False, "Positionsgenauigkeit: ganze Zahl 0–32 erwartet."
+            if not 0 <= pos_precision <= 32:
+                return False, "Positionsgenauigkeit: Wert zwischen 0 und 32 (0 = keine Position, 32 = exakt)."
+    is_muted = form.get("is_muted") in ("1", "on", "true", "yes")
+
     psk_raw = (form.get("psk") or "").strip()
     psk_changed = False
     if psk_raw:
@@ -2023,6 +2030,10 @@ def _apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
     settings.name = name
     settings.uplink_enabled = uplink
     settings.downlink_enabled = downlink
+    if pos_precision is not None:
+        module_settings.position_precision = pos_precision
+    if module_settings is not None and hasattr(module_settings, "is_muted") and "is_muted_present" in form:
+        module_settings.is_muted = is_muted
     ch.role = role
     ch.index = idx
 
@@ -2050,6 +2061,8 @@ def _apply_local_channel_settings(iface_id: int, form) -> Tuple[bool, str]:
             bits.append("PSK=geändert")
     bits.append(f"Up={'an' if uplink else 'aus'}")
     bits.append(f"Down={'an' if downlink else 'aus'}")
+    if pos_precision is not None:
+        bits.append(f"Pos-Genauigkeit={pos_precision}")
     return True, (
         f"Kanal #{idx} gespeichert ({', '.join(bits)}). "
         "Empfang auf einem neuen Slot: Channel-Test neu speichern; "
@@ -2076,6 +2089,54 @@ def _channel_role_options(index: int, selected: int) -> str:
     return "".join(opts)
 
 
+_POSITION_PRECISION_CHOICES: Tuple[Tuple[int, str], ...] = (
+    (0, "0 – keine Position"),
+    (10, "10 – ca. 23 km"),
+    (11, "11 – ca. 12 km"),
+    (12, "12 – ca. 5,8 km"),
+    (13, "13 – ca. 2,9 km"),
+    (14, "14 – ca. 1,5 km"),
+    (15, "15 – ca. 730 m"),
+    (16, "16 – ca. 360 m"),
+    (17, "17 – ca. 180 m"),
+    (18, "18 – ca. 90 m"),
+    (19, "19 – ca. 45 m"),
+    (32, "32 – exakt"),
+)
+
+
+def _channel_module_settings_html(idx: int, ch: Dict[str, Any]) -> str:
+    """Per-channel module settings (Companion: Positionsgenauigkeit, stumm)."""
+    cols = []
+    pp = ch.get("position_precision")
+    if pp is not None:
+        choices = list(_POSITION_PRECISION_CHOICES)
+        if all(int(pp) != v for v, _ in choices):
+            choices.insert(0, (int(pp), f"{int(pp)} (aktuell)"))
+        opts = "".join(
+            f'<option value="{v}"{" selected" if v == int(pp) else ""}>{html.escape(label)}</option>'
+            for v, label in choices
+        )
+        cols.append(
+            f"""<div class="col-md-3">
+        <label class="form-label" for="ch-pp-{idx}">Positionsgenauigkeit</label>
+        <select class="form-select form-select-sm" id="ch-pp-{idx}" name="position_precision">{opts}</select>
+      </div>"""
+        )
+    if ch.get("is_muted") is not None:
+        chk = " checked" if ch.get("is_muted") else ""
+        cols.append(
+            f"""<div class="col-md-2">
+        <input type="hidden" name="is_muted_present" value="1">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" name="is_muted" id="ch-mute-{idx}" value="1"{chk}>
+          <label class="form-check-label" for="ch-mute-{idx}">Stumm</label>
+        </div>
+      </div>"""
+        )
+    return "".join(cols)
+
+
 def build_channels_settings_html(
     channels: List[Dict[str, Any]],
     *,
@@ -2093,6 +2154,7 @@ def build_channels_settings_html(
         up_chk = " checked" if ch.get("uplink") else ""
         down_chk = " checked" if ch.get("downlink") else ""
         role_opts = _channel_role_options(idx, int(ch.get("role") or 0))
+        module_cols = _channel_module_settings_html(idx, ch)
         badge = ""
         if idx == 0:
             badge = '<span class="badge bg-primary ms-1">Primary</span>'
@@ -2142,6 +2204,7 @@ def build_channels_settings_html(
           <label class="form-check-label" for="ch-down-{idx}">Downlink</label>
         </div>
       </div>
+      {module_cols}
       <div class="col-md-2">
         <button type="submit" class="btn btn-sm btn-outline-primary w-100"
                 onclick="return confirm('Kanal #{idx} wirklich auf dem Gerät speichern?');">
@@ -2170,7 +2233,6 @@ def build_channels_settings_html(
 {''.join(rows) if rows else '<p class="text-muted">Keine Kanäle geladen.</p>'}
 """
 
-
 def node_settings_role_options(selected: int) -> str:
     opts = []
     for val, label in sorted(_NODE_ROLE_LABELS.items()):
@@ -2193,6 +2255,7 @@ def build_node_settings_html(
     iface_id: int,
     ifaces: List[int],
     form_action: str,
+    show_iface_selector: bool = True,
 ) -> str:
     """HTML form for local node settings."""
     tab_parts = []
@@ -2203,6 +2266,9 @@ def build_node_settings_html(
             f'<a class="btn btn-sm {cls}" href="{html.escape(form_action)}{sep}iface={i}">IF {i}</a>'
         )
     tabs = " ".join(tab_parts)
+    iface_line = (
+        f'<p class="small text-muted mb-2">Schnittstelle: {tabs}</p>' if show_iface_selector else ""
+    )
 
     lat_val = settings["latitude"]
     lon_val = settings["longitude"]
@@ -2218,7 +2284,7 @@ def build_node_settings_html(
     cfg_lon = settings["config_longitude"]
 
     return f"""
-<p class="small text-muted mb-2">Schnittstelle: {tabs}</p>
+{iface_line}
 <p class="small text-muted">Liest und schreibt die Konfiguration der <strong>lokal verbundenen</strong> Meshtastic-Node
   (wie <code>meshtastic --set</code>). Änderungen werden im Gerät gespeichert und gelten unabhängig vom Bot.</p>
 <p class="small text-muted">Dieser Bot hat <strong>kein GPS</strong> — es können nur <strong>feste Positionen</strong> gesetzt werden
@@ -2248,6 +2314,7 @@ def build_node_settings_html(
 </div>
 
 <form method="post" class="node-settings-form">
+  <input type="hidden" name="action" value="save_overview">
   <input type="hidden" name="iface_id" value="{iface_id}">
 
   <h5 class="mt-2 mb-3">Knotenname</h5>
@@ -2271,6 +2338,12 @@ def build_node_settings_html(
       <select class="form-select" id="ns-role" name="role">
         {node_settings_role_options(settings["role"])}
       </select>
+      <div class="form-text text-danger">Andere Rollen als CLIENT/CLIENT_MUTE/TAK/CLIENT_BASE:
+        {html.escape(ROLE_WARNING)}</div>
+      <div class="form-check small">
+        <input class="form-check-input" type="checkbox" id="ns-role-confirm" name="confirm__role" value="1">
+        <label class="form-check-label" for="ns-role-confirm">Warnung gelesen — Rolle bewusst ändern</label>
+      </div>
     </div>
     <div class="col-md-4">
       <label class="form-label" for="ns-rebroadcast">Rebroadcast</label>
@@ -2344,34 +2417,6 @@ def build_node_settings_html(
   <button type="submit" class="btn btn-primary">Auf Gerät speichern</button>
 </form>
 """
-
-
-def build_node_settings_page_html(
-    settings: Dict[str, Any],
-    channels: Optional[List[Dict[str, Any]]],
-    channels_err: Optional[str],
-    *,
-    iface_id: int,
-    ifaces: List[int],
-    form_action: str,
-) -> str:
-    """Node settings form + channel editor section."""
-    body = build_node_settings_html(
-        settings,
-        iface_id=iface_id,
-        ifaces=ifaces,
-        form_action=form_action,
-    )
-    if channels_err:
-        body += (
-            f'<hr class="my-4"><h5>Mesh-Kanäle</h5>'
-            f'<p class="alert alert-warning">{html.escape(channels_err)}</p>'
-        )
-    elif channels is not None:
-        body += build_channels_settings_html(
-            channels, iface_id=iface_id, form_action=form_action
-        )
-    return body
 
 
 def _bw_node_caption(nid: int) -> Tuple[str, str, str]:

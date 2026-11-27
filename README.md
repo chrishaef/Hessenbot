@@ -165,7 +165,13 @@ cp config.template config.ini
 
 - **MOTD** und **News**: Text bearbeiten plus automatischer Versand — Zeitplan mit klarer UI; Kanalwahl aus der Meshtastic-Instanz
 - **Scheduler**: geplante Nachrichten oder Aktionen (Wetter, News, Sysinfo, …) mit derselben Intervall-UI und Kanalwahl vom Radio
-- **Node Settings**: Einstellungen der verbundenen Meshtastic-Node (Name, Broadcast-Intervalle, feste Position — kein GPS am Bot) sowie **Mesh-Kanäle** (Name, Rolle, PSK, Up-/Downlink je Slot 0–7)
+- **Node Settings**: alle Einstellungen der verbundenen Meshtastic-Node wie in der Companion-App, als Unter-Tabs (`/node-settings?tab=…`):
+  - **Radio-Konfiguration**: Übersicht (Name, Rolle, Intervalle, feste Position — kein GPS am Bot), Benutzer (inkl. HAM-Modus, „nicht anschreibbar“), **Kanäle** (Name, Rolle, PSK, Up-/Downlink, Positionsgenauigkeit, stumm je Slot 0–7), Gerät, Position, Energie, Netzwerk, Display, LoRa (inkl. Region, Preset, Sendeleistung), Bluetooth, Sicherheit (Schlüssel, Admin-Keys, Managed Mode)
+  - **Module**: MQTT, Seriell, Ext. Benachrichtigung (+ Klingelton), Store & Forward, Range Test, Telemetrie, Canned Messages (+ Texte), Audio, Remote Hardware, Neighbor Info, Umgebungslicht, Detection Sensor, Paxcounter sowie — je nach installierter `meshtastic`-Version — Statusnachricht, Traffic Management, TAK
+  - **Administration**: Uhrzeit setzen, Neustart, Herunterfahren, NodeDB-Reset, Werksreset (Konfiguration / Gerät)
+  - Gefährliche Änderungen (Region, Preset/Frequenz, Sendeleistung über 14 dBm oder 0 = Regionsmaximum, TX aus, Duty-Cycle, Rollen außer CLIENT/CLIENT_MUTE/TAK/CLIENT_BASE, neuer privater Schlüssel, Managed Mode, Verbindung kappende Schalter, Resets) brauchen eine Bestätigung; HAM-Modus zusätzlich das Wort „HAM“ (die Firmware löscht dabei die PSKs aller Kanäle). Werte werden nie still begrenzt, ungültige Eingaben lehnen den ganzen Bereich ab
+  - Vor dem Schreiben liest der Bot den Bereich frisch von der Node; hat er sich seit dem Laden der Seite geändert, wird nichts gespeichert. „Neu von der Node laden“ aktualisiert die Anzeige. Canned-Message-Texte und Klingelton werden erst auf Klick gelesen
+  - Alle Formulare tragen ein Sitzungs-Token (CSRF), das Login-Cookie ist `SameSite=Lax`
 - **Blitzwatch (Admin):** NodeDB-Liste mit Suche; Nutzer-Einstellungen (Home, Radius, Zusatzorte)
 - Einheitliche **Top-Navigation** (Statistik, Befehle, Blitzwatch, BBS, NodeDB, FAQ); Footer: Impressum · Datenschutz · GitHub
 - Aktivierung: `[webAdmin] enabled = True` (siehe [config.template](config.template)); optional `publicUrl`, Impressumsfelder
